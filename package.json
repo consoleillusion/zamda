@@ -1,8 +1,10 @@
 {
   "name": "@consoleillusion/zamda",
   "module": "index.ts",
-  "version": "0.0.05",
+  "version": "0.0.06",
   "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
   "devDependencies": {
     "@types/bun": "latest"
   },
