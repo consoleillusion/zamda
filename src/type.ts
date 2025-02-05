@@ -1,6 +1,11 @@
 import {R,S} from './init'
 
-export default {}
+export const is = R["is"]
+export const isNil = R["isNil"]
+export const isNotNil = R["isNotNil"]
+export const propIs = R["propIs"]
+export const type = R["type"]
+
 /*
 const t =
   { String: $.String
