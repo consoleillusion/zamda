@@ -58,10 +58,19 @@ export const promap = R["promap"]
 export const T = R["T"]
 export const tap = R["tap"]
 export const thunkify = R["thunkify"]
-export const tryCatch = R["tryCatch"]
 export const unapply = R["unapply"]
 export const unary = R["unary"]
 export const uncurryN = R["uncurryN"]
 export const useWith = R["useWith"]
 export const thrush  = S["T"]
+
+
+export const tryCatch = tryCatch =
+  fnSuccess => fnFail => async arg => {
+    try {
+      return await fnSuccess(arg)
+    } catch(e) {
+      return await fnFail(e)
+    }
+  }
 
