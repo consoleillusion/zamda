@@ -28,7 +28,7 @@
           '';
           nativeBuildInputs =
             [ pkgs.bun
-             pkgs.zig_0_13
+#             pkgs.zig_0_13
             ];
         };
       }
