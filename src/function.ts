@@ -65,7 +65,7 @@ export const useWith = R["useWith"]
 export const thrush  = S["T"]
 
 
-export const tryCatch = tryCatch =
+export const tryCatch = 
   fnSuccess => fnFail => async arg => {
     try {
       return await fnSuccess(arg)
