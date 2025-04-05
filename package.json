@@ -1,12 +1,11 @@
 {
   "name": "@consoleillusion/zamda",
-  "version": "0.0.971",
+  "version": "0.0.9711",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "scripts": {
-    "bundle": "bun build --outdir=dist --minify index.ts",
-    "publish": " bun x npm publish" 
+    "bundle": "bun build --outdir=dist --minify index.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
