@@ -35,7 +35,6 @@ export const curryN = R["curryN"]
 export const descend = R["descend"]
 export const descendNatural = R["descendNatural"]
 export const empty = R["empty"]
-export const F = R["F"]
 export const flip = R["flip"]
 export const flow = R["flow"]
 export const identity = R["identity"]
@@ -55,7 +54,6 @@ export const partial = R["partial"]
 export const partialObject = R["partialObject"]
 export const partialRight = R["partialRight"]
 export const promap = R["promap"]
-export const T = R["T"]
 export const tap = R["tap"]
 export const thunkify = R["thunkify"]
 export const unapply = R["unapply"]
@@ -64,6 +62,11 @@ export const uncurryN = R["uncurryN"]
 export const useWith = R["useWith"]
 export const thrush  = S["T"]
 
+
+export const F = R["F"]
+export const T = R["T"]
+/*
+*/
 
 export const tryCatch = 
   fnSuccess => fnFail => async arg => {
