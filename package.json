@@ -1,11 +1,13 @@
 {
   "name": "@consoleillusion/zamda",
-  "version": "0.0.9711",
+  "version": "0.0.9712",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "scripts": {
-    "bundle": "bun build --outdir=dist --minify index.ts"
+    "prep:git": "sh -c 'git add .; git commit -m \"$1\"' --",
+    "prep:version": "bunx npm version patch --no-git-tag-version",
+    "prep:bundle": "bun build --outdir=dist --minify index.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
