@@ -1,6 +1,6 @@
 {
   "name": "@consoleillusion/zamda",
-  "version": "0.0.9714",
+  "version": "0.0.9715",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -9,7 +9,7 @@
     "prep:version": "bunx npm version patch --no-git-tag-version",
     "prep:git": "sh -c 'git add .; git commit -m \"$*\"' --",
     "prep": "sh -c 'bun run prep:bundle && bun run prep:version && bun run prep:git \"$*\"' --",
-    "publish": "bunx npm publish"
+    "pub": "bunx npm publish"
   },
   "devDependencies": {
     "@types/bun": "latest"
