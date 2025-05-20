@@ -5,8 +5,12 @@ export const isNil = R["isNil"]
 export const isNotNil = R["isNotNil"]
 export const propIs = R["propIs"]
 export const type = R["type"]
+
 export const Right = S["Right"]
 export const Left = S["Left"]
+export const either = S["either"]
+export const isRight = S["isRight"]
+export const isLeft= S["isLeft"]
 
 /*
 const t =
