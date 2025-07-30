@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "scripts": {
-    "prep": "sh -c 'bun build --outdir=dist --minify index.ts && git add . && git commit -m \"$*\"' --",
+    "build:default": "bun build --outdir=dist --minify index.ts",
+    "prep": "sh -c 'bun build:default && git add . && git commit -m \"$*\"' --",
     "postpublish": "bunx npm version patch --no-git-tag-version && git add . && git commit -m \"Auto version bump\"",
     "pub": "bunx npm publish"
   },

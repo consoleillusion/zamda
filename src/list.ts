@@ -125,7 +125,12 @@ export const shuffle =
     }
     return array
   }
+
+
 /*
+export const sortQuick = xs => R["sort"]
+export const sortMerge = xs => R["sort"]
+
 export const mapValues =
   fun ('mapValues')
       ([G.Fun([G.Any,G.Str,G.Obj,G.Any]), G.Obj, G.Obj])
