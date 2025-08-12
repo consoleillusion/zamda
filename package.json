@@ -1,7 +1,7 @@
 {
   "name": "@consoleillusion/zamda",
   "module": "index.ts",
-  "version": "0.0.04",
+  "version": "0.0.05",
   "type": "module",
   "devDependencies": {
     "@types/bun": "latest"
