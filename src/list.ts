@@ -23,7 +23,6 @@ export const findIndex = R["findIndex"]
 export const findLast = R["findLast"]
 export const findLastIndex = R["findLastIndex"]
 export const flatten = R["flatten"]
-export const forEach = R["forEach"]
 export const fromPairs = R["fromPairs"]
 export const groupBy = R["groupBy"]
 export const groupWith = R["groupWith"]
@@ -94,12 +93,26 @@ export const zipObj = R["zipObj"]
 export const zipWith = R["zipWith"]
 export const mapRaw = R["map"]
 
+export const pipeWith = R["pipeWith"]
+export const pipe = S["pipe"]
 export const pipeSync =
       ( fns => input => fns.reduce
                   ( (promise, fn) => R.andThen(fn, promise)
                   , Promise.resolve(input)
                   )
       )
+export const forEach = R["forEach"]
+
+export const forSeries =
+       fn => async(xs) => {
+        for(const x of xs){
+          await fn(x)
+        }
+        return undefined
+      }
+export const forParallel =
+  fn => xs => Promise.all(R.map(fn)(xs))
+
 /*
 export const mapValues =
   fun ('mapValues')
