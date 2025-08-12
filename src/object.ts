@@ -59,8 +59,8 @@ export const whereEq = R["whereEq"]
 export const renameKeys = R["renameKeys"]
 export const mapKeys = R["mapKeys"]
 export const renameKey =
-  (a) => (b) => (o) => G.pipe(
-    [ G.assoc(b)(o[a])
-    , G.dissoc(a)
+  (a) => (b) => (o) => S.pipe(
+    [ R.assoc(b)(o[a])
+    , R.dissoc(a)
     ])(o)
 
