@@ -94,6 +94,12 @@ export const zipObj = R["zipObj"]
 export const zipWith = R["zipWith"]
 export const mapRaw = R["map"]
 
+export const pipeSync =
+      ( fns => input => fns.reduce
+                  ( (promise, fn) => R.andThen(fn, promise)
+                  , Promise.resolve(input)
+                  )
+      )
 /*
 export const mapValues =
   fun ('mapValues')
