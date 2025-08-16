@@ -10,6 +10,7 @@
     "pub": "bunx npm publish"
   },
   "devDependencies": {
+    "json-schema-faker": "^0.5.9",
     "@types/bun": "latest"
   },
   "peerDependencies": {
@@ -20,7 +21,6 @@
     "change-case": "^5.4.4",
     "fluture": "^14.0.0",
     "fluture-sanctuary-types": "^7.1.0",
-    "json-schema-faker": "^0.5.9",
     "ramda": "^0.31.3",
     "sanctuary": "^3.1.0",
     "sanctuary-def": "^0.22.0",
