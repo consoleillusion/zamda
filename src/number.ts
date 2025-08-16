@@ -13,3 +13,4 @@ export const negate = R["negate"]
 export const product = R["product"]
 export const subtract = R["subtract"]
 export const sum = R["sum"]
+export const logN = n => x => Math.log(x) / Math.log(n)
