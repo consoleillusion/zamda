@@ -21,3 +21,8 @@ export const pathCase = changeCase["pathCase"]
 export const sentenceCase = changeCase["sentenceCase"]
 export const snakeCase = changeCase["snakeCase"]
 export const trainCase = changeCase["trainCase"]
+
+/*
+ * Useful for searches and canonical forms.
+ */
+export const stripDiacritics = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
