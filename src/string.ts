@@ -28,4 +28,4 @@ export const trainCase = changeCase["trainCase"]
  */
 export const stripDiacritics = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 
-export const color = c.styles
+export const color = R.mapObjIndexed(x=>x.wrap)(c.styles)
