@@ -1,5 +1,6 @@
 import {R,S} from './init'
 import * as changeCase from 'change-case'
+import c from 'ansi-colors'
 
 export const match = R["match"]
 export const replace = R["replace"]
@@ -26,3 +27,5 @@ export const trainCase = changeCase["trainCase"]
  * Useful for searches and canonical forms.
  */
 export const stripDiacritics = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+
+export const color = c.styles
