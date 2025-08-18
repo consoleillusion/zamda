@@ -7,7 +7,6 @@ export const both = R["both"]
 export const complement = R["complement"]
 export const cond = R["cond"]
 export const defaultTo = R["defaultTo"]
-export const either = R["either"]
 export const ifElse = R["ifElse"]
 export const isEmpty = R["isEmpty"]
 export const isNotEmpty = R["isNotEmpty"]
@@ -21,3 +20,8 @@ export const when = R["when"]
 export const xor = R["xor"]
 
 export const isEmptyOrNil = x => isEmpty(x) || isNil(x)
+
+export const fromRight = S["fromRight"]
+export const fromLeft = S["fromLeft"]
+export const either = S["either"]
+export const unwrapOr = d => e => Z.either(_=>d)(e => Z.fromRight(e))(e)
