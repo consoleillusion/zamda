@@ -65,8 +65,9 @@ export const thrush  = S["T"]
 
 export const F = R["F"]
 export const T = R["T"]
+
+export const encase = S["encase"]
 /*
-*/
 
 export const tryFn = 
   fnSuccess => async arg => {
@@ -76,6 +77,7 @@ export const tryFn =
       return S.Left(await e)
     }
   }
+*/
 
 export const tryCatch = 
   fnSuccess => fnFail => async arg => {
