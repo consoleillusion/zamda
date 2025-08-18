@@ -19,7 +19,7 @@ export const until = R["until"]
 export const when = R["when"]
 export const xor = R["xor"]
 
-export const isEmptyOrNil = x => isEmpty(x) || isNil(x)
+export const isEmptyOrNil = x => R.isEmpty(x) || R.isNil(x)
 
 export const fromRight = S["fromRight"]
 export const fromLeft = S["fromLeft"]
