@@ -83,18 +83,18 @@ export const tryFn =
 export const tryCatch = 
   fnSuccess => fnFail => async arg => {
     try {
-      return S.Right(await fnSuccess(arg))
+      return (await fnSuccess(arg))
     } catch(e) {
-      return S.Left(await fnFail(e))
+      return (await fnFail(e))
     }
   }
 
 const try_ = 
   fnSuccess => async arg => {
     try {
-      return S.Right(await fnSuccess(arg))
+      return (await fnSuccess(arg))
     } catch(e) {
-      return S.Left(await (e))
+      return (await (e))
     }
   }
 export { try_ as try };
