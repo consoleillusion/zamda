@@ -68,7 +68,7 @@ export const T = R["T"]
 
 export const encase = S["encase"]
 export const encaseP = S["encaseP"]
-export const change = S["chain"]
+export const chain = S["chain"]
 /*
 
 export const tryFn = 
