@@ -19,3 +19,5 @@ export const unless = R["unless"]
 export const until = R["until"]
 export const when = R["when"]
 export const xor = R["xor"]
+
+export const isEmptyOrNil = x => isEmpty(x) || isNil(x)
