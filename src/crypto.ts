@@ -16,9 +16,7 @@ export const sha256 =
   }
 import ag2 from "argon2-browser";
  */
-
-
-  // Core hashing (cross-platform)
+    /*
 const sha256Raw = async input =>
   typeof crypto?.subtle !== "undefined"
     ? new Uint8Array(
@@ -31,7 +29,6 @@ const sha256Raw = async input =>
           .digest()
       );
 
-// Formatters
 const toHex = bytes =>
   Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
 
@@ -44,9 +41,33 @@ const toBase64Url = bytes =>
   toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
 // Public functions
-export const sha256Hex = async input => toHex(await sha256Raw(input));
-export const sha256Base64 = async input => toBase64(await sha256Raw(input));
+    //
+export const sha256Hex       = async input => toHex(await sha256Raw(input));
+export const sha256Base64    = async input => toBase64(await sha256Raw(input));
 export const sha256Base64Url = async input => toBase64Url(await sha256Raw(input));
-export const sha256 = sha256Base64Url
+export const sha256Base64UrlSync = input => toBase64Url(await sha256Raw(input));
+export const sha256          = sha256Base64Url
+*/
 
 //export const argon2 = ag2
+import { sha256 as _sha256 } from "@noble/hashes/sha2.js";
+
+// formatters
+const toHex = bytes => Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+
+const toBase64 = bytes =>
+  (typeof Buffer !== "undefined" && typeof Buffer.from === "function")
+    ? Buffer.from(bytes).toString("base64")
+    : btoa(String.fromCharCode(...bytes));
+
+const toBase64Url = bytes => toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/,"");
+
+// core sync hash to bytes (Uint8Array)
+const sha256Raw = input =>
+  // accept string or Uint8Array
+  _sha256(typeof input === "string" ? new TextEncoder().encode(input) : input);
+
+// public sync APIs
+export const sha256Hex       = input => toHex(sha256Raw(input));
+export const sha256Base64    = input => toBase64(sha256Raw(input));
+export const sha256Base64Url = input => toBase64Url(sha256Raw(input));
