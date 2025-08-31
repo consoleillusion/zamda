@@ -1,6 +1,6 @@
 {
   "name": "@consoleillusion/zamda",
-  "version": "0.0.971910",
+  "version": "0.0.971911",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
