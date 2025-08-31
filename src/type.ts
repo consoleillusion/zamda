@@ -12,6 +12,9 @@ export const either = S["either"]
 export const isRight = S["isRight"]
 export const isLeft= S["isLeft"]
 
+const _parseInt = def => data => parseInt(data) || def
+export { parseInt_ as parseInt };
+
 /*
 const t =
   { String: $.String
