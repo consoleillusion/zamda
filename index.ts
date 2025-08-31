@@ -8,8 +8,9 @@ import * as str from './src/string'
 import * as typ from './src/type'
 import * as log from './src/log'
 import * as crypt from './src/crypto'
+import * as control from './src/control'
 
-export const Z = {...list,...func,...logic,...num,...obj,...relation,...str,...typ,...log,...crypt}
+export const Z = {...list,...func,...logic,...num,...obj,...relation,...str,...typ,...log,...crypt, ...control}
 export default Z
 
 //Z.log(Z.fromRight)
