@@ -68,12 +68,21 @@ export const T = R["T"]
 /*
 */
 
+export const tryFn = 
+  fnSuccess => async arg => {
+    try {
+      return S.Right(await fnSuccess(arg))
+    } catch(e) {
+      return S.Left(await e)
+    }
+  }
+
 export const tryCatch = 
   fnSuccess => fnFail => async arg => {
     try {
-      return await fnSuccess(arg)
+      return S.Right(await fnSuccess(arg))
     } catch(e) {
-      return await fnFail(e)
+      return S.Left(await fnFail(e))
     }
   }
 
