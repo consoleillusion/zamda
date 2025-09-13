@@ -9,6 +9,7 @@ export const log2 = x => { if (process.env.DEBUG > 1){log(x)}}
 export const log3 = x => { if (process.env.DEBUG > 2){log(x)}}
 export const log4 = x => { if (process.env.DEBUG > 3){log(x)}}
 export const log5 = x => { if (process.env.DEBUG > 4){log(x)}}
+
 /*
 export const performance =
   name => fn => arg => {
