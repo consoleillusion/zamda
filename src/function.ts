@@ -67,6 +67,7 @@ export const F = R["F"]
 export const T = R["T"]
 
 export const encase = S["encase"]
+export const encaseP = S["encaseP"]
 /*
 
 export const tryFn = 
@@ -88,3 +89,12 @@ export const tryCatch =
     }
   }
 
+const try_ = 
+  fnSuccess => async arg => {
+    try {
+      return S.Right(await fnSuccess(arg))
+    } catch(e) {
+      return S.Left(await (e))
+    }
+  }
+export { try_ as try };
