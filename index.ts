@@ -10,3 +10,5 @@ import * as log from './src/log'
 
 export const Z = {...list,...func,...logic,...num,...obj,...relation,...str,...typ,...log}
 export default Z
+
+Z.log(Z.fromRight)
