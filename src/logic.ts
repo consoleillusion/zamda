@@ -24,4 +24,4 @@ export const isEmptyOrNil = x => isEmpty(x) || isNil(x)
 export const fromRight = S["fromRight"]
 export const fromLeft = S["fromLeft"]
 export const either = S["either"]
-export const unwrapOr = d => e => Z.either(_=>d)(e => Z.fromRight(e))(e)
+export const unwrapOr = d => e => either(_=>d)(e => fromRight(e))(e)
