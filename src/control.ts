@@ -12,3 +12,5 @@ export const forSeries =
 
 export const forParallel =
   fn => xs => Promise.all(R.map(fn)(xs))
+
+export const promiseAll = async x => await Promise.all(x)
