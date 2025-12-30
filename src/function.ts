@@ -80,6 +80,14 @@ export const tryFn =
   }
 */
 
+export const tryEither = 
+  fnSuccess => async arg => {
+    try {
+      return S.Right(await fnSuccess(arg))
+    } catch(e) {
+      return S.Left(await e)
+    }
+  }
 export const tryCatch = 
   fnSuccess => fnFail => async arg => {
     try {
