@@ -19,9 +19,6 @@ const x = Z.encase(async x => x)(1)
   (attemptP(val => console.log('✅ Right', val)))
 );
 */
-import crypto from "crypto";
+import Z from './index'
 
-const sha256 =
-  input => crypto.createHash("sha256").update(input).digest("base64URL");
-
-console.log(sha256("hello node"));
+console.log(await Z.sha256("hello node"));
