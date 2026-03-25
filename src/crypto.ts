@@ -14,7 +14,9 @@ export const sha256 =
         .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     }
   }
+import ag2 from "argon2-browser";
  */
+
 
   // Core hashing (cross-platform)
 const sha256Raw = async input =>
@@ -46,3 +48,5 @@ export const sha256Hex = async input => toHex(await sha256Raw(input));
 export const sha256Base64 = async input => toBase64(await sha256Raw(input));
 export const sha256Base64Url = async input => toBase64Url(await sha256Raw(input));
 export const sha256 = sha256Base64Url
+
+//export const argon2 = ag2

@@ -21,4 +21,4 @@ const x = Z.encase(async x => x)(1)
 */
 import Z from './index'
 
-console.log(await Z.sha256("hello node"));
+console.log(await Z.argon2.hash('aoeu'))
