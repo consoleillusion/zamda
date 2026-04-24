@@ -81,6 +81,7 @@ export const tryFn =
   }
 */
 
+
 export const tryEither = 
   fnSuccess => fnFail => async arg => {
     try {
