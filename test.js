@@ -21,4 +21,5 @@ const x = Z.encase(async x => x)(1)
 */
 import Z from './index'
 
-console.log(await Z.argon2.hash('aoeu'))
+//console.log(await Z.argon2.hash('aoeu'))
+Z.log(Z.parseInt(1)('1'))
