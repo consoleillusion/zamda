@@ -39,9 +39,6 @@ export const join = R["join"]
 export const last = R["last"]
 export const lastIndexOf = R["lastIndexOf"]
 export const length = R["length"]
-export const map = R["map"]
-export const mapAccum = R["mapAccum"]
-export const mapAccumRight = R["mapAccumRight"]
 export const mergeAll = R["mergeAll"]
 export const move = R["move"]
 export const none = R["none"]
@@ -113,6 +110,17 @@ export const shuffle =
       [array[i], array[j]] = [array[j], array[i]]
     }
     return array
+  }
+
+export const map = R["map"]
+export const mapAccum = R["mapAccum"]
+export const mapAccumRight = R["mapAccumRight"]
+export const mapSeries =
+  fn => async arr => {
+    for (let i = 0; i < arr.length; i++) {
+      arr[i] = await fn(arr[i], i, arr);
+    }
+    return arr
   }
 
 
