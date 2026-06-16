@@ -15,29 +15,23 @@ const randomBytes =
     return getRandomValues(new Uint8Array(n))
   }
 
-const DEFAULTS =
+const defaults =
   { parallelism: 1
   , iterations: 10
   , memorySize: 32768
   , hashLength: 32
   , saltLength: 16
+  , outputType: 'encoded'
   }
 
-async function hash (password, options = {}) {
-  const opts = {...DEFAULTS, ...options}
-  const salt = opts.salt ?? await randomBytes(opts.saltLength)
-  return argon2id({
-    password,
-    salt,
-    parallelism: opts.parallelism,
-    iterations: opts.iterations,
-    memorySize: opts.memorySize,
-    hashLength: opts.hashLength,
-    outputType: 'encoded', // self-describing PHC string; params travel with the hash
-  })
-}
+const hash =
+  async opts => argon2id(
+    { ...defaults
+    , ...opts
+    , salt: opts.salt ?? await randomBytes(opts.saltLength ?? defaults.saltLength)
+    })
+
 export { hash as argon2id}
 
-export async function verify(password, encoded) {
-  return argon2Verify({password, hash: encoded})
-}
+const verify = async opts => argon2Verify(opts)
+export {verify as argon2Verify}
