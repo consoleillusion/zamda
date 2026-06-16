@@ -1,5 +1,6 @@
 import {R,S} from './init'
 
+/*
 export const adjust = R["adjust"]
 export const all = R["all"]
 export const any = R["any"]
@@ -89,6 +90,7 @@ export const zip = R["zip"]
 export const zipObj = R["zipObj"]
 export const zipWith = R["zipWith"]
 export const mapRaw = R["map"]
+*/
 
 export const pipeWith = R["pipeWith"]
 export const pipe = S["pipe"]

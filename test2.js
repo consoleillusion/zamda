@@ -2,16 +2,7 @@ import $ from 'sanctuary-def'
 import {FutureType} from 'fluture-sanctuary-types'
 import {resolve, chain, parallel, map, reject, fork} from 'fluture'
 
-const PromiseType = $.UnaryType
-  ('Promise')
-  ('')
-  ([])
-  (x => x instanceof Promise)
-  (_ => [])
-
-const env = $.env.concat([PromiseType($.Unknown)])
-const def = $.create({checkTypes: true, env: env})
-
+const def = $.create({checkTypes: true, env: $.env})
 const a = $.TypeVariable('a')
 const b = $.TypeVariable('b')
 const e = $.TypeVariable('e')
@@ -25,7 +16,7 @@ export const forEach =
        return undefined
      })
 
-export const forSeriesF =
+export const forSeries =
   def('forSeries')
      ({})
      ([ $.Fn(a)(FutureType(e)(b))
@@ -38,7 +29,7 @@ export const forSeriesF =
                  )
      )
 
-export const forParallelF =
+export const forParallel =
   def('forParallel')
      ({})
      ([ $.Fn(a)(FutureType(e)(b))
@@ -51,24 +42,15 @@ export const forParallelF =
        )
      )
 
-export const forSeriesP =
-  def('forSeriesP')
-     ({})
-     ([ $.Fn(a)(b)
-      , $.Array(a)
-      , PromiseType($.Undefined)
-      ])
-     (fn => arr =>
-       arr.reduce( (acc, x) => acc.then(() => fn(x))
-                 , Promise.resolve(undefined)
-                 ).then(() => undefined)
-     )
 
-export const forParallelP =
-  def('forParallelP')
-     ({})
-     ([ $.Fn(a)(b)
-      , $.Array(a)
-      , PromiseType($.Undefined)
-      ])
-     ( fn => arr => Promise.all(arr.map(x => Promise.resolve(fn(x)))).then(() => undefined) )
+forParallelP(console.log)([1,3,54])
+// --- tests ---
+
+
+/*
+fork(_=>_)
+    (_=>_)
+    (forParallel( x => resolve(console.log(x)))(([1,2,3])))
+
+forEach(console.log)([5,6,7])
+*/
