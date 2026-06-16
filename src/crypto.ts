@@ -2,20 +2,20 @@ import {argon2id, argon2Verify} from 'hash-wasm'
 
 let getRandomValues
 
-const randomBytes = 
-  async n => {
-    if (!getRandomValues) {
-      if (globalThis.crypto?.getRandomValues) {
-        getRandomValues = (buf) => globalThis.crypto.getRandomValues(buf)
-      } else {
-        const {webcrypto} = await import('node:crypto')
-        getRandomValues = (buf) => webcrypto.getRandomValues(buf)
-      }
+const getRNG =
+  async _ => {
+    if(!getRandomValues) {
+      getRandomValues = globalThis.crypto?.getRandomValues 
+                      ? buf => globalThis.crypto.getRandomValues(buf)
+                      : async buf => (await import('node:crypto')).webcrypto.getRandomValues(buf)
     }
-    return getRandomValues(new Uint8Array(n))
+    return getRandomValues
   }
 
-const defaults =
+export const randomBytes = 
+  async n => (await getRNG())(new Uint8Array(n))
+
+const argon2Defaults =
   { parallelism: 1
   , iterations: 10
   , memorySize: 32768
@@ -24,14 +24,13 @@ const defaults =
   , outputType: 'encoded'
   }
 
-const hash =
+const argon2idDigest =
   async opts => argon2id(
-    { ...defaults
+    { ...argon2Defaults
     , ...opts
-    , salt: opts.salt ?? await randomBytes(opts.saltLength ?? defaults.saltLength)
+    , salt: opts.salt ?? await randomBytes(opts.saltLength ?? argon2Defaults.saltLength)
     })
-
-export { hash as argon2id}
-
 const verify = async opts => argon2Verify(opts)
+
+export {argon2idDigest as argon2id}
 export {verify as argon2Verify}
