@@ -62,27 +62,3 @@ export const init =
 
       })
   }
-
-
-
-
-
-/*
-import {R,S} from './init'
-import c from 'ansi-colors'
-
-export const match = R["match"]
-export const split = R["split"]
-export const test = R["test"]
-//export const toLower = R["toLower"]
-//export const toUpper = R["toUpper"]
-export const toString = R["toString"]
-//export const trim = R["trim"]
-
-/*
- * Useful for searches and canonical forms.
- */
-//export const stripDiacritics = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-
-//export const color = R.mapObjIndexed(x=>x.wrap)(c.styles)
-

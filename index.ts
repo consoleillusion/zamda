@@ -1,9 +1,12 @@
 import {init as listFns} from './src/list'
 import {init as controlFns} from './src/control'
 import {init as strFns, TextCasing} from './src/string'
+import {init as mathFns} from './src/math.js'
+import {init as listFns} from './src/list.js'
 import * as generalTypes from './src/types'
 import {init as cryptFns, Argon2Params, Argon2VerifyParams} from './src/crypto'
 import $ from 'sanctuary-def'
+import * as L from 'partial.lenses'
 import sanctuary from 'sanctuary'
 import Ajv from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
@@ -113,9 +116,12 @@ const init =
     return (
     { Z:
       { ...Z
+      , ...L
       , ...strFns({Z,def,$:types})
       , ...cryptFns({Z,def,$:types})
       , ...controlFns({Z,def,$:types})
+      , ...mathFns({Z,def,$:types})
+      , ...listFns({Z,def,$:types})
       }
     , def
     , $: types
