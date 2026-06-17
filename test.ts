@@ -15,7 +15,8 @@ import init from './index.ts'
 
 const {Z} = init()
 
-//console.log(Z)
+/*
+console.log(Z)
 console.log(Z.changeCase('pascalCase')('u ntheo uheno hnoe uh'))
 const password = "password123"
 const hash = (await Z.argon2id({password,salt:'eenuhenuhaenouhaenuhnaoeuhaneouh naehuna euh'}))
@@ -25,6 +26,9 @@ console.log(Z.replace(/a/)(x=>""+x.offset)('abc'))
 console.log(Z.split(' ')('a beo teu nth unte hc'))
 console.log(Z.join(' BLACK ')(Z.split(' ')('a beo teu nth unte hc')))
 console.log(Z.map(x=>x*2)([1,5,8,8]))
+*/
 
 //Z.forEach(x=>{console.log(x*2)})([1,2,3])
 Z.forSeries(async x => {console.log(x*2)})([1,2,3])
+console.log(Z.head([1,7,9]))
+console.log(Z.tail([1,7,9]))
