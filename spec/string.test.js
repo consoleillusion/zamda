@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test"
-import { Z } from "./setup.ts"
+import { Z } from "./setup.js"
 
 describe("string", () => {
   describe("changeCase", () => {
