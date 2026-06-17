@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.0.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "ansi-colors": "^4.1.3",
     "change-case": "^5.4.4",
     "fluture": "^14.0.0",
