@@ -25,13 +25,13 @@ import $ from 'sanctuary-def'
 //import {FutureType, ConcurrentFutureType, env as flutureEnv} from 'fluture-sanctuary-types'
 */
 
-
 const PromiseType = $.UnaryType
   ('Promise')
   ('')
   ([])
   (x => x instanceof Promise)
   (_ => [])
+
 const validateMeta = ajv.compile(
   { $schema: 'https://json-schema.org/draft/2020-12/schema'
   , allOf: [{ $ref: 'https://json-schema.org/draft/2020-12/schema' }]
@@ -72,32 +72,34 @@ const jsonSchemaSanctuary =
       }
       return T
      })
-const makeDefExplained = def => name => cs => types => impl => {
-  const fn = def(name)(cs)(types)(impl)
-  const argTypes = types.slice(0, -1)
-  const arity = argTypes.length
-  const enrich = (e, args) => {
-    const blocks = []
-    args.forEach((a, i) => {
-      const T = argTypes[i]
-      if (T && typeof T.explainDetailed === 'function' && $.test([])(T)(a) === false) {
-        const lines = T.explainDetailed(a).map(d =>
-          `    ${d.prop}: ${d.message}` + (d.description ? `\n      \u21b3 ${d.description}` : ''))
-        blocks.push(`  arg ${i} (${T.name}):\n` + lines.join('\n'))
-      }
-    })
-    if (blocks.length) e.message += '\n\nDetail:\n' + blocks.join('\n')
-    return e
+
+const makeDefExplained =
+  def => name => cs => types => impl => {
+    const fn = def(name)(cs)(types)(impl)
+    const argTypes = types.slice(0, -1)
+    const arity = argTypes.length
+    const enrich = (e, args) => {
+      const blocks = []
+      args.forEach((a, i) => {
+        const T = argTypes[i]
+        if (T && typeof T.explainDetailed === 'function' && $.test([])(T)(a) === false) {
+          const lines = T.explainDetailed(a).map(d =>
+            `    ${d.prop}: ${d.message}` + (d.description ? `\n      \u21b3 ${d.description}` : ''))
+          blocks.push(`  arg ${i} (${T.name}):\n` + lines.join('\n'))
+        }
+      })
+      if (blocks.length) e.message += '\n\nDetail:\n' + blocks.join('\n')
+      return e
+    }
+    const step = (collected) => (arg) => {
+      const args = [...collected, arg]
+      let next
+      try { next = args.reduce((f, a) => f(a), fn) }
+      catch (e) { throw enrich(e, args) }
+      return args.length >= arity ? next : step(args)
+    }
+    return step([])
   }
-  const step = (collected) => (arg) => {
-    const args = [...collected, arg]
-    let next
-    try { next = args.reduce((f, a) => f(a), fn) }
-    catch (e) { throw enrich(e, args) }
-    return args.length >= arity ? next : step(args)
-  }
-  return step([])
-}
 const init =
   opts => {
     opts = {jsonSchemas:[],checkTypes:true,...opts}
