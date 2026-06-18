@@ -9,6 +9,7 @@ import * as L from 'partial.lenses'
 import sanctuary from 'sanctuary'
 import Ajv from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
+import {FutureType,env as flutureEnv} from 'fluture-sanctuary-types'
 const ajv = addFormats (new Ajv ({allErrors: true, strict: false}))
 /*
 import {FutureType, ConcurrentFutureType, env as flutureEnv} from 'fluture-sanctuary-types'
@@ -31,10 +32,11 @@ const JsonSchemaWithTitleType = $.NullaryType
   ('')
   ([])
   (validateMeta)
+
 const env = sanctuary.env.concat(
   [ PromiseType($.Unknown)
   , JsonSchemaWithTitleType
-  ])
+  ]).concat(flutureEnv)
 const errorProp = err => err.params?.missingProperty ?? err.instancePath.split('/').filter(Boolean).pop()
 const jsonSchemaSanctuary =
   ($.create({checkTypes: true, env}))
@@ -92,7 +94,9 @@ const makeDefExplained =
 const init =
   opts => {
     opts = {jsonSchemas:[],checkTypes:true,...opts}
-    const extraTypes = [TextCasing,Argon2Params,Argon2VerifyParams,...opts.jsonSchemas].map(x=>jsonSchemaSanctuary(x)).concat(Object.values(generalTypes))
+    const extraTypes =
+      [ TextCasing,Argon2Params,Argon2VerifyParams,...opts.jsonSchemas].map(x=>jsonSchemaSanctuary(x))
+      .concat(Object.values(generalTypes))
     const envUser = env.concat(extraTypes)
     const Z   = {...sanctuary.create({ checkTypes: opts.checkTypes, env: envUser }),jsonSchemaSanctuary}
     const defOriginal = $.create({ checkTypes: opts.checkTypes, env: envUser })
@@ -102,6 +106,7 @@ const init =
       , PromiseType
       , JsonSchemaWithTitleType
       , ...Object.fromEntries(extraTypes.map(t => [t.name, t]))
+      , FutureType
       }
     return (
     { Z:

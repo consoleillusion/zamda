@@ -1,28 +1,28 @@
-/*
- * Fisher-Yates / Knuth Shuffle
- */
-
 export const init =
-  ({Z,def,$}) => {
+  ({Z, def, $}) => {
     const a = $.TypeVariable('a')
+    const b = $.TypeVariable('b')
     return (
-      { shuffle:
-        def('shuffle')
+      { mapParallel:
+          def('mapParallel')
             ({})
-            ([$.Array(a), $.Array(a)])
-            ( array => {
-              const length = array.length
-              for (let i = length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1))
-                const temp = array[i]
-                array[i] = array[j]
-                array[j] = temp
-                //[array[i], array[j]] = [array[j], array[i]]
-              }
-              return array
-            })
+            ([$.Fn(a)($.PromiseType(b)), $.Array(a), $.PromiseType($.Array(b))])
+            ( f => xs => Promise.all(xs.map(x => f(x))) )
+
+      , mapSeries:
+          def('mapSeries')
+            ({})
+            ([$.Fn(a)($.PromiseType(b)), $.Array(a), $.PromiseType($.Array(b))])
+            ( f => async xs => {
+                const out = []
+                for (const x of xs) out.push(await f(x))
+                return out
+              })
       })
   }
+
+        /*
+            */
 
 /*
 export const sortQuick = xs => R["sort"]
