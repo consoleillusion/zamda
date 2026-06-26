@@ -2,6 +2,13 @@ import {R,S} from './init'
 
 export const log = x => console.log(x)
 export const logPipe = x => {console.log(x); return x}
+
+export const log0 = x => log(x)
+export const log1 = x => { if (process.env.DEBUG > 0){log(x)}}
+export const log2 = x => { if (process.env.DEBUG > 1){log(x)}}
+export const log3 = x => { if (process.env.DEBUG > 2){log(x)}}
+export const log4 = x => { if (process.env.DEBUG > 3){log(x)}}
+export const log5 = x => { if (process.env.DEBUG > 4){log(x)}}
 /*
 export const performance =
   name => fn => arg => {
