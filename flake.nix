@@ -18,6 +18,7 @@
             export ENVIRONMENT_NAME="${name}"
             export PS1="\[\e[1;38;5;${color}m\]${prompt}\[\e[0m\] "
 
+            echo "This will require zig build tools eventually"
             set -a
             source .env
             set +a

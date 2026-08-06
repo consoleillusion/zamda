@@ -1,5 +1,4 @@
 /*
-import Z from './index'
 import S from 'sanctuary'
 import { attemptP, encaseP,fork } from 'fluture'
 
@@ -18,8 +17,11 @@ const x = Z.encase(async x => x)(1)
   (err => console.error('❌ Left', err))
   (attemptP(val => console.log('✅ Right', val)))
 );
+import Z from './index'
+//console.log(await Z.argon2.hash('aoeu'))
+//Z.log(Z.parseInt(1)('1'))
 */
 import Z from './index'
 
-//console.log(await Z.argon2.hash('aoeu'))
-Z.log(Z.parseInt(1)('1'))
+Z.forParallelP(x => Z.argon2id(String(x),{memorySize: 64000,iterations:100}).then(Z.log))([1, 3, 5])
+Z.forSeriesP(x => Z.argon2id(String(x),{memorySize: 64000, iterations:100}).then(Z.log))([1, 3, 5])
