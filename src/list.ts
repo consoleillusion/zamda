@@ -1,6 +1,24 @@
-import {R,S} from './init'
-
 /*
+ * Fisher-Yates / Knuth Shuffle
+ */
+export const init =
+  ({Z,def,$}) => {
+    return (
+      { 
+      })
+  }
+
+export const shuffle =
+  array => {
+    const length = array.length
+    for (let i = length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      [array[i], array[j]] = [array[j], array[i]]
+    }
+    return array
+  }
+/*
+import {R,S} from './init'
 export const adjust = R["adjust"]
 export const all = R["all"]
 export const any = R["any"]
@@ -92,6 +110,7 @@ export const zipWith = R["zipWith"]
 export const mapRaw = R["map"]
 */
 
+/*
 export const pipeWith = R["pipeWith"]
 export const pipe = S["pipe"]
 export const pipeSync =
@@ -100,19 +119,9 @@ export const pipeSync =
                   , Promise.resolve(input)
                   )
       )
+     */
 
 /*
- * Fisher-Yates / Knuth Shuffle
- */
-export const shuffle =
-  array => {
-    const length = array.length
-    for (let i = length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      [array[i], array[j]] = [array[j], array[i]]
-    }
-    return array
-  }
 
 export const map = R["map"]
 export const mapAccum = R["mapAccum"]
@@ -124,6 +133,7 @@ export const mapSeries =
     }
     return arr
   }
+ */
 
 
 /*
