@@ -1,26 +1,3 @@
-import $ from 'sanctuary-def'
-import {FutureType} from 'fluture-sanctuary-types'
-import {resolve, chain, parallel, map, reject, fork} from 'fluture'
-
-/*
-import {init} from './init.ts'
-const PromiseType = $.UnaryType
-  ('Promise')
-  ('')
-  ([])
-  (x => x instanceof Promise)
-  (_ => [])
-
-const env = $.env.concat([PromiseType($.Unknown)])
-const def = $.create({checkTypes: true, env: env})
-const {types,def} = init({promise:true,future:false})
-console.log(Object.keys(types))
-const PromiseType = types.PromiseType
-console.log(PromiseType)
-
-const e = $.TypeVariable('e')
-*/
-
 export const init =
   ({Z,def,$}) => {
     const a = $.TypeVariable('a')
@@ -79,4 +56,3 @@ export const forParallelF =
        )
      )
     */
-
