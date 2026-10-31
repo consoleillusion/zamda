@@ -11,18 +11,7 @@ import Ajv from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 const ajv = addFormats (new Ajv ({allErrors: true, strict: false}))
 /*
-import * as func from './src/function'
-import * as logic from './src/logic'
-import * as num from './src/number'
-import * as obj from './src/object'
-import * as relation from './src/relation'
-import * as typ from './src/type'
-import * as log from './src/log'
-import * as control from './src/control'
-export const Z = {...list,...func,...logic,...num,...obj,...relation,...str,...typ,...log,...crypt, ...control}
-import sanctuary from 'sanctuary'
-import $ from 'sanctuary-def'
-//import {FutureType, ConcurrentFutureType, env as flutureEnv} from 'fluture-sanctuary-types'
+import {FutureType, ConcurrentFutureType, env as flutureEnv} from 'fluture-sanctuary-types'
 */
 
 const PromiseType = $.UnaryType
