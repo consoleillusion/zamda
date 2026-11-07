@@ -1,6 +1,16 @@
-import init from './index.ts'
+import init from './index.js'
+const { Z } = init()
 
-// Shared library instance for all test files.
-export const { Z } = init()
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-console.log(Z.shuffle([1,2,3,4,5,6]))
+const square =
+  async x => {
+    console.log(x)
+    await sleep(2000 * Math.random())
+    return x * x 
+  }
+
+const arr = [1,5,66,7]
+
+console.log(await Z.mapParallel(square)(arr))
+console.log(await Z.mapSeries(square)(arr))
