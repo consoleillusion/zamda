@@ -1,36 +1,21 @@
 {
-  "name": "@consoleillusion/zamda",
-  "version": "0.0.973",
+  "name": "zamda",
+  "version": "0.0.0",
+  "description": "Typed, declarative columnar pipelines for JavaScript, with pluggable execution backends.",
+  "license": "MIT",
   "type": "module",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": ["src", "README.md", "LICENSE"],
   "scripts": {
-    "build:default": "bun build --outdir=dist --minify index.ts",
-    "prep": "sh -c 'bun build:default && git add . && git commit -m \"$*\"' --",
-    "postpublish": "bunx npm version patch --no-git-tag-version && git add . && git commit -m \"Auto version bump\"",
-    "pub": "bunx npm publish"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "size": "bun run scripts/size.ts",
+    "check": "bun run typecheck && bun test && bun run size"
   },
   "devDependencies": {
-    "json-schema-faker": "^0.5.9",
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "@noble/hashes": "^2.0.0",
-    "ajv": "^8.20.0",
-    "ajv-formats": "^3.0.1",
-    "ansi-colors": "^4.1.3",
-    "change-case": "^5.4.4",
-    "fluture": "^14.0.0",
-    "fluture-sanctuary-types": "^7.1.0",
-    "hash-wasm": "^4.12.0",
-    "partial.lenses": "^14.17.0",
-    "ramda": "^0.31.3",
-    "sanctuary": "^3.1.0",
-    "sanctuary-def": "^0.22.0",
-    "sanctuary-type-classes": "^13.0.0",
-    "sanctuary-type-identifiers": "^4.0.0"
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
   }
 }

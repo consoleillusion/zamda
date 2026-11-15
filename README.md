@@ -1,12 +1,57 @@
-# Zamda
+# zamda
 
-This is my evolving Functional Programming library for Javascript. I use a lot of other FP libraries but they have inconsistent philosophies and cover different territories. Sanctuary's keeping different parts of its ecosystem in different packages also makes it harder to use and harder to learn. Modularity can be achieved through using ES Modules rather than seperate packages. I also intend to find a way to use futures in an easier way. I also intend to write some parts of this in Zig/WASM, which is why I'm calling it Zamda. I'm also considering using Rust, in which I might call it Ramda, I can't think of any other well known libraries of that name. Currently this is just a wrapper library. Interface will change over time. Don't expect it to be "fast" or "light" for a long time.
+Typed, declarative columnar pipelines for JavaScript.
 
-## Goal
+You describe a query with a typed DSL. zamda compiles it to a small intermediate
+representation (IR) and runs it on a backend. The same compiled plan gives the
+same result on every backend.
 
-- Unified and complete FP interface with consistent philosophy
-- Eventual, gradual rewrite in Zig
-- Unsure how pure i will make it yet or if i will follow the strictly monadic appoarch
-- Easy to use Futures
+```ts
+import { count, pipe, schema, t, table } from 'zamda';
 
+const Users = schema({ name: t.utf8, country: t.utf8, age: t.int32, active: t.bool });
+const users = table(Users, rows);
 
+const plan = pipe(Users)
+  .filter(c => c.active.eq(true).and(c.age.gte(18)))
+  .select(c => ({ name: c.name, next: c.age.add(1) }))
+  .limit(10)
+  .compile();
+
+const out = await plan.execute(users);
+out.toArray(); // { name: string | null; next: number | null }[]
+```
+
+## Status
+
+Milestone 1 is in progress. Working today: schemas, the typed DSL, the IR, the
+validator, and `filter`, `select` and `limit` on the JS backend. `groupBy().agg()`
+and `sort()` compile but do not execute yet. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Develop
+
+```sh
+bun install
+bun run check     # typecheck + tests + size budget
+```
+
+| Command | What it does |
+| --- | --- |
+| `bun test` | Unit, slice and golden contract tests |
+| `bun run typecheck` | `tsc --noEmit`, including the type-inference tests |
+| `bun run size` | Fails if the core exceeds 40 KB gzipped |
+
+## Documentation
+
+| Read | For |
+| --- | --- |
+| [AGENTS.md](AGENTS.md) | Rules for anyone, human or agent, changing this repo |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, modules and how to extend them |
+| [docs/CONTRACT.md](docs/CONTRACT.md) | The semantics every backend must implement |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Milestones and their gates |
+| [docs/TASKS.md](docs/TASKS.md) | Work packages, ready to pick up |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Why things are the way they are |
+
+## Licence
+
+MIT
