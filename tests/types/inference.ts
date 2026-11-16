@@ -4,7 +4,7 @@
 // Add a case here whenever the DSL's types change. A wrong inference must fail
 // the typecheck, and a call that should be rejected is marked @ts-expect-error.
 
-import { count, pipe, schema, t } from '../../src';
+import { count, ifElse, list, pipe, schema, t, table } from '../../src';
 import type { Plan, RowOf } from '../../src';
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
@@ -13,42 +13,114 @@ function assertType<_T extends true>(): void {
   // Purpose: compile-time assertion; the type argument must be `true`
 }
 
-type RowsOf<P> = P extends Plan<infer _In, infer Out> ? RowOf<Out> : never;
+type RowsOf<P> = P extends Plan<infer _In, infer Out, infer _Params> ? RowOf<Out> : never;
 
-const Users = schema({ name: t.utf8, country: t.dictionary, age: t.int32, active: t.bool, id: t.int64 });
+const Users = schema({
+  name: t.utf8,
+  country: t.dictionary,
+  age: t.int32,
+  small: t.int8,
+  big: t.int64,
+  ubig: t.uint64,
+  score: t.float32,
+  active: t.bool,
+  born: t.date32,
+  seen: t.timestamp,
+});
 
 // select: output row type is inferred from the returned expressions.
 const projected = pipe(Users)
   .filter(c => c.active.eq(true).and(c.age.gte(18)))
-  .select(c => ({ name: c.name, next: c.age.add(1), id: c.id, adult: c.age.gte(18) }))
+  .select(c => ({ name: c.name, next: c.age.add(1), id: c.big, adult: c.age.gte(18), born: c.born }))
   .compile();
 assertType<
   Same<
     RowsOf<typeof projected>,
-    { name: string | null; next: number | null; id: bigint | null; adult: boolean | null }
+    { name: string | null; next: number | null; id: bigint | null; adult: boolean | null; born: Date | null }
   >
 >();
 
-// filter, sort and limit keep the row type.
-const same = pipe(Users).filter(c => c.age.gt(1)).sort(c => c.age.desc()).limit(5).compile();
-assertType<
-  Same<
-    RowsOf<typeof same>,
-    { name: string | null; country: string | null; age: number | null; active: boolean | null; id: bigint | null }
-  >
->();
+// filter, sort, limit and distinct keep the row type.
+const same = pipe(Users).select(c => ({ age: c.age, name: c.name })).filter(c => c.age.gt(1)).sort(c => c.age.desc()).limit(5).distinct().compile();
+assertType<Same<RowsOf<typeof same>, { age: number | null; name: string | null }>>();
 
 // groupBy().agg(): keys followed by aggregates, with aggregate result types.
 const grouped = pipe(Users)
   .groupBy(c => ({ country: c.country }))
-  .agg(c => ({ n: count(), total: c.age.sum(), mean: c.age.avg(), oldest: c.age.max() }))
+  .agg(c => ({ n: count(), total: c.age.sum(), mean: c.age.avg(), oldest: c.age.max(), d: c.name.countDistinct() }))
   .compile();
 assertType<
   Same<
     RowsOf<typeof grouped>,
-    { country: string | null; n: number | null; total: bigint | null; mean: number | null; oldest: number | null }
+    { country: string | null; n: number | null; total: bigint | null; mean: number | null; oldest: number | null; d: number | null }
   >
 >();
+
+// Keyless agg: aggregates only.
+const totals = pipe(Users).agg(c => ({ n: count(), last: c.seen.max() })).compile();
+assertType<Same<RowsOf<typeof totals>, { n: number | null; last: Date | null }>>();
+
+// C-PROMOTION and C-DIV at the type level.
+const math = pipe(Users)
+  .select(c => ({
+    widened: c.small.add(c.age),
+    toBig: c.age.add(c.big),
+    toFloat: c.age.mul(c.score),
+    quotient: c.age.div(2),
+    floatQuotient: c.score.div(c.score),
+    whole: c.age.intDiv(2),
+    casted: c.age.cast(t.int64),
+    length: c.name.length(),
+    year: c.born.extract('year'),
+    month: c.seen.dateTrunc('month'),
+    picked: ifElse(c.active, c.age, 0),
+    filled: c.name.coalesce('?'),
+    member: c.country.isIn(['NZ', 'AU']),
+  }))
+  .compile();
+assertType<
+  Same<
+    RowsOf<typeof math>,
+    {
+      widened: number | null;
+      toBig: bigint | null;
+      toFloat: number | null;
+      quotient: number | null;
+      floatQuotient: number | null;
+      whole: number | null;
+      casted: bigint | null;
+      length: number | null;
+      year: number | null;
+      month: Date | null;
+      picked: number | null;
+      filled: string | null;
+      member: boolean | null;
+    }
+  >
+>();
+
+// withColumns replaces and adds; rename changes keys.
+const reshaped = pipe(Users)
+  .select(c => ({ name: c.name, age: c.age }))
+  .withColumns(c => ({ age: c.age.cast(t.int64), initial: c.name.lower() }))
+  .rename({ name: 'who' })
+  .compile();
+assertType<Same<RowsOf<typeof reshaped>, { who: string | null; age: bigint | null; initial: string | null }>>();
+
+// Parameters: declared, typed in the callback, and required at execute().
+const withParams = pipe(Users, { minAge: t.int32, countries: list(t.dictionary) })
+  .filter((c, p) => c.age.gte(p.minAge).and(c.country.isIn(p.countries)))
+  .compile();
+const users = table(Users, []);
+void withParams.execute(users, { params: { minAge: 18, countries: ['NZ'] } });
+void projected.execute(users);
+void projected.execute(users, { signal: new AbortController().signal });
+// @ts-expect-error params are required
+void withParams.execute(users);
+// @ts-expect-error countries is missing
+void withParams.execute(users, { params: { minAge: 18 } });
+// @ts-expect-error minAge must be a number
+void withParams.execute(users, { params: { minAge: '18', countries: [] } });
 
 // Rejected at compile time.
 pipe(Users).filter(c => {
@@ -60,6 +132,16 @@ pipe(Users).filter(c => {
   c.nope;
   // @ts-expect-error and() needs a boolean expression
   c.active.and(c.age);
+  // @ts-expect-error int64 and uint64 have no common type
+  c.big.add(c.ubig);
+  // @ts-expect-error floor is defined for floats only
+  c.age.floor();
+  // @ts-expect-error intDiv is defined for integers only
+  c.score.intDiv(2);
+  // @ts-expect-error hour is not a date32 unit
+  c.born.extract('hour');
+  // @ts-expect-error isIn values must match the column type
+  c.age.isIn(['x']);
   return c.active;
 });
 
@@ -68,3 +150,6 @@ pipe(Users).filter(c => c.age);
 
 // @ts-expect-error aggregates are not allowed in select
 pipe(Users).select(c => ({ total: c.age.sum() }));
+
+// @ts-expect-error rename accepts existing column names only
+pipe(Users).rename({ nope: 'x' });

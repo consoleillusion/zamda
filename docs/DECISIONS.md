@@ -21,9 +21,21 @@ in code. Newest last.
 | D-014 | The runtime and toolchain is Bun, with `tsc` for type checking. | Owner's choice. |
 | D-015 | Name: zamda. Licence: MIT. | Owner's choice. |
 | D-016 | Append-only live tables are in Milestone 2; keyed live tables come first after the MVP. | A dashboard that moves is a stronger first release; keyed updates are a much larger engine feature. |
+| D-017 | Contract refinements made while building aggregates: a `sum` is overflow-checked on every partial sum; a non-finite float running sum is returned as is; `-0.0` keys are reported as `0.0`; `avg` sums as `float64`; NaN is greatest for `min` and `max`. | Each was a gap in the contract that two backends could have filled differently. |
+| D-018 | Group-by on 32-bit integer keys and integer distinct counts use open-addressing hash tables over typed arrays, not `Map` and `Set`. | Measured: 2.4x faster than `Map` on 75k groups over a million rows. See `docs/BENCHMARKS.md`. |
+| D-019 | The executor skips copying columns no later node reads. | Cheap, and it never changes results. |
+| D-020 | Parameters are declared on `pipe(schema, { name: type })` and reach callbacks as a second argument, `(c, p) => ...`. There is no free `param()` function. | The declaration gives `execute()` an exact parameter type with no extra machinery in every expression type. |
+| D-021 | `cast` and `in` are IR expression kinds, not registry functions. | Each needs information a function signature cannot carry (a target type, a list), and each maps to its own Substrait expression. |
+| D-022 | `timestamp` is whole milliseconds since the Unix epoch in UTC, with no unit or time zone parameter. `date32` rejects a `Date` that has a time of day. | It is exactly what a JS `Date` holds, so nothing is lost or guessed on the way in or out. Finer units can be added as new types. |
+| D-023 | `lower` and `upper` return `utf8` even for a dictionary input. | Case mapping can merge entries, which would break the rule that dictionary entries are unique. |
+| D-024 | `round` rounds ties to even. | It is the IEEE 754 default and avoids the upward bias of JS's `Math.round`. |
+| D-025 | A JS literal operand takes the type of the expression it meets; only two expressions are promoted. Comparisons promote like arithmetic. | `c.small.add(1)` staying `int8` is predictable; widening on every literal would make result types depend on literal size. |
+| D-026 | `filter` and `sort` produce a selection (row indexes) over their input; rows are copied only when a later operator needs dense columns. | Removes the copy that made filter-then-group slower than a hand-written loop. |
+| D-027 | Dictionary entries are unique within a column, so equal codes mean equal strings. | Lets group-by, distinct counts and equality run on integer codes. |
 
 ## Departures from design spec v4
 
 The scaffold differs from the spec's code examples in three places, each
 recorded above: D-005 (error name), D-006 (`count()` instead of `c.count()`),
-D-007 (`groupBy` takes an object). The spec should be updated to match.
+D-007 (`groupBy` takes an object), D-020 (declared parameters) and D-022
+(timestamps have no unit or time zone parameter).

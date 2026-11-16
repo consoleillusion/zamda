@@ -8,7 +8,7 @@ import {
   SchemaError,
   TypeCheckError,
   count,
-  param,
+  list,
   pipe,
   schema,
   t,
@@ -56,13 +56,24 @@ describe('slice: filter, select, limit', () => {
     expect(out.column('age').valid).toEqual(new Uint8Array([1, 1, 1, 0, 1]));
   });
 
-  test('parameters are bound at execute time', async () => {
-    const plan = pipe(Users).filter(c => c.age.gte(param('minAge', t.int32))).compile();
+  test('parameters are declared, typed and bound at execute time', async () => {
+    const plan = pipe(Users, { minAge: t.int32, countries: list(t.utf8) })
+      .filter((c, p) => c.age.gte(p.minAge).and(c.country.isIn(p.countries)))
+      .compile();
     const users = table(Users, rows);
-    expect((await plan.execute(users, { params: { minAge: 30 } })).rowCount).toBe(2);
-    expect((await plan.execute(users, { params: { minAge: 50 } })).rowCount).toBe(1);
+    expect((await plan.execute(users, { params: { minAge: 20, countries: ['NZ'] } })).rowCount).toBe(3);
+    expect((await plan.execute(users, { params: { minAge: 50, countries: ['NZ', 'AU'] } })).rowCount).toBe(1);
+    expect((await plan.execute(users, { params: { minAge: 0, countries: [] } })).rowCount).toBe(0);
+    // @ts-expect-error params are required when the plan declares any
     await expect(plan.execute(users)).rejects.toBeInstanceOf(PlanError);
-    await expect(plan.execute(users, { params: { minAge: 'x' } })).rejects.toBeInstanceOf(TypeCheckError);
+    await expect(
+      // @ts-expect-error minAge must be a number
+      plan.execute(users, { params: { minAge: 'x', countries: [] } }),
+    ).rejects.toBeInstanceOf(TypeCheckError);
+    await expect(
+      // @ts-expect-error extra is not a declared parameter
+      plan.execute(users, { params: { minAge: 1, countries: [], extra: 1 } }),
+    ).rejects.toBeInstanceOf(PlanError);
   });
 
   test('explain() lists the nodes', () => {
@@ -129,7 +140,7 @@ describe('guards against JavaScript operators', () => {
   });
 });
 
-describe('not implemented yet: these mark the next work packages', () => {
+describe('aggregate and sort', () => {
   test('groupBy().agg() compiles to an aggregate node', () => {
     const plan = pipe(Users)
       .groupBy(c => ({ country: c.country }))
@@ -143,11 +154,31 @@ describe('not implemented yet: these mark the next work packages', () => {
     ]);
   });
 
-  test('aggregate and sort raise PlanError on the JS backend until T-103 and T-104 land', async () => {
-    const users = table(Users, rows);
-    const agg = pipe(Users).groupBy(c => ({ country: c.country })).agg(() => ({ n: count() })).compile();
-    const sorted = pipe(Users).sort(c => c.age.desc()).compile();
-    await expect(agg.execute(users)).rejects.toBeInstanceOf(PlanError);
-    await expect(sorted.execute(users)).rejects.toBeInstanceOf(PlanError);
+  test('groupBy().agg() runs on the JS backend', async () => {
+    const plan = pipe(Users)
+      .filter(c => c.active.eq(true))
+      .groupBy(c => ({ country: c.country }))
+      .agg(c => ({ n: count(), oldest: c.age.max(), mean: c.age.avg() }))
+      .compile();
+    const out = await plan.execute(table(Users, rows));
+    expect(out.toArray()).toEqual([
+      { country: 'NZ', n: 2, oldest: 34, mean: 28 },
+      { country: 'AU', n: 1, oldest: 17, mean: 17 },
+      { country: 'US', n: 1, oldest: null, mean: null },
+    ]);
+  });
+
+  test('top-k: the oldest two active users', async () => {
+    const plan = pipe(Users)
+      .filter(c => c.active.eq(true))
+      .sort(c => c.age.desc())
+      .limit(2)
+      .select(c => ({ name: c.name, age: c.age }))
+      .compile();
+    const out = await plan.execute(table(Users, rows));
+    expect(out.toArray()).toEqual([
+      { name: 'Ana', age: 34 },
+      { name: 'Eli', age: 22 },
+    ]);
   });
 });

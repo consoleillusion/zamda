@@ -8,8 +8,9 @@
 import type { Field } from './schema';
 import type { DataType } from './types';
 
-export const IR_VERSION = 1;
+export const IR_VERSION = 2;
 
+// Dates are stored as numbers: days (date32) or milliseconds (timestamp).
 export type LiteralValue = boolean | number | bigint | string;
 
 export type IrExpr =
@@ -20,6 +21,16 @@ export type IrExpr =
       readonly kind: 'call';
       readonly fn: string;
       readonly args: readonly IrExpr[];
+      readonly type: DataType;
+    }
+  // Substrait: Cast expression.
+  | { readonly kind: 'cast'; readonly arg: IrExpr; readonly type: DataType }
+  // Substrait: SingularOrList. Exactly one of `values` and `param` is set.
+  | {
+      readonly kind: 'in';
+      readonly arg: IrExpr;
+      readonly values: readonly LiteralValue[] | null;
+      readonly param: string | null;
       readonly type: DataType;
     };
 
@@ -34,6 +45,13 @@ export interface IrSortKey {
   readonly expr: IrExpr;
   readonly descending: boolean;
   readonly nullsFirst: boolean;
+}
+
+export interface IrParam {
+  readonly name: string;
+  readonly type: DataType;
+  // True for a list parameter, used by isIn().
+  readonly list: boolean;
 }
 
 interface NodeBase {
@@ -63,7 +81,7 @@ export interface IrPlan {
   // Index of the node whose output is the plan's result.
   readonly root: number;
   readonly output: readonly Field[];
-  readonly params: readonly Field[];
+  readonly params: readonly IrParam[];
 }
 
 export function walkExpr(expr: IrExpr, visit: (e: IrExpr) => void): void {
@@ -71,6 +89,8 @@ export function walkExpr(expr: IrExpr, visit: (e: IrExpr) => void): void {
   visit(expr);
   if (expr.kind === 'call') {
     for (const arg of expr.args) walkExpr(arg, visit);
+  } else if (expr.kind === 'cast' || expr.kind === 'in') {
+    walkExpr(expr.arg, visit);
   }
 }
 

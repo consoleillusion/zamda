@@ -5,11 +5,11 @@ are TypeScript only and produce a usable library on their own.
 
 ```
  [1 Core] ----> [2 JS release] ----> <Spike> --pass--> [3 WASM engine] ----> [Later]
-  in progress                           |
+    done                                |
                                         +--fail--> stop at 2; zamda is a JS library
 ```
 
-**Current position:** Milestone 1, first slice done (task T-101).
+**Current position:** Milestone 1 is complete (`docs/MILESTONE-1.md`). Milestone 2 is next.
 
 ## Milestones
 

@@ -1,8 +1,15 @@
 // In-memory column storage on the JS side: used by the JS backend and by every
 // backend's results. Validity is one byte per row (1 = present), which is
 // simpler and faster in JS than a bit-packed bitmap (docs/DECISIONS.md, D-004).
+//
+// Storage by type:
+//   bool                 Uint8Array of 0 or 1
+//   intN, uintN, floatN  the matching typed array (64-bit integers as BigInt arrays)
+//   utf8                 string[]
+//   dictionary           Int32Array of codes + `dictionary`, a list of UNIQUE strings
+//   date32               Int32Array of days since the Unix epoch
+//   timestamp            Float64Array of whole milliseconds since the Unix epoch, UTC
 
-import { SchemaError } from './errors';
 import type { DataType } from './types';
 
 export type ColumnValues =
@@ -20,10 +27,12 @@ export type ColumnValues =
 
 export interface Column {
   readonly type: DataType;
-  // bool is stored as 0 or 1 in a Uint8Array.
   readonly values: ColumnValues;
   // null when no value is null.
   readonly valid: Uint8Array | null;
+  // Present exactly when type is `dictionary`. Entries are unique, so two rows
+  // of one column hold equal strings if and only if their codes are equal.
+  readonly dictionary?: readonly string[];
 }
 
 // Loose views used inside kernels, where the element type is known from the DataType.
@@ -32,7 +41,7 @@ export type BigCells = { [i: number]: bigint; readonly length: number };
 export type AnyCells = { [i: number]: number | bigint | string; readonly length: number };
 
 export function nums(column: Column): NumCells {
-  // Purpose: view a column's values as numbers
+  // Purpose: view a column's values as numbers (for a dictionary column: its codes)
   return column.values as unknown as NumCells;
 }
 
@@ -42,8 +51,25 @@ export function bigs(column: Column): BigCells {
 }
 
 export function cells(column: Column): AnyCells {
-  // Purpose: view a column's values without knowing the element type
+  // Purpose: view a column's stored values without knowing the element type
   return column.values as unknown as AnyCells;
+}
+
+const decoded = new WeakMap<Column, readonly string[]>();
+
+export function texts(column: Column): readonly string[] {
+  // Purpose: a string column's values as strings, decoding a dictionary column once
+  if (!column.dictionary) return column.values as string[];
+  let out = decoded.get(column);
+  if (!out) {
+    const codes = nums(column);
+    const dictionary = column.dictionary;
+    const strings: string[] = new Array(codes.length);
+    for (let i = 0; i < codes.length; i++) strings[i] = dictionary[codes[i]!] ?? '';
+    out = strings;
+    decoded.set(column, out);
+  }
+  return out;
 }
 
 export function allocate(type: DataType, length: number): ColumnValues {
@@ -57,6 +83,8 @@ export function allocate(type: DataType, length: number): ColumnValues {
     case 'int16':
       return new Int16Array(length);
     case 'int32':
+    case 'date32':
+    case 'dictionary':
       return new Int32Array(length);
     case 'uint16':
       return new Uint16Array(length);
@@ -69,21 +97,42 @@ export function allocate(type: DataType, length: number): ColumnValues {
     case 'float32':
       return new Float32Array(length);
     case 'float64':
+    case 'timestamp':
       return new Float64Array(length);
     case 'utf8':
-    case 'dictionary':
-      // Dictionary encoding is a storage optimization added in docs/TASKS.md, T-107.
       return new Array<string>(length).fill('');
-    case 'date32':
-    case 'timestamp':
-      throw new SchemaError(`Columns of type ${type.name} are not supported yet (T-108)`);
   }
 }
 
-export function makeColumn(type: DataType, values: ColumnValues, valid: Uint8Array | null): Column {
+export function makeColumn(
+  type: DataType,
+  values: ColumnValues,
+  valid: Uint8Array | null,
+  dictionary?: readonly string[],
+): Column {
   // Purpose: build a column, dropping the validity array when nothing is null
-  if (valid && valid.indexOf(0) === -1) return { type, values, valid: null };
-  return { type, values, valid };
+  const keep = valid && valid.indexOf(0) !== -1 ? valid : null;
+  return dictionary ? { type, values, valid: keep, dictionary } : { type, values, valid: keep };
+}
+
+export function stringColumn(type: DataType, strings: readonly string[], valid: Uint8Array | null): Column {
+  // Purpose: build a utf8 or dictionary column from strings, encoding a dictionary if needed
+  if (type.name !== 'dictionary') return makeColumn(type, strings as string[], valid);
+  const codes = new Int32Array(strings.length);
+  const dictionary: string[] = [];
+  const seen = new Map<string, number>();
+  for (let i = 0; i < strings.length; i++) {
+    if (valid && !valid[i]) continue;
+    const s = strings[i]!;
+    let code = seen.get(s);
+    if (code === undefined) {
+      code = dictionary.length;
+      seen.set(s, code);
+      dictionary.push(s);
+    }
+    codes[i] = code;
+  }
+  return makeColumn(type, codes, valid, dictionary);
 }
 
 export function take(column: Column, indices: Uint32Array): Column {
@@ -97,12 +146,12 @@ export function take(column: Column, indices: Uint32Array): Column {
     valid = new Uint8Array(indices.length);
     for (let i = 0; i < indices.length; i++) valid[i] = column.valid[indices[i]!]!;
   }
-  return makeColumn(column.type, out, valid);
+  return makeColumn(column.type, out, valid, column.dictionary);
 }
 
 export function head(column: Column, count: number): Column {
   // Purpose: the first `count` rows of a column
   const values = column.values.slice(0, count) as ColumnValues;
   const valid = column.valid ? column.valid.slice(0, count) : null;
-  return makeColumn(column.type, values, valid);
+  return makeColumn(column.type, values, valid, column.dictionary);
 }

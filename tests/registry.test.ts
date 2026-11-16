@@ -6,7 +6,8 @@ import { REGISTRY } from '../src/registry';
 
 test('every function has a Substrait mapping', () => {
   for (const def of REGISTRY.values()) {
-    expect(def.substrait).toMatch(/^functions_[a-z_]+:[a-z_]+$/);
+    // Either a function in a Substrait extension, or a built-in Substrait expression.
+    expect(def.substrait).toMatch(/^(functions_[a-z_]+|expression):[a-z_]+$/);
   }
 });
 

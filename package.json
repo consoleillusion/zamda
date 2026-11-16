@@ -7,15 +7,21 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "files": ["src", "README.md", "LICENSE"],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "size": "bun run scripts/size.ts",
-    "check": "bun run typecheck && bun test && bun run size"
+    "check": "bun run typecheck && bun test && bun run size",
+    "bench": "bun run bench/groupby.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "arquero": "^8.0.3",
     "typescript": "^5.6.0"
   }
 }

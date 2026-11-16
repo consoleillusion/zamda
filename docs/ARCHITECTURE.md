@@ -62,11 +62,13 @@ IR; any backend that honours the contract can execute it.
 | Module | Responsibility | May import |
 | --- | --- | --- |
 | `src/types.ts` | Data types, `t`, ranges, type predicates | nothing |
+| `src/promotion.ts` | Generated numeric promotion table (C-PROMOTION) | nothing |
+| `src/convert.ts` | One JS value to its stored form, with every schema check | types |
 | `src/errors.ts` | Error classes | nothing |
 | `src/schema.ts` | `schema()`, `RowOf`, schema compatibility | types, errors |
 | `src/ir.ts` | IR type definitions and walkers | schema, types |
 | `src/registry.ts` | Function definitions: type rule, nulls, Substrait name | types, errors |
-| `src/expr.ts` | Expression classes, `lit`, `param`, `count` | ir, registry, types, errors |
+| `src/expr.ts` | Expression classes, `lit`, `ifElse`, `count`, promotion | ir, registry, promotion, convert, types, errors |
 | `src/pipe.ts` | `Pipeline`, `Grouped`, accessor proxy, misuse guards | expr, ir, schema, optimize, validate, plan |
 | `src/optimize.ts` | IR-to-IR passes | ir |
 | `src/validate.ts` | The IR validator | ir, registry, schema, types, errors |
@@ -120,7 +122,7 @@ A backend must:
 1. Check `docs/CONTRACT.md` defines its behaviour; propose a rule if not.
 2. Add a `FunctionDef` to `src/registry.ts`: type rule, null behaviour, Substrait name.
 3. Add the DSL method to the right class in `src/expr.ts`.
-4. Add a kernel in `src/backends/js/` and register it in `kernels.ts`.
+4. Add a kernel in the matching `src/backends/js/kernels-<group>.ts`.
 5. Add golden tests, and a type test in `tests/types/inference.ts`.
 
 `tests/registry.test.ts` fails if a registered scalar has no JS kernel or no
@@ -143,12 +145,19 @@ Substrait mapping.
 
 ## JS backend internals
 
-- `load.ts` turns rows into checked columns.
+- `load.ts` turns rows, or one array per column, into checked columns.
 - A column is a typed array (or `string[]`) plus an optional validity array with
-  one byte per row.
-- `kernels.ts` holds one function per registry entry, operating on whole columns.
-- `exec.ts` walks the node table. Today each node processes the whole table as
-  one batch; Milestone 2 makes it chunked and resumable (task T-201).
+  one byte per row. A dictionary column is integer codes plus a list of unique strings.
+- `kernels.ts` holds comparison and logic and assembles the kernel table;
+  `kernels-arith.ts`, `kernels-string.ts`, `kernels-time.ts` and `kernels-misc.ts`
+  hold the rest. Each kernel operates on whole columns.
+- `sort.ts` sorts row indexes with a total-order comparator, and does top-k with a heap.
+- `aggregate.ts` is the hash group-by: assign group ids in first-occurrence
+  order, then one loop per aggregate.
+- `exec.ts` walks the node table. `filter` and `sort` output a selection of row
+  indexes over their input, and columns nothing reads are never copied. Today
+  each node processes the whole table at once; Milestone 2 makes it chunked and
+  resumable (task T-201).
 
 ## Planned layout for the WASM backend
 

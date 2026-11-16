@@ -1,8 +1,14 @@
 import type { ResultData } from './backend';
-import type { ColumnValues } from './column';
-import { cells } from './column';
+import type { Column, ColumnValues } from './column';
+import { cells, texts } from './column';
 import { SchemaError } from './errors';
 import type { Fields, RowOf } from './schema';
+import { MS_PER_DAY } from './types';
+
+function outputValues(column: Column): ColumnValues {
+  // Purpose: storage as handed to users: dictionary columns are decoded to strings
+  return column.dictionary ? (texts(column) as string[]) : column.values;
+}
 
 export class Result<Out extends Fields> {
   private readonly data: ResultData;
@@ -23,21 +29,26 @@ export class Result<Out extends Fields> {
     for (let r = 0; r < this.data.rowCount; r++) rows.push({});
     this.data.schema.forEach((field, c) => {
       const column = this.data.columns[c]!;
-      const values = cells(column);
-      const isBool = field.type.name === 'bool';
+      const values = column.dictionary ? texts(column) : cells(column);
+      const kind = field.type.name;
       for (let r = 0; r < this.data.rowCount; r++) {
-        if (column.valid && !column.valid[r]) rows[r]![field.name] = null;
-        else rows[r]![field.name] = isBool ? values[r] === 1 : values[r];
+        const row = rows[r]!;
+        if (column.valid && !column.valid[r]) row[field.name] = null;
+        else if (kind === 'bool') row[field.name] = values[r] === 1;
+        else if (kind === 'date32') row[field.name] = new Date((values[r] as number) * MS_PER_DAY);
+        else if (kind === 'timestamp') row[field.name] = new Date(values[r] as number);
+        else row[field.name] = values[r];
       }
     });
     return rows as RowOf<Out>[];
   }
 
   columns(): { [K in keyof Out]: ColumnValues } {
-    // Purpose: raw column storage by name, for charting libraries; see column() for nulls
+    // Purpose: column storage by name, for charting libraries; see column() for nulls.
+    // Dates come back as numbers: days (date32) or milliseconds (timestamp) since the epoch.
     const out: Record<string, ColumnValues> = {};
     this.data.schema.forEach((field, c) => {
-      out[field.name] = this.data.columns[c]!.values;
+      out[field.name] = outputValues(this.data.columns[c]!);
     });
     return out as { [K in keyof Out]: ColumnValues };
   }
@@ -49,6 +60,6 @@ export class Result<Out extends Fields> {
     });
     if (c === -1) throw new SchemaError(`The result has no column "${name}"`);
     const column = this.data.columns[c]!;
-    return { values: column.values, valid: column.valid ?? undefined };
+    return { values: outputValues(column), valid: column.valid ?? undefined };
   }
 }

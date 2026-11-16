@@ -15,7 +15,8 @@ export interface Table<F extends Fields = Fields> {
 
 export interface BackendOptions {
   // Parameter values, already type-checked against the plan.
-  readonly params: ReadonlyMap<string, LiteralValue>;
+  // A list parameter's value is an array.
+  readonly params: ReadonlyMap<string, LiteralValue | readonly LiteralValue[]>;
   readonly signal?: AbortSignal;
 }
 

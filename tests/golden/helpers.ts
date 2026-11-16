@@ -5,7 +5,7 @@
 // golden test runs against both without being rewritten.
 
 import { table } from '../../src';
-import type { Fields, Pipeline, RowInput, RowOf, Schema } from '../../src';
+import type { Fields, NoParams, Pipeline, RowInput, RowOf, Schema } from '../../src';
 import { pipe } from '../../src';
 
 export const backends = ['js'] as const;
@@ -13,7 +13,7 @@ export const backends = ['js'] as const;
 export async function run<F extends Fields, Out extends Fields>(
   schema: Schema<F>,
   rows: readonly RowInput<F>[],
-  build: (p: Pipeline<F, F>) => Pipeline<F, Out>,
+  build: (p: Pipeline<F, F, NoParams>) => Pipeline<F, Out, NoParams>,
 ): Promise<RowOf<Out>[]> {
   // Purpose: build a pipeline, run it on the JS backend and return the rows
   const plan = build(pipe(schema)).compile();

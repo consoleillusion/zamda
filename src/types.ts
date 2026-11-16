@@ -6,7 +6,9 @@ export type BigIntName = 'int64' | 'uint64';
 export type FloatName = 'float32' | 'float64';
 export type NumericName = IntName | BigIntName | FloatName;
 export type UnsignedName = 'uint8' | 'uint16' | 'uint32' | 'uint64';
+export type IntegerName = IntName | BigIntName;
 export type StringName = 'utf8' | 'dictionary';
+export type TemporalName = 'date32' | 'timestamp';
 export type TypeName = 'bool' | NumericName | StringName | 'date32' | 'timestamp';
 
 export interface DataType<N extends TypeName = TypeName> {
@@ -105,3 +107,15 @@ export function sameType(a: DataType, b: DataType): boolean {
   // Purpose: compare two data types for equality
   return a.name === b.name;
 }
+
+export function isInteger(type: DataType): type is DataType<IntegerName> {
+  // Purpose: true for any integer type, of any width
+  return isInt(type) || isBigInt(type);
+}
+
+export function isTemporal(type: DataType): type is DataType<TemporalName> {
+  // Purpose: true for dates and timestamps
+  return type.name === 'date32' || type.name === 'timestamp';
+}
+
+export const MS_PER_DAY = 86_400_000;

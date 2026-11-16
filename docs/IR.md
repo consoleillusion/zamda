@@ -1,7 +1,7 @@
 # The IR
 
 The IR is the one format every backend consumes. Types are in `src/ir.ts`.
-Current version: `IR_VERSION = 1`. Bump it on any incompatible change.
+Current version: `IR_VERSION = 2`. Bump it on any incompatible change.
 
 ## Plan
 
@@ -12,7 +12,7 @@ Current version: `IR_VERSION = 1`. Bump it on any incompatible change.
 | `nodes` | Flat node table; node 0 is the scan |
 | `root` | Index of the node whose output is the result |
 | `output` | Schema of the result |
-| `params` | Parameters the plan needs at execution, with types |
+| `params` | Declared parameters: name, type, and whether it is a list |
 
 ## Nodes
 
@@ -28,17 +28,35 @@ Every node carries `schema`, its output schema. Every node except `scan` has
 | `sort` | `keys` (expr, descending, nullsFirst) | same as input | Sort |
 | `limit` | `count` | same as input | Fetch |
 
+How the DSL lowers to nodes:
+
+| DSL | Node |
+| --- | --- |
+| `select`, `withColumns`, `rename` | `project` |
+| `groupBy().agg()` | `aggregate` |
+| `agg()` without `groupBy` | `aggregate` with no keys |
+| `distinct()` | `aggregate` with every column as a key and no aggregates |
+| `sort().limit(k)` | `sort` then `limit`; a backend may fuse them into a top-k |
+
 ## Expressions
 
-| `kind` | Fields | Meaning |
-| --- | --- | --- |
-| `field` | `index`, `type` | Column `index` of the input node's schema |
-| `literal` | `value`, `type` | A typed constant |
-| `param` | `name`, `type` | A value supplied at `execute()` |
-| `call` | `fn`, `args`, `type` | A registry function applied to arguments |
+| `kind` | Fields | Meaning | Substrait |
+| --- | --- | --- | --- |
+| `field` | `index`, `type` | Column `index` of the input node's schema | FieldReference |
+| `literal` | `value`, `type` | A typed constant | Literal |
+| `param` | `name`, `type` | A scalar value supplied at `execute()` | Literal, bound on export |
+| `call` | `fn`, `args`, `type` | A registry function applied to arguments | ScalarFunction |
+| `cast` | `arg`, `type` | Checked numeric conversion | Cast |
+| `in` | `arg`, `values` or `param`, `type` | List membership; exactly one of `values` and `param` is set | SingularOrList |
 
 Every expression carries its result `type`. The validator recomputes call types
 from the registry and rejects a plan whose stated types disagree.
+
+Literal values are `boolean`, `number`, `bigint` or `string`. Dates are numbers:
+days for `date32`, milliseconds for `timestamp`.
+
+Sugar never reaches the IR: `between` is `gte` and `lte`; `bin` is arithmetic
+plus `if_else`; numeric promotion is `cast` nodes around the operands.
 
 ## Example
 
@@ -60,4 +78,5 @@ speed and untrusted-input validation matter.
 
 ## Limits
 
-The validator caps a plan at 1,024 nodes and expressions at 256 levels of nesting.
+The validator caps a plan at 1,024 nodes, expressions at 256 levels of nesting,
+and a literal in-list at 65,536 values.
