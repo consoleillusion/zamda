@@ -6,6 +6,21 @@ import type { DataType } from '../../types';
 
 export type Kernel = (args: readonly Column[], type: DataType, rowCount: number) => Column;
 
+// Columns that hold one value in every row (a literal or parameter broadcast to
+// the batch). Kernels may read row 0 instead of the whole array.
+const constants = new WeakSet<Column>();
+
+export function markConstant(column: Column): Column {
+  // Purpose: record that a column holds the same value in every row
+  constants.add(column);
+  return column;
+}
+
+export function isConstant(column: Column): boolean {
+  // Purpose: true if the column is known to hold the same value in every row
+  return constants.has(column);
+}
+
 export function mergeValid(a: Uint8Array | null, b: Uint8Array | null, n: number): Uint8Array | null {
   // Purpose: validity of a result that is null when either input is null
   if (!a && !b) return null;
@@ -41,12 +56,13 @@ export function orderNumbers(a: number | bigint, b: number | bigint): number {
   return aNaN === bNaN ? 0 : aNaN ? 1 : -1;
 }
 
-export function overflow(what: string, type: DataType, where: string): never {
-  // Purpose: raise the C-OVERFLOW error
-  throw new ExecutionError(`Integer overflow in ${what} (${type.name}) ${where}`);
+export function overflow(what: string, type: DataType, detail = ''): never {
+  // Purpose: raise the C-OVERFLOW error. Row numbers are not reported: execution is
+  // chunked and rows may have been filtered, so a position would mislead.
+  throw new ExecutionError(`Integer overflow in ${what} (${type.name})${detail ? `: ${detail}` : ''}`);
 }
 
-export function divideByZero(what: string, row: number): never {
+export function divideByZero(what: string): never {
   // Purpose: raise the C-DIV error for an integer division by zero
-  throw new ExecutionError(`Integer divide by zero in ${what} at row ${row}`);
+  throw new ExecutionError(`Integer divide by zero in ${what}`);
 }

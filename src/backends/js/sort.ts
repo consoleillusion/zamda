@@ -1,5 +1,8 @@
 // The sort operator for the JS reference executor.
 //
+// It sorts row indexes, not rows, as a generator that yields between bounded
+// steps so a long sort can be paused or aborted (docs/TASKS.md, T-201).
+//
 // It sorts row indexes, not rows. The comparator ends with the row index, which
 // makes it a total order: the sort is stable on every JS engine (C-SORT-STABLE),
 // and a bounded top-k returns exactly what a full sort then limit would.
@@ -77,7 +80,10 @@ function rowCompare(keys: readonly SortColumn[]): Compare {
   };
 }
 
-function topK(rowCount: number, k: number, compare: Compare): Uint32Array {
+// How much work a sort does between two yields, in comparisons' worth of rows.
+const STEP_ROWS = 65536;
+
+function* topK(rowCount: number, k: number, compare: Compare): Generator<void, Uint32Array> {
   // Purpose: the first k rows of the sorted order, using a heap of the k best rows seen so far
   const heap = new Uint32Array(k);
   let size = 0;
@@ -115,17 +121,57 @@ function topK(rowCount: number, k: number, compare: Compare): Uint32Array {
       heap[0] = row;
       siftDown(0);
     }
+    if ((row + 1) % STEP_ROWS === 0) yield;
   }
   return heap.subarray(0, size).sort(compare);
 }
 
-export function sortIndices(keys: readonly SortColumn[], rowCount: number, limit: number | null): Uint32Array {
-  // Purpose: row indexes in sorted order; with a limit, only the first `limit` of them
+function* mergeSort(rowCount: number, compare: Compare): Generator<void, Uint32Array> {
+  // Purpose: full sort in bounded steps: sort runs of STEP_ROWS natively, then merge runs pairwise
+  let from = new Uint32Array(rowCount);
+  for (let i = 0; i < rowCount; i++) from[i] = i;
+  for (let start = 0; start < rowCount; start += STEP_ROWS) {
+    from.subarray(start, Math.min(start + STEP_ROWS, rowCount)).sort(compare);
+    yield;
+  }
+  let to = new Uint32Array(rowCount);
+  let sinceYield = 0;
+  for (let width = STEP_ROWS; width < rowCount; width *= 2) {
+    for (let left = 0; left < rowCount; left += 2 * width) {
+      const middle = Math.min(left + width, rowCount);
+      const end = Math.min(left + 2 * width, rowCount);
+      let a = left;
+      let b = middle;
+      let out = left;
+      while (a < middle && b < end) {
+        // On a tie take the left run first; the comparator is a total order, so ties cannot occur anyway.
+        to[out++] = compare(from[b]!, from[a]!) < 0 ? from[b++]! : from[a++]!;
+        if (++sinceYield === STEP_ROWS) {
+          sinceYield = 0;
+          yield;
+        }
+      }
+      while (a < middle) to[out++] = from[a++]!;
+      while (b < end) to[out++] = from[b++]!;
+    }
+    const swap = from;
+    from = to;
+    to = swap;
+  }
+  return from;
+}
+
+export function* sortSteps(
+  keys: readonly SortColumn[],
+  rowCount: number,
+  limit: number | null,
+): Generator<void, Uint32Array> {
+  // Purpose: row indexes in sorted order, computed in steps that yield so the run can pause or abort.
+  // With a limit, only the first `limit` indexes are returned.
   const compare = rowCompare(keys);
   if (limit !== null && limit < rowCount) {
-    return limit === 0 ? new Uint32Array(0) : topK(rowCount, limit, compare);
+    if (limit === 0) return new Uint32Array(0);
+    return yield* topK(rowCount, limit, compare);
   }
-  const indices = new Uint32Array(rowCount);
-  for (let i = 0; i < rowCount; i++) indices[i] = i;
-  return indices.sort(compare);
+  return yield* mergeSort(rowCount, compare);
 }

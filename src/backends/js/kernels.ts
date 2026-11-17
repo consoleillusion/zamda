@@ -11,9 +11,9 @@
 import type { Column, NumCells } from '../../column';
 import { bigs, makeColumn, nums, texts } from '../../column';
 import type { DataType } from '../../types';
-import { isBigInt, isString, t } from '../../types';
+import { INT_RANGES, isBigInt, isInt, isString, t } from '../../types';
 import type { Kernel } from './kernel-util';
-import { compareStrings, mergeValid } from './kernel-util';
+import { compareStrings, isConstant, mergeValid } from './kernel-util';
 import { ARITHMETIC_KERNELS } from './kernels-arith';
 import { MISC_KERNELS } from './kernels-misc';
 import { STRING_KERNELS } from './kernels-string';
@@ -55,6 +55,50 @@ function compareNumbers(op: CompareOp, a: NumCells, b: NumCells, out: Uint8Array
   }
 }
 
+// The operator that gives the same answer with its operands swapped.
+const FLIPPED: Record<CompareOp, CompareOp> = { eq: 'eq', neq: 'neq', lt: 'gt', lte: 'gte', gt: 'lt', gte: 'lte' };
+
+function coversType(op: CompareOp, type: DataType, b: number): boolean | null {
+  // Purpose: true or false when every value of an integer type gives the same answer against b, else null
+  // A range filter that is switched off (0..255 on a uint8 column) then costs one fill.
+  if (!isInt(type)) return null;
+  const [min, max] = INT_RANGES[type.name];
+  if (op === 'gte') return b <= min ? true : b > max ? false : null;
+  if (op === 'lte') return b >= max ? true : b < min ? false : null;
+  if (op === 'gt') return b < min ? true : b >= max ? false : null;
+  if (op === 'lt') return b > max ? true : b <= min ? false : null;
+  return null;
+}
+
+function compareScalar(op: CompareOp, a: NumCells, b: number, out: Uint8Array, n: number, type: DataType): void {
+  // Purpose: a number column against one value, read once instead of from a broadcast array
+  const fixed = coversType(op, type, b);
+  if (fixed !== null) {
+    if (fixed) out.fill(1);
+    return;
+  }
+  switch (op) {
+    case 'eq':
+      for (let i = 0; i < n; i++) out[i] = a[i]! === b ? 1 : 0;
+      break;
+    case 'neq':
+      for (let i = 0; i < n; i++) out[i] = a[i]! !== b ? 1 : 0;
+      break;
+    case 'lt':
+      for (let i = 0; i < n; i++) out[i] = a[i]! < b ? 1 : 0;
+      break;
+    case 'lte':
+      for (let i = 0; i < n; i++) out[i] = a[i]! <= b ? 1 : 0;
+      break;
+    case 'gt':
+      for (let i = 0; i < n; i++) out[i] = a[i]! > b ? 1 : 0;
+      break;
+    case 'gte':
+      for (let i = 0; i < n; i++) out[i] = a[i]! >= b ? 1 : 0;
+      break;
+  }
+}
+
 function compareBigInts(x: Column, y: Column, test: (order: number) => boolean, out: Uint8Array, n: number): void {
   // Purpose: comparison of 64-bit integer columns
   const a = bigs(x);
@@ -76,6 +120,10 @@ function comparison(op: CompareOp): Kernel {
     const out = new Uint8Array(n);
     if (isBigInt(x.type)) {
       compareBigInts(x, y, test, out, n);
+    } else if (!isString(x.type) && isConstant(y)) {
+      compareScalar(op, nums(x), nums(y)[0]!, out, n, x.type);
+    } else if (!isString(x.type) && isConstant(x)) {
+      compareScalar(FLIPPED[op], nums(y), nums(x)[0]!, out, n, y.type);
     } else if (!isString(x.type)) {
       compareNumbers(op, nums(x), nums(y), out, n);
     } else if ((op === 'eq' || op === 'neq') && x.dictionary && y.dictionary && y.dictionary.length === 1) {

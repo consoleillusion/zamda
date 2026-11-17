@@ -29,11 +29,14 @@ export type {
 export { Plan } from './plan';
 export type { ExecuteArgs, ExecuteOptions } from './plan';
 
+export { latest } from './latest';
+export type { LatestRun } from './latest';
+
 export { Result } from './result';
 export type { ColumnValues } from './column';
 
 export { table } from './backends/js';
-export type { ColumnInput, JsTable, RowInput } from './backends/js';
+export type { ColumnInput, JsTable, RowInput, TableInput, TableOptions } from './backends/js';
 
 export type { Backend, BackendOptions, ResultData, Table } from './backend';
 export type { IrAggregate, IrExpr, IrNode, IrParam, IrPlan, IrSortKey } from './ir';

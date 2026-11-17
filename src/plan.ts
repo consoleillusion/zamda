@@ -11,7 +11,14 @@ export interface ExecuteOptions<P extends ParamDecls = NoParams> {
   // Values for every declared parameter.
   readonly params?: ParamValues<P>;
   // Aborting rejects the run with AbortError and leaves the table intact.
+  // The run notices within one time slice.
   readonly signal?: AbortSignal;
+  // Called between time slices and once at the end, with how much of the table has been read.
+  readonly onProgress?: (progress: { rowsScanned: number; rowsTotal: number }) => void;
+  // Rows processed per chunk. Default 65,536. Results never depend on it.
+  readonly chunkRows?: number;
+  // How long to work before returning to the event loop, in milliseconds. Default 8.
+  readonly sliceMs?: number;
 }
 
 // `options` is required exactly when the plan declares parameters.
@@ -103,8 +110,21 @@ export class Plan<In extends Fields, Out extends Fields, P extends ParamDecls = 
     for (const name of Object.keys(given)) {
       if (!params.has(name)) throw new PlanError(`Unknown parameter "${name}"`);
     }
+    const { chunkRows, sliceMs } = options;
+    if (chunkRows !== undefined && (!Number.isInteger(chunkRows) || chunkRows < 1)) {
+      throw new PlanError(`chunkRows must be a positive integer, got ${chunkRows}`);
+    }
+    if (sliceMs !== undefined && !(sliceMs >= 0)) {
+      throw new PlanError(`sliceMs must be zero or more, got ${sliceMs}`);
+    }
     if (options.signal?.aborted) throw new AbortError();
-    const data = await table.backend.execute(this.ir, table, { params, signal: options.signal });
+    const data = await table.backend.execute(this.ir, table, {
+      params,
+      signal: options.signal,
+      chunkRows,
+      sliceMs,
+      onProgress: options.onProgress,
+    });
     return new Result<Out>(data);
   }
 

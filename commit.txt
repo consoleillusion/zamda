@@ -1,0 +1,53 @@
+Huge Rewrite: zamda typed columnar pipelines with BGP dashboard
+
+zamda is a typed JavaScript DSL for columnar data pipelines. Pipelines
+compile to a versioned IR, and a written semantics contract defines
+what every backend must compute. This commit holds the JS reference
+backend and a reference dashboard over the global BGP routing table.
+
+DSL and IR
+- pipe(schema, params) with filter, select, withColumns, rename, sort,
+  limit, distinct, groupBy().agg() and agg(). Expressions are typed and
+  checked when written. JS operators (&&, ||, ===) are rejected inside
+  accessor callbacks.
+- Declared plan parameters, including lists, so a pipeline compiles
+  once and is re-run with new values.
+- Flat node IR (IR_VERSION 2) with cast and in expressions, a validator
+  and explain(). The function registry has 35 scalar and 6 aggregate
+  functions, each mapped to a Substrait name for later export.
+- Integer overflow is checked by default; wrapping_* functions are
+  explicit. Kleene three-valued logic, Neumaier float sums and
+  code-point string ordering are specified in docs/CONTRACT.md.
+
+JS reference backend
+- Columns are typed arrays with a validity array. Dictionary columns
+  hold int32 codes plus a list of unique strings.
+- Resumable generator execution: 64k-row chunks, about 8 ms time
+  slices, AbortSignal, onProgress, and selection vectors instead of row
+  copies. latest(plan) aborts the previous run.
+- Append-only live tables made of immutable segments, with a rolling
+  retain window and snapshot semantics for each run.
+- Hash group-by with specialised key tables (small ints, int32,
+  integer tuples, strings), canonical dictionaries across chunks, and
+  a merge sort plus heap top-k.
+- Evaluation shortcuts that don't change results: constant and/or
+  short-circuit, comparison against a scalar, and per-dictionary-entry
+  evaluation of expressions over one dictionary column.
+
+BGP reference data and dashboard
+- scripts/prep-bgp.ts parses a RIPE RIS MRT dump (RFC 6396), keeps one
+  route per IPv4 prefix, adds network names and regional registries,
+  and writes a compact columnar routes file that loads without copying.
+- demo/ is served with `bun run demo`: four crossfiltered charts (top
+  networks, prefix and path length histograms, regions), name and
+  address filters, and a live panel fed by RIS Live with a rolling
+  window. Charts are plain SVG.
+- scripts/fake-routes.ts writes a synthetic dataset for offline use.
+
+Tooling and docs
+- Bun runtime. 195 tests, including golden contract tests run at
+  several chunk sizes, type-inference tests and a 40 KB gzip size
+  budget (core is 21 KB).
+- Group-by benchmark against plain JS and Arquero.
+- docs/: ARCHITECTURE, CONTRACT, IR, ROADMAP, TASKS, DECISIONS
+  (D-001 to D-048), BENCHMARKS, MILESTONE-1.

@@ -155,3 +155,73 @@ export function head(column: Column, count: number): Column {
   const valid = column.valid ? column.valid.slice(0, count) : null;
   return makeColumn(column.type, values, valid, column.dictionary);
 }
+
+export function slice(column: Column, start: number, end: number): Column {
+  // Purpose: rows [start, end) of a column; typed arrays are views, not copies
+  const values = Array.isArray(column.values)
+    ? column.values.slice(start, end)
+    : (column.values.subarray(start, end) as ColumnValues);
+  const valid = column.valid ? column.valid.subarray(start, end) : null;
+  return makeColumn(column.type, values, valid, column.dictionary);
+}
+
+export function emptyColumn(type: DataType): Column {
+  // Purpose: a column of the given type with no rows
+  return makeColumn(type, allocate(type, 0), null, type.name === 'dictionary' ? [] : undefined);
+}
+
+export function concat(type: DataType, pieces: readonly Column[]): Column {
+  // Purpose: join columns of one type end to end
+  if (pieces.length === 0) return emptyColumn(type);
+  if (pieces.length === 1) return pieces[0]!;
+  let total = 0;
+  let anyNull = false;
+  for (const piece of pieces) {
+    total += piece.values.length;
+    if (piece.valid) anyNull = true;
+  }
+  let valid: Uint8Array | null = null;
+  if (anyNull) {
+    valid = new Uint8Array(total).fill(1);
+    let at = 0;
+    for (const piece of pieces) {
+      if (piece.valid) valid.set(piece.valid, at);
+      at += piece.values.length;
+    }
+  }
+  if (type.name === 'utf8') {
+    const out: string[] = [];
+    for (const piece of pieces) for (const s of piece.values as string[]) out.push(s);
+    return makeColumn(type, out, valid);
+  }
+  if (type.name === 'dictionary') {
+    const shared = pieces[0]!.dictionary;
+    const same = pieces.every(function (piece) {
+      return piece.dictionary === shared;
+    });
+    if (!same) {
+      // Pieces computed separately have separate dictionaries: re-encode through strings.
+      const out: string[] = [];
+      for (const piece of pieces) for (const s of texts(piece)) out.push(s);
+      return stringColumn(type, out, valid);
+    }
+  }
+  const values = allocate(type, total);
+  let at = 0;
+  for (const piece of pieces) {
+    (values as unknown as { set(source: unknown, offset: number): void }).set(piece.values, at);
+    at += piece.values.length;
+  }
+  return makeColumn(type, values, valid, pieces[0]!.dictionary);
+}
+
+type Growable = Exclude<ColumnValues, string[]>;
+
+export function grow<A extends Growable>(array: A, size: number): A {
+  // Purpose: the same typed array, or a copy at least `size` long with doubled capacity
+  if (array.length >= size) return array;
+  const make = array.constructor as new (length: number) => A;
+  const next = new make(Math.max(size, array.length * 2, 16));
+  (next as unknown as { set(source: unknown): void }).set(array);
+  return next;
+}

@@ -18,6 +18,12 @@ export interface BackendOptions {
   // A list parameter's value is an array.
   readonly params: ReadonlyMap<string, LiteralValue | readonly LiteralValue[]>;
   readonly signal?: AbortSignal;
+  // Rows per chunk; a backend may ignore it. Default 65,536.
+  readonly chunkRows?: number;
+  // How long to work before returning to the event loop, in milliseconds. Default 8.
+  readonly sliceMs?: number;
+  // Called between time slices and once at the end.
+  readonly onProgress?: (progress: { rowsScanned: number; rowsTotal: number }) => void;
 }
 
 export interface ResultData {

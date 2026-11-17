@@ -27,7 +27,8 @@ out.toArray(); // { name: string | null; next: number | null }[]
 Milestone 1 (the core) is complete: every rule in the contract is implemented on
 the JS backend and pinned by a test. See [docs/MILESTONE-1.md](docs/MILESTONE-1.md)
 for the gate review and [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for numbers.
-Next is Milestone 2, the JS release: [docs/ROADMAP.md](docs/ROADMAP.md).
+Milestone 2, the JS release, is under way: execution is now chunked and
+cancellable. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What you can write
 
@@ -55,7 +56,9 @@ await top.execute(routes, { params: { minLen: 2, maxLen: 6, regions: ['APNIC'] }
 | Dates | `dateTrunc`, `extract` |
 | Aggregates | `count`, `countDistinct`, `sum`, `avg`, `min`, `max` |
 | Input | row objects, or one array per column (typed arrays are used without copying) |
+| Live tables | `table.append(rows)`, with an optional `retain: { rows }` rolling window; each run sees the table as it was when the run started |
 | Output | `toArray()` rows, `columns()`, `column(name)` |
+| Running | Chunked and cooperative: `signal` to cancel, `onProgress`, and `latest(plan)` so a new run cancels the previous one |
 
 ## Develop
 
@@ -70,6 +73,11 @@ bun run check     # typecheck + tests + size budget
 | `bun run typecheck` | `tsc --noEmit`, including the type-inference tests |
 | `bun run size` | Fails if the core exceeds 40 KB gzipped |
 | `bun run bench` | Group-by benchmark against plain JS and Arquero |
+| `bun run prep-bgp` | Download a RIPE RIS routing table dump and build `data/routes.bin` for the demo |
+| `bun run fake-routes` | Write a synthetic `data/routes.bin` (a million routes) for trying the demo offline |
+| `bun run demo` | The reference dashboard on http://localhost:3000; add `?live=sim` for a simulated live feed, `?live=off` for none |
+| `bun run scripts/inspect-routes.ts` | Run the dashboard's queries on `data/routes.bin` and time them |
+| `bun run scripts/check-dump.ts <dump.gz>` | Check the MRT reader gives the same answer however a dump is split |
 
 ## Documentation
 

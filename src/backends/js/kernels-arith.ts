@@ -28,7 +28,7 @@ function arithmetic(op: Op, wrapping: boolean): Kernel {
         if (valid && !valid[i]) continue;
         let r = op === 'add' ? a[i]! + b[i]! : op === 'sub' ? a[i]! - b[i]! : a[i]! * b[i]!;
         if (wrapping) r = unsigned ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r);
-        else if (r < lo || r > hi) overflow(op, type, `at row ${i}`);
+        else if (r < lo || r > hi) overflow(op, type, `${a[i]} and ${b[i]}`);
         out[i] = r;
       }
       return makeColumn(type, values, valid);
@@ -54,7 +54,7 @@ function arithmetic(op: Op, wrapping: boolean): Kernel {
       if (valid && !valid[i]) continue;
       // Products of two in-range integers stay exact enough to detect overflow.
       const r = op === 'add' ? a[i]! + b[i]! : op === 'sub' ? a[i]! - b[i]! : a[i]! * b[i]!;
-      if (range && (r < range[0] || r > range[1])) overflow(op, type, `at row ${i}`);
+      if (range && (r < range[0] || r > range[1])) overflow(op, type, `${a[i]} and ${b[i]}`);
       out[i] = r;
     }
     return makeColumn(type, values, valid);
@@ -73,7 +73,7 @@ function div(args: readonly Column[], type: DataType, n: number): Column {
     const b = bigs(y);
     for (let i = 0; i < n; i++) {
       if (valid && !valid[i]) continue;
-      if (b[i] === 0n) divideByZero('div', i);
+      if (b[i] === 0n) divideByZero('div');
       out[i] = Number(a[i]) / Number(b[i]);
     }
     return makeColumn(type, values, valid);
@@ -83,7 +83,7 @@ function div(args: readonly Column[], type: DataType, n: number): Column {
   const integers = isInt(x.type);
   for (let i = 0; i < n; i++) {
     if (valid && !valid[i]) continue;
-    if (integers && b[i] === 0) divideByZero('div', i);
+    if (integers && b[i] === 0) divideByZero('div');
     out[i] = a[i]! / b[i]!;
   }
   return makeColumn(type, values, valid);
@@ -104,9 +104,9 @@ function intDivOrMod(isMod: boolean): Kernel {
       const out = values as unknown as BigCells;
       for (let i = 0; i < n; i++) {
         if (valid && !valid[i]) continue;
-        if (b[i] === 0n) divideByZero(what, i);
+        if (b[i] === 0n) divideByZero(what);
         const r = isMod ? a[i]! % b[i]! : a[i]! / b[i]!;
-        if (r < lo || r > hi) overflow(what, type, `at row ${i}`);
+        if (r < lo || r > hi) overflow(what, type, `${a[i]} and ${b[i]}`);
         out[i] = r;
       }
       return makeColumn(type, values, valid);
@@ -117,10 +117,10 @@ function intDivOrMod(isMod: boolean): Kernel {
     const range = isInt(type) ? INT_RANGES[type.name] : null;
     for (let i = 0; i < n; i++) {
       if (valid && !valid[i]) continue;
-      if (range && b[i] === 0) divideByZero(what, i);
+      if (range && b[i] === 0) divideByZero(what);
       // Float mod is the IEEE remainder with the dividend's sign, which is JS's %.
       const r = isMod ? a[i]! % b[i]! : Math.trunc(a[i]! / b[i]!);
-      if (range && (r < range[0] || r > range[1])) overflow(what, type, `at row ${i}`);
+      if (range && (r < range[0] || r > range[1])) overflow(what, type, `${a[i]} and ${b[i]}`);
       out[i] = r;
     }
     return makeColumn(type, values, valid);
@@ -140,7 +140,7 @@ function negOrAbs(isAbs: boolean): Kernel {
       for (let i = 0; i < n; i++) {
         if (x.valid && !x.valid[i]) continue;
         const r = isAbs ? (a[i]! < 0n ? -a[i]! : a[i]!) : -a[i]!;
-        if (r < lo || r > hi) overflow(what, type, `at row ${i}`);
+        if (r < lo || r > hi) overflow(what, type, `${a[i]}`);
         out[i] = r;
       }
       return makeColumn(type, values, x.valid);
@@ -151,7 +151,7 @@ function negOrAbs(isAbs: boolean): Kernel {
     for (let i = 0; i < n; i++) {
       if (x.valid && !x.valid[i]) continue;
       const r = isAbs ? Math.abs(a[i]!) : -a[i]!;
-      if (range && (r < range[0] || r > range[1])) overflow(what, type, `at row ${i}`);
+      if (range && (r < range[0] || r > range[1])) overflow(what, type, `${a[i]}`);
       out[i] = r;
     }
     return makeColumn(type, values, x.valid);
@@ -192,13 +192,13 @@ function isNaNKernel(args: readonly Column[], _type: DataType, n: number): Colum
   return makeColumn(t.bool, out, x.valid);
 }
 
-function castNumber(v: number, to: DataType, row: number): number {
+function castNumber(v: number, to: DataType): number {
   // Purpose: C-CAST: a JS number to a number-backed type, truncating toward zero and checking range
   if (isFloat(to)) return v;
   const r = Math.trunc(v);
   const [lo, hi] = INT_RANGES[(to as DataType<keyof typeof INT_RANGES>).name];
   // The comparison is false for NaN, so NaN and infinities are rejected here too.
-  if (!(r >= lo && r <= hi)) overflow('cast', to, `at row ${row}: ${v} does not fit`);
+  if (!(r >= lo && r <= hi)) overflow('cast', to, `${v} does not fit`);
   return r;
 }
 
@@ -218,10 +218,10 @@ export function castColumn(x: Column, to: DataType, n: number): Column {
       if (fromBig) r = b[i]!;
       else {
         const v = Math.trunc(a[i]!);
-        if (!Number.isFinite(v)) overflow('cast', to, `at row ${i}: ${a[i]} does not fit`);
+        if (!Number.isFinite(v)) overflow('cast', to, `${a[i]} does not fit`);
         r = BigInt(v);
       }
-      if (r < lo || r > hi) overflow('cast', to, `at row ${i}: ${r} does not fit`);
+      if (r < lo || r > hi) overflow('cast', to, `${r} does not fit`);
       out[i] = r;
     }
     return makeColumn(to, values, valid);
@@ -234,7 +234,7 @@ export function castColumn(x: Column, to: DataType, n: number): Column {
       if (valid && !valid[i]) continue;
       const v = b[i]!;
       if (range && (v < BigInt(range[0]) || v > BigInt(range[1]))) {
-        overflow('cast', to, `at row ${i}: ${v} does not fit`);
+        overflow('cast', to, `${v} does not fit`);
       }
       out[i] = Number(v);
     }
@@ -243,7 +243,7 @@ export function castColumn(x: Column, to: DataType, n: number): Column {
   const a = nums(x);
   for (let i = 0; i < n; i++) {
     if (valid && !valid[i]) continue;
-    out[i] = castNumber(a[i]!, to, i);
+    out[i] = castNumber(a[i]!, to);
   }
   return makeColumn(to, values, valid);
 }

@@ -32,22 +32,28 @@ Complete. Gate review: `docs/MILESTONE-1.md`.
 
 ## Milestone 2: JS release
 
-All ready: Milestone 1 is complete. T-201 and T-203 touch `src/backends/js/exec.ts`
-and `src/optimize.ts` respectively and can run in parallel; T-205 and T-208 are independent.
+T-201, T-202, T-204, T-205, T-206, T-215 and T-216 are done. Ready now: T-217 (needs a real `data/routes.bin` and a browser), T-203, T-207, T-208, T-218.
+T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`; the rest are independent.
 
 | ID | Task | Needs |
 | --- | --- | --- |
-| T-201 | Chunked, resumable execution: `step()` per 64k-row chunk, yield about every 8 ms, abort within one time slice, progress callback | T-112 |
-| T-202 | `latest(plan)` helper: a new run aborts the one in flight | T-201 |
+| T-201 | Chunked, resumable execution: 64k-row chunks, yield about every 8 ms, abort within one time slice, progress callback. **Done.** | T-112 |
+| T-202 | `latest(plan)` helper: a new run aborts the one in flight. **Done.** | T-201 |
 | T-203 | Optimizer passes: constant folding, filter and project fusion, projection pushdown, limit pushdown; golden suite runs with passes on and off | T-112 |
-| T-204 | Append-only live tables: `table.append(rows)`, rolling `retain` window, a run sees the table as of its start | T-201 |
-| T-205 | `scripts/prep-bgp.ts`: download one RouteViews snapshot and write rows matching the reference schema | T-112 |
-| T-206 | Reference dashboard under `demo/`: four linked charts, controls as parameters, live panel on RIPE RIS Live | T-202, T-204, T-205 |
+| T-204 | Append-only live tables: `table.append(rows)`, rolling `retain` window, a run sees the table as of its start. **Done.** | T-201 |
+| T-205 | `scripts/prep-bgp.ts`: download one RIPE RIS snapshot and write the routes file matching the reference schema. **Done; not yet run against a real dump.** | T-112 |
+| T-206 | Reference dashboard under `demo/`: four linked charts, controls as parameters, live panel on RIPE RIS Live. **Done** (`bun run demo`); checked in headless Chrome on synthetic data with the simulated feed, not yet on real data or the real feed. | T-202, T-204, T-205 |
 | T-207 | Benchmark harness under `bench/`: JS executor vs Arquero on the reference queries; publish results | T-205 |
 | T-208 | ESLint rule flagging `&&`, `\|\|`, `!` and `===` in accessor callbacks; API reference docs | T-112 |
 | T-209 | Build and publish: ESM output with `.d.ts`, npm alpha | T-206, T-208 |
-| T-210 | Measure the reference queries in Chrome and Firefox, not only Bun | T-207 |
+| T-210 | Measure the reference queries in Chrome and Firefox, not only Bun (the dashboard part is T-217) | T-207 |
 | T-211 | Allow `utf8` and `dictionary` expressions to be mixed in one operation | T-112 |
+| T-215 | Run `bun run prep-bgp` against a real RIS dump; record row count, skipped prefixes and timings in `docs/BENCHMARKS.md`. **Done** (`docs/BENCHMARKS.md`). | T-205 |
+| T-216 | The first real run stopped at ~930k prefixes with "Path attribute runs past the entry"; a second run of the same dump found no bad entries. **Closed:** `scripts/check-dump.ts` gave identical results under four different splits of the same dump, with no bad entries; the first failure was most likely damage in that one download. | T-205 |
+| T-217 | Run `bun run demo` on a real `data/routes.bin` with the real RIS Live feed, in Chrome and Firefox. Record per-chart times for load, a brush drag, a region click and a search in `docs/BENCHMARKS.md`; check against the 200 ms target in `docs/ROADMAP.md` | T-206 |
+| T-218 | One interaction filters the same million rows five times, once per chart. Share the work: evaluate each filter term once per interaction and give each chart the combination it needs (all terms but its own) | T-206 |
+| T-219 | `lower`/`upper` on a dictionary column return `utf8`, so the strings are materialised per row. Keep dictionary encoding through them (entries must be re-deduplicated: "A" and "a" both lower to "a"). The shortcut in D-045 covers the dashboard's search, so this only matters when the result is stored or grouped | T-211 |
+| T-212 | Sort directly over a large table copies every needed column once before sorting; sort a selection over the source instead | T-201 |
 
 ## Spike
 

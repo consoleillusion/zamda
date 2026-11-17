@@ -349,3 +349,60 @@ describe('hash paths agree with the simple paths', () => {
     }
   });
 });
+
+describe('C-GROUP-ORDER: grouping on several integer and category columns', () => {
+  test('matches a string-keyed reference at scale, with nulls, negatives and every int-like type', async () => {
+    const S = schema({ a: t.int8, b: t.uint32, c: t.dictionary, d: t.int32, e: t.date32, v: t.int32 });
+    const rows = Array.from({ length: 30000 }, (_, i) => ({
+      a: i % 11 === 0 ? null : (i % 7) - 3,
+      b: i % 13 === 0 ? null : ((i * 2654435761) >>> 0) % 5 === 0 ? 4294967295 : (i * 31) % 97,
+      c: i % 17 === 0 ? null : `k${(i * 7) % 23}`,
+      d: (i % 5) - 2,
+      e: new Date(Date.UTC(2026, 0, 1 + (i % 3))),
+      v: i,
+    }));
+    const keyOf = (r: (typeof rows)[number]) => JSON.stringify([r.a, r.b, r.c, r.d, r.e.getTime()]);
+    const expected = new Map<string, { n: number; sum: number }>();
+    for (const r of rows) {
+      const g = expected.get(keyOf(r)) ?? { n: 0, sum: 0 };
+      g.n++;
+      g.sum += r.v;
+      expected.set(keyOf(r), g);
+    }
+    const three = await run(S, rows, p => p.groupBy(c => ({ a: c.a, b: c.b, c: c.c })).agg(() => ({ n: count() })));
+    const five = await run(S, rows, p =>
+      p.groupBy(c => ({ a: c.a, b: c.b, c: c.c, d: c.d, e: c.e })).agg(c => ({ n: count(), sum: c.v.sum() })),
+    );
+    expect(five.length).toBe(expected.size);
+    const order = [...expected.keys()];
+    five.forEach((r, i) => {
+      const key = JSON.stringify([r.a, r.b, r.c, r.d, r.e!.getTime()]);
+      expect(key).toBe(order[i]!);
+      expect([r.n, Number(r.sum)]).toEqual([expected.get(key)!.n, expected.get(key)!.sum]);
+    });
+    const threeKeys = new Set(rows.map(r => JSON.stringify([r.a, r.b, r.c])));
+    expect(three.length).toBe(threeKeys.size);
+    expect(three.map(r => JSON.stringify([r.a, r.b, r.c]))).toEqual([...threeKeys]);
+  });
+
+  test('two-column grouping with nulls in either column', async () => {
+    const S = schema({ x: t.uint32, y: t.dictionary });
+    const rows = [
+      { x: 1, y: 'a' },
+      { x: null, y: 'a' },
+      { x: 1, y: null },
+      { x: null, y: null },
+      { x: 1, y: 'a' },
+      { x: null, y: null },
+      { x: 0, y: 'a' },
+    ];
+    const out = await run(S, rows, p => p.groupBy(c => ({ x: c.x, y: c.y })).agg(() => ({ n: count() })));
+    expect(out).toEqual([
+      { x: 1, y: 'a', n: 2 },
+      { x: null, y: 'a', n: 1 },
+      { x: 1, y: null, n: 1 },
+      { x: null, y: null, n: 2 },
+      { x: 0, y: 'a', n: 1 },
+    ]);
+  });
+});

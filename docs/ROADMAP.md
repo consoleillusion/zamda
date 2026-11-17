@@ -9,7 +9,7 @@ are TypeScript only and produce a usable library on their own.
                                         +--fail--> stop at 2; zamda is a JS library
 ```
 
-**Current position:** Milestone 1 is complete (`docs/MILESTONE-1.md`). Milestone 2 is next.
+**Current position:** Milestone 2. Chunked execution (T-201), `latest()` (T-202), live tables (T-204) and the dataset script (T-205) are done. The dashboard (T-206) is built and runs on synthetic data; next is measuring it on real data in real browsers (T-217).
 
 ## Milestones
 
@@ -50,9 +50,9 @@ records its cost for the record.
 
 The acceptance test for Milestone 2 and the benchmark for the spike.
 
-- **Data:** one snapshot of the global IPv4 BGP routing table from a public
-  collector (RouteViews), about a million routes. The preparation script
-  downloads it; no data is redistributed with zamda.
+- **Data:** one snapshot of the global IPv4 BGP routing table from RIPE RIS
+  (collector rrc00), about a million routes. `bun run prep-bgp` downloads it
+  and writes `data/routes.bin`; no data is redistributed with zamda.
 - **Columns:** `prefix_addr` uint32, `prefix_len` uint8, `origin_as` uint32,
   `as_name` dictionary, `path_len` uint8, `rir` dictionary.
 - **Charts:** top 20 networks by route count; prefix-length histogram;
@@ -61,7 +61,8 @@ The acceptance test for Milestone 2 and the benchmark for the spike.
   search (`contains`), address range. Every control is a plan parameter.
 - **One interaction** re-runs the three charts other than the one being touched.
 - **Live panel:** a rolling-window table fed by a public stream of BGP updates
-  (RIPE RIS Live), showing updates per minute and the most active networks.
+  (RIPE RIS Live), showing announcements and withdrawals per 5 seconds over the
+  last 5 minutes and the most active networks. `?live=sim` uses a simulated feed.
 
 ## Non-goals for v1
 

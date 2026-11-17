@@ -17,7 +17,10 @@
     "typecheck": "tsc --noEmit",
     "size": "bun run scripts/size.ts",
     "check": "bun run typecheck && bun test && bun run size",
-    "bench": "bun run bench/groupby.ts"
+    "bench": "bun run bench/groupby.ts",
+    "prep-bgp": "bun run scripts/prep-bgp.ts",
+    "demo": "bun demo/server.ts",
+    "fake-routes": "bun scripts/fake-routes.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

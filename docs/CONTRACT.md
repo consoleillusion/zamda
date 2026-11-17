@@ -90,6 +90,8 @@ and column. `utf8` and `dictionary` behave identically; they differ only in stor
 
 | ID | Rule |
 | --- | --- |
+| C-LIVE | `append` adds rows at the end of a table. A run sees the table exactly as it stood when the run started: rows appended, or dropped by the retain window, during the run do not affect it. A table built by appends gives the same results as one built from the same rows at once. With `retain: { rows: N }` the table holds exactly the most recent `N` rows. An `append` with a bad value is rejected whole and leaves the table unchanged. |
+| C-CHUNK | A result never depends on how execution is chunked or sliced. An aborted run rejects with `AbortError` and leaves the table unchanged. A run that raises does so whatever the chunk size. |
 | C-BETWEEN | `between(low, high)` is inclusive at both ends and equals `gte(low).and(lte(high))`. |
 | C-DETERMINISM | Every registry function is deterministic. Non-deterministic functions are excluded from the MVP. |
 

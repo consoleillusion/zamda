@@ -21,6 +21,89 @@ noticeably the range is shown.
 
 Q4 was measured in one of the three runs.
 
+## After chunked execution (task T-201)
+
+The same queries, with execution now chunked and yielding to the event loop
+about every 8 ms. One run:
+
+| Query | Before | After |
+| --- | --- | --- |
+| Q1 count per network | 19 to 20 | 22.5 |
+| Q2 count per prefix length | 4 to 5 | 4.1 |
+| Q3 filter, count and distinct per region | 29 to 41 | 34.1 |
+| Q4 top 20 networks | 21 | 29.0 |
+
+Chunking costs a few milliseconds on the longer queries: each pause is a trip
+through the event loop, and the sort now gathers its input before sorting. In
+exchange a run can be cancelled within a time slice and the page stays responsive.
+
+## Reference dataset (2026-11-18)
+
+Built by `bun run prep-bgp --date 20261116` from RIPE RIS rrc00, dump
+`bview.20261116.0000.gz`:
+
+| Measure | Value |
+| --- | --- |
+| IPv4 prefixes in the dump | 1,165,516 |
+| Peers | 109 |
+| Routes written | 1,165,315 |
+| Skipped: no single origin AS | 201 |
+| Path lengths over 255 (stored as 255) | 2 |
+| Decompressed dump read | about 3.8 GB |
+| Routes file | 19.7 MB |
+| Total time, including the download | 171 s |
+
+## Real routing data (2026-11-18)
+
+`scripts/inspect-routes.ts` on the reference dataset (1,165,315 routes), run on
+the owner's machine, median of five runs:
+
+| Query | Time |
+| --- | --- |
+| Load `data/routes.bin` into a table | 114 ms (once) |
+| Top 10 networks by route count, grouped by network and name | 193.6 ms (before D-043) |
+| Prefix-length histogram | 3.3 ms |
+| Path-length histogram | 2.5 ms |
+| Routes and distinct networks by region | 17.4 ms |
+| Longest paths (30 or more), top 5 | 1.9 ms |
+
+The top-10 query took the string-keyed path for two-column grouping. On a
+synthetic dataset of the same shape on the development machine (about six
+times slower than the owner's), that query went from 1,301 ms to 63 to 90 ms
+after D-043. Re-run `scripts/inspect-routes.ts` to get the real figure.
+
+## The reference dashboard, first measurements (sandbox only)
+
+Measured in headless Chrome and in Bun in the build sandbox, which is about six
+times slower than the owner's machine, on the synthetic routes file
+(`bun run fake-routes`: a million routes, 75,000 networks) with the simulated
+live feed. Task T-217 replaces these with real data on real hardware.
+
+Each chart alone, Bun, median of 9 runs, no selection / prefix /22–/24 /
+region ARIN plus name search "cloud":
+
+| Chart | Plan | ms |
+| --- | --- | --- |
+| Totals | filter, count and distinct networks | 37 / 39 / 20 |
+| Top 20 networks | filter, group by (origin, name), top 20 | 62 / 70 / 31 |
+| Prefix length | filter, group by length | 14 / 14 / 27 |
+| Path length | filter, group by length | 14 / 20 / 22 |
+| Regions | filter, group by region, count and distinct networks | 39 / 42 / 22 |
+
+The evaluation shortcuts in D-045 took these from 60 to 150 ms each. The name
+search alone went from 44 ms to 10 ms, and a switched-off filter now costs
+almost nothing.
+
+In Chrome the five charts run at once and interleave in 8 ms slices, so each
+chart's time is close to the whole interaction's: 250 to 350 ms per
+interaction here, down from 550 to 800 ms before D-045. Divided by the
+sandbox's slowness that is roughly 40 to 60 ms on the owner's machine, inside
+the 200 ms target, but that is an estimate until T-217 measures it. The live
+panel's three queries take 2 to 6 ms per second.
+
+What remains is aggregation, not filtering: the two distinct counts and the
+two-key group. Sharing one filter pass across the five charts is T-218.
+
 ## What the numbers say
 
 - zamda's JS backend beats Arquero on every query, by 3.5x to 15x.

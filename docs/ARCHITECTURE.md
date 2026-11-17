@@ -76,6 +76,7 @@ IR; any backend that honours the contract can execute it.
 | `src/backend.ts` | `Backend`, `Table`, `ResultData` interfaces | column, ir, schema |
 | `src/plan.ts` | `Plan.execute`, `explain` | backend, expr, ir, result, schema |
 | `src/result.ts` | `Result` | backend, column, schema |
+| `src/latest.ts` | `latest()`: a new run aborts the previous one | plan (types only) |
 | `src/backends/js/` | JS reference executor | core modules only |
 | `src/index.ts` | Public API | everything |
 
@@ -145,6 +146,8 @@ Substrait mapping.
 
 ## JS backend internals
 
+- `index.ts` holds `JsTable`: a list of immutable segments, one per `append`,
+  plus the optional retain window. A run captures the segment list at its start.
 - `load.ts` turns rows, or one array per column, into checked columns.
 - A column is a typed array (or `string[]`) plus an optional validity array with
   one byte per row. A dictionary column is integer codes plus a list of unique strings.
@@ -154,10 +157,49 @@ Substrait mapping.
 - `sort.ts` sorts row indexes with a total-order comparator, and does top-k with a heap.
 - `aggregate.ts` is the hash group-by: assign group ids in first-occurrence
   order, then one loop per aggregate.
-- `exec.ts` walks the node table. `filter` and `sort` output a selection of row
-  indexes over their input, and columns nothing reads are never copied. Today
-  each node processes the whole table at once; Milestone 2 makes it chunked and
-  resumable (task T-201).
+- `exec.ts` runs a plan as a generator in resumable steps. It cuts the node
+  chain into phases at the blocking operators and reads each phase's source in
+  64k-row chunks:
+
+  ```
+  table segments --chunks--> [filter | project | limit]* --> aggregate
+        --chunks--> [filter | project | limit]* --> sort
+        --chunks--> [filter | project | limit]* --> result
+  ```
+
+  The driver resumes the generator until about 8 ms have passed, then returns to
+  the event loop and checks the abort signal.
+- `filter` and `sort` output a selection of row indexes over their input, and
+  columns nothing reads are never copied.
+- `aggregate.ts` keeps its group table, accumulators and key values across
+  chunks. Dictionary codes are mapped onto one canonical dictionary per key,
+  because chunks computed separately have separate dictionaries.
+- `sort.ts` sorts runs natively and merges them in bounded steps; top-k uses a heap.
+
+## The reference dashboard (demo/, not part of the package)
+
+```
+demo/server.ts     Bun.serve: bundles index.html and serves data/routes.bin
+demo/index.html    page layout; demo/style.css
+demo/dashboard.ts  the linked charts' plans, parameters and selection logic (tested)
+demo/live.ts       RIS Live parsing, the live table and its plans, simulated feed (tested)
+demo/charts.ts     SVG drawing: bars, brushable histogram, region toggles, activity
+demo/main.ts       wiring: load, run charts through latest(), feed the live panel
+```
+
+## Scripts (not part of the package)
+
+```
+scripts/size.ts           size gate for `bun run size`
+scripts/prep-bgp.ts       builds data/routes.bin from a RIPE RIS dump
+scripts/inspect-routes.ts runs the dashboard queries on data/routes.bin
+scripts/fake-routes.ts    writes a synthetic data/routes.bin for offline use
+scripts/check-dump.ts     re-reads a dump with random splits; all passes must agree
+scripts/bgp/mrt.ts        streaming MRT (RFC 6396) reader: TABLE_DUMP_V2 IPv4 RIBs
+scripts/bgp/routes.ts     one route per prefix (shortest path, lowest peer)
+scripts/bgp/registry.ts   asn.txt names and NRO delegation stats
+scripts/bgp/file.ts       the routes file format and its loader into a zamda table
+```
 
 ## Planned layout for the WASM backend
 
@@ -185,8 +227,9 @@ spike/                    Throwaway spike code; never imported by src/
 
 | Kind | Where | Purpose |
 | --- | --- | --- |
-| Golden | `tests/golden/` | One block per contract rule; runs on every backend |
+| Golden | `tests/golden/` | One block per contract rule; each plan runs at several chunk sizes and must give identical results; runs on every backend |
 | Slice | `tests/slice.test.ts` | End-to-end API behaviour and guards |
+| Execution | `tests/execution.test.ts` | Yielding, cancellation, progress, early termination, `latest()` |
 | Types | `tests/types/inference.ts` | TypeScript inference, checked by `tsc` |
 | Registry | `tests/registry.test.ts` | Structural rules on the function registry |
 | Cross-backend property tests | later, with the WASM backend | Random plans must match the JS backend |
