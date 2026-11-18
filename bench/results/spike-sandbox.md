@@ -12,28 +12,38 @@
 
 | Step | zamda JS (ms) | native (ms) |
 | --- | ---: | ---: |
-| load from row objects | 20.9 | 10.4 |
-| load from columns (strings encoded) |  | 9.82 |
-| Q1 routes per network | 10.7 | 1.96 |
-| Q3 routes and distinct networks per region | 4.20 | 1.17 |
-| Q4 top 20 networks | 6.38 | 1.93 |
-| Q7 full sort, radix | 14.4 | 1.60 |
-| Q7 full sort, pdqsort |  | 2.02 |
+| load from row objects | 26.0 | 20.6 |
+| load from columns (strings encoded) |  | 15.0 |
+| Q1 routes per network | 10.1 | 2.66 |
+| Q3 routes and distinct networks per region | 4.04 | 1.69 |
+| Q4 top 20 networks | 6.85 | 2.75 |
+| Q7 full sort, radix | 20.3 | 2.61 |
+| Q7 full sort, pdqsort |  | 2.94 |
 
-**native:** gate queries 35.6 ms in JS against 6.65 ms (5.4x); with row loading 56.5 against 17.0 ms (**3.3x**).
+| Dashboard interaction (four charts) | zamda JS (ms) | native (ms) |
+| --- | ---: | ---: |
+| nothing selected | 29.3 | 5.64 (5.2x) |
+| prefix /22-/24, region ARIN, name "cloud" | 22.7 | 1.48 (15.3x) |
+
+**native:** gate queries 41.2 ms in JS against 9.71 ms (4.2x); with row loading 67.3 against 30.3 ms (**2.2x**).
 
 ## 1,000,000 rows
 
 | Step | zamda JS (ms) | native (ms) |
 | --- | ---: | ---: |
-| load from row objects | 176 | 61.4 |
-| load from columns (strings encoded) |  | 52.5 |
-| Q1 routes per network | 63.0 | 11.3 |
-| Q3 routes and distinct networks per region | 37.4 | 10.4 |
-| Q4 top 20 networks | 27.9 | 16.0 |
-| Q7 full sort, radix | 159 | 18.9 |
-| Q7 full sort, pdqsort |  | 27.4 |
+| load from row objects | 192 | 60.4 |
+| load from columns (strings encoded) |  | 58.8 |
+| Q1 routes per network | 41.2 | 10.5 |
+| Q3 routes and distinct networks per region | 24.8 | 10.7 |
+| Q4 top 20 networks | 23.5 | 16.5 |
+| Q7 full sort, radix | 217 | 19.9 |
+| Q7 full sort, pdqsort |  | 32.9 |
 
-**native:** gate queries 288 ms in JS against 56.6 ms (5.1x); with row loading 464 against 118 ms (**3.9x**).
+| Dashboard interaction (four charts) | zamda JS (ms) | native (ms) |
+| --- | ---: | ---: |
+| nothing selected | 93.8 | 27.9 (3.4x) |
+| prefix /22-/24, region ARIN, name "cloud" | 104 | 6.80 (15.2x) |
+
+**native:** gate queries 307 ms in JS against 57.6 ms (5.3x); with row loading 499 against 118 ms (**4.2x**).
 
 The gate needs 3x or more at 1,000,000 rows with loading included, and a win from 100,000 rows. Every spike answer was checked against zamda's before timing.

@@ -285,6 +285,24 @@ At 100,000 rows with loading: 3.3x (Bun), 3.2x (Chrome), 2.6x (Firefox). WASM wa
 - **Not measured:** the filter path (Q5), so the dashboard's 50 ms target is unconfirmed; sizes
   below 100,000 rows; Firefox timings are rounded to whole milliseconds.
 
+## The dashboard on WASM kernels, native upper bound (S-302)
+
+Same method as the section above: the Rust kernels built natively, sandbox Xeon, synthetic
+data, every chart checked against zamda's before timing. One interaction is the four charts
+together, with the copy of each result out of module memory included and the top-20 pick in JS
+left out (zamda's number leaves it out too). `bench/results/spike-sandbox.md`.
+
+| One interaction | 100,000 rows | 1,000,000 rows |
+| --- | ---: | ---: |
+| nothing selected: zamda JS | 29.3 ms | 93.8 ms |
+| nothing selected: Rust native | 5.6 ms (5.2x) | 27.9 ms (3.4x) |
+| prefix /22-/24, ARIN, "cloud": zamda JS | 22.7 ms | 104 ms |
+| prefix /22-/24, ARIN, "cloud": Rust native | 1.5 ms (15x) | 6.8 ms (15x) |
+
+The no-selection case is the slow one for both engines: every row passes, so the per-network
+count hashes a million rows. The WASM target is 50 ms per interaction. Measure on the owner's
+machine before reading anything into the margin.
+
 ## What the numbers say
 
 - zamda's JS backend beats Arquero on every query, by 3.5x to 15x.

@@ -70,6 +70,7 @@ T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`
 | ID | Task | Needs |
 | --- | --- | --- |
 | S-301 | Under `spike/`: Rust/WASM prototypes of group-by and sort, measured against the spike gate with JS row loading included. **Done, gate met** (D-053, D-054): 4.2x Bun, 3.4x Chrome, 3.5x Firefox at 1M rows, 42.9 KB module, ahead at 100k (`bench/results/spike-my-laptop.md`). Not done and not needed for the gate: arrow-rs and DataFusion comparisons (the hand-written kernels fit the size limit by a wide margin). Throwaway code. | T-207 |
+| S-302 | The dashboard on WASM, first slice (D-056): a per-row failed-controls mask and the four chart kernels (per-network counts, prefix and path length histograms, routes and distinct networks per region), each checked against zamda's answers for two selections. **Built and measured natively in the sandbox only** (1M rows: 94 to 28 ms with nothing selected, 104 to 6.8 ms with selections); the WASM numbers and the 50 ms target check need `bun run spike:build` and `bun run spike` on the owner's machine, and Chrome and Firefox through `bun run spike:browser`. Not covered: the live panel, top-20 selection in JS, parameter binding through the IR. | S-301 |
 
 ## Milestone 3: WASM engine
 

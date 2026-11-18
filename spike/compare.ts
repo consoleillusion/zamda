@@ -5,7 +5,9 @@
 import { measure, once } from '../bench/reference/measure';
 import type { Timing } from '../bench/reference/measure';
 import { QUERIES, canonical, key, orderedSummary } from '../bench/reference/queries';
-import { sample, toRows, zamdaFromRows } from '../bench/reference/data';
+import { sample, toRows, zamdaFromColumns, zamdaFromRows } from '../bench/reference/data';
+import { EMPTY_SELECTION, compilePlans, paramsFor } from '../demo/dashboard';
+import type { Selection } from '../demo/dashboard';
 import type { RouteArrays } from '../bench/reference/data';
 import { Spike } from './engine';
 import type { RawKernels } from './engine';
@@ -26,8 +28,15 @@ export interface EngineResult {
   readonly q7Pdq: Timing;
 }
 
+export interface DashboardRow {
+  readonly label: string;
+  readonly zamda: Timing;
+  readonly engines: readonly { readonly name: string; readonly timing: Timing }[];
+}
+
 export interface SpikeSize {
   readonly rows: number;
+  readonly dashboard: readonly DashboardRow[];
   readonly zamda: { readonly loadRows: Timing; readonly q1: Timing; readonly q3: Timing; readonly q4: Timing; readonly q7: Timing };
   readonly engines: readonly EngineResult[];
 }
@@ -55,6 +64,69 @@ function spikeSummaries(spike: Spike): Record<(typeof GATE_IDS)[number], string>
   const radix = orderedSummary(q7.prefix_len, q7.prefix_addr);
   if (radix !== orderedSummary(q7Pdq.prefix_len, q7Pdq.prefix_addr)) throw new Error('the two sorts disagree');
   return { Q1: canonical(q1Lines, false), Q3: canonical(q3Lines, false), Q4: canonical(q4Lines, true), Q7: radix };
+}
+
+const SCENARIOS: readonly { label: string; selection: Selection }[] = [
+  { label: 'nothing selected', selection: EMPTY_SELECTION },
+  { label: 'prefix /22-/24, region ARIN, name "cloud"', selection: { ...EMPTY_SELECTION, prefixLen: [22, 24], regions: ['ARIN'], search: 'cloud' } },
+];
+
+const CHARTS = ['networks', 'prefixLen', 'pathLen', 'regions'] as const;
+
+function dashboardSummaries(spike: Spike, selection: Selection): Record<(typeof CHARTS)[number], string> {
+  // Purpose: the four charts' answers from the spike, in the same canonical form as zamda's
+  const d = spike.dashboard(selection);
+  const lines: Record<(typeof CHARTS)[number], string[]> = { networks: [], prefixLen: [], pathLen: [], regions: [] };
+  for (let j = 0; j < d.networks.origin_as.length; j++) {
+    const code = d.networks.name[j]!;
+    lines.networks.push(`${key(d.networks.origin_as[j], code === 0 ? null : spike.nameList[code - 1])}=${d.networks.n[j]}`);
+  }
+  for (let v = 0; v < 256; v++) {
+    if (d.prefixLen[v] !== 0) lines.prefixLen.push(`${v}=${d.prefixLen[v]}`);
+    if (d.pathLen[v] !== 0) lines.pathLen.push(`${v}=${d.pathLen[v]}`);
+    if (d.regions.routes[v] !== 0) lines.regions.push(`${key(v === 0 ? null : spike.rirList[v - 1])}=${d.regions.routes[v]},${d.regions.networks[v]}`);
+  }
+  return { networks: canonical(lines.networks, false), prefixLen: canonical(lines.prefixLen, false), pathLen: canonical(lines.pathLen, false), regions: canonical(lines.regions, false) };
+}
+
+async function zamdaDashboard(table: ReturnType<typeof zamdaFromColumns>, plans: ReturnType<typeof compilePlans>, selection: Selection): Promise<unknown[]> {
+  // Purpose: start the four charts the way the dashboard does, together
+  return Promise.all(CHARTS.map(id => (plans[id] as { execute(t: typeof table, o: unknown): Promise<unknown> }).execute(table, { params: paramsFor(selection, id) })));
+}
+
+export async function compareDashboard(arrays: RouteArrays, engines: readonly EngineSpec[], runs: number): Promise<DashboardRow[]> {
+  // Purpose: one dashboard interaction on zamda JS and on each spike engine, after checking all four charts agree
+  const table = zamdaFromColumns(arrays);
+  const plans = compilePlans();
+  const spikes = engines.map(e => {
+    // Purpose: load the table into this engine
+    const spike = new Spike(e.kernels);
+    spike.loadColumns(arrays);
+    return spike;
+  });
+  const rows: DashboardRow[] = [];
+  for (const { label, selection } of SCENARIOS) {
+    const expected = await zamdaDashboard(table, plans, selection);
+    const z = {
+      networks: canonical((expected[0] as { toArray(): Record<string, unknown>[] }).toArray().map(r => `${key(r.origin_as, r.as_name)}=${r.routes}`), false),
+      prefixLen: canonical((expected[1] as { toArray(): Record<string, unknown>[] }).toArray().map(r => `${r.prefix_len}=${r.routes}`), false),
+      pathLen: canonical((expected[2] as { toArray(): Record<string, unknown>[] }).toArray().map(r => `${r.path_len}=${r.routes}`), false),
+      regions: canonical((expected[3] as { toArray(): Record<string, unknown>[] }).toArray().map(r => `${key(r.rir)}=${r.routes},${r.networks}`), false),
+    };
+    for (let e = 0; e < engines.length; e++) {
+      const got = dashboardSummaries(spikes[e]!, selection);
+      for (const id of CHARTS) {
+        if (got[id] !== z[id]) throw new Error(`${engines[e]!.name} dashboard (${label}), chart ${id}: differs from zamda\nzamda: ${z[id].slice(0, 200)}\nspike: ${got[id].slice(0, 200)}`);
+      }
+    }
+    rows.push({
+      label,
+      zamda: await measure(() => zamdaDashboard(table, plans, selection), runs),
+      engines: await Promise.all(engines.map(async (e, i) => ({ name: e.name, timing: await measure(() => spikes[i]!.dashboard(selection), runs) }))),
+    });
+  }
+  for (const spike of spikes) spike.release();
+  return rows;
 }
 
 export async function compareSize(arrays: RouteArrays, engines: readonly EngineSpec[], runs: number): Promise<SpikeSize> {
@@ -88,6 +160,7 @@ export async function compareSize(arrays: RouteArrays, engines: readonly EngineS
   }
   return {
     rows: arrays.rowCount,
+    dashboard: await compareDashboard(arrays, engines, runs),
     zamda: { loadRows: await once(() => zamdaFromRows(rows), runs), q1: await zTime('Q1'), q3: await zTime('Q3'), q4: await zTime('Q4'), q7: await zTime('Q7') },
     engines: results,
   };
@@ -118,6 +191,9 @@ export function spikeMarkdown(meta: Record<string, string | number>, sizes: read
     row('Q4 top 20 networks', size.zamda.q4.median, e => e.q4.median);
     row('Q7 full sort, radix', size.zamda.q7.median, e => e.q7Radix.median);
     row('Q7 full sort, pdqsort', null, e => e.q7Pdq.median);
+    lines.push('');
+    lines.push('| Dashboard interaction (four charts) | zamda JS (ms) | ' + size.engines.map(e => `${e.name} (ms)`).join(' | ') + ' |', '| --- | ---: |' + size.engines.map(() => ' ---: |').join(''));
+    for (const d of size.dashboard) lines.push(`| ${d.label} | ${f(d.zamda.median)} | ` + d.engines.map(e => `${f(e.timing.median)} (${(d.zamda.median / e.timing.median).toFixed(1)}x)`).join(' | ') + ' |');
     lines.push('');
     for (const e of size.engines) {
       const t = gateTotals(size, e);

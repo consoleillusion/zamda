@@ -14,6 +14,10 @@ export function loadNative(path: string): RawKernels {
     zs_q1: { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.u64 },
     zs_q3: { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
     zs_q4: { args: [FFIType.u64, FFIType.ptr, FFIType.u64, FFIType.ptr, FFIType.ptr], returns: FFIType.u64 },
+    zs_mask: { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u64, FFIType.ptr], returns: FFIType.void },
+    zs_c_networks: { args: [FFIType.u64, FFIType.ptr, FFIType.u8, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.u64 },
+    zs_c_hist: { args: [FFIType.u64, FFIType.ptr, FFIType.u8, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
+    zs_c_regions: { args: [FFIType.u64, FFIType.ptr, FFIType.u8, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
     zs_q7: { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u32], returns: FFIType.void },
   });
   // Pointers travel as numbers. The ones the library hands out stay below 2^53 on 64-bit desktop systems.
@@ -27,6 +31,10 @@ export function loadNative(path: string): RawKernels {
     q3: (n, a, b, c, d) => void s.zs_q3!(n, asPtr(a), asPtr(b), asPtr(c), asPtr(d)),
     q4: (n, a, l, c, d) => Number(s.zs_q4!(n, asPtr(a), l, asPtr(c), asPtr(d))),
     q7: (n, a, b, c, d, r) => void s.zs_q7!(n, asPtr(a), asPtr(b), asPtr(c), asPtr(d), r),
+    mask: (n, a, b, c, d, f, g, h, i, j, k) => void s.zs_mask!(n, asPtr(a), asPtr(b), asPtr(c), asPtr(d), asPtr(f), asPtr(g), asPtr(h), asPtr(i), j, asPtr(k)),
+    cNetworks: (n, m, k, o, nm, a, b, c) => Number(s.zs_c_networks!(n, asPtr(m), k, asPtr(o), asPtr(nm), asPtr(a), asPtr(b), asPtr(c))),
+    cHist: (n, m, k, col, out) => void s.zs_c_hist!(n, asPtr(m), k, asPtr(col), asPtr(out)),
+    cRegions: (n, m, k, r, o, a, b) => void s.zs_c_regions!(n, asPtr(m), k, asPtr(r), asPtr(o), asPtr(a), asPtr(b)),
     overflowed: () => Number(s.zs_overflowed!()),
   };
 }
