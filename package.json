@@ -20,7 +20,14 @@
     "bench": "bun run bench/groupby.ts",
     "prep-bgp": "bun run scripts/prep-bgp.ts",
     "demo": "bun demo/server.ts",
-    "fake-routes": "bun scripts/fake-routes.ts"
+    "fake-routes": "bun scripts/fake-routes.ts",
+    "bench:ref": "bun bench/reference/run.ts",
+    "bench:compare": "bun bench/reference/compare-bun.ts",
+    "bench:browser": "bun bench/reference/browser/server.ts",
+    "spike:build": "cargo build --release --manifest-path spike/Cargo.toml --target wasm32-unknown-unknown && cargo build --release --manifest-path spike/Cargo.toml",
+    "spike": "bun spike/run.ts",
+    "spike:browser": "bun spike/browser/server.ts",
+    "spike:test": "cargo test --release --manifest-path spike/Cargo.toml"
   },
   "devDependencies": {
     "@types/bun": "latest",

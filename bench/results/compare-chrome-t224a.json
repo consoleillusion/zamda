@@ -1,0 +1,177 @@
+{
+  "runtime": "Chrome/153.0.0.0",
+  "rows": 1000000,
+  "queries": [
+    {
+      "id": "Q1",
+      "label": "routes per network (group by origin and name)",
+      "zamda": {
+        "median": 66.20000000001164,
+        "min": 43.69999999999709,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 44.69999999999709,
+        "min": 42.69999999999709,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 407.8000000000029,
+        "min": 371.5,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q2",
+      "label": "routes per prefix length",
+      "zamda": {
+        "median": 3.6000000000058208,
+        "min": 3.3999999999941792,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 3.8000000000029104,
+        "min": 3.400000000008731,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 37.20000000001164,
+        "min": 36.5,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q3",
+      "label": "routes and distinct networks per region",
+      "zamda": {
+        "median": 29.30000000000291,
+        "min": 29.09999999999127,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 29.69999999999709,
+        "min": 28.30000000000291,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 214.3000000000029,
+        "min": 204.6999999999971,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q4",
+      "label": "top 20 networks (group, sort, limit)",
+      "zamda": {
+        "median": 39.60000000000582,
+        "min": 27.19999999999709,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 29.69999999999709,
+        "min": 27.69999999999709,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 178.60000000000582,
+        "min": 175.90000000000873,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q5",
+      "label": "filtered region chart (prefix /22-/24, path 2-6)",
+      "zamda": {
+        "median": 76.69999999999709,
+        "min": 71.10000000000582,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 60.5,
+        "min": 50.20000000001164,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 128.5,
+        "min": 127.79999999998836,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q6",
+      "label": "name search (\"cloud\", case-insensitive)",
+      "zamda": {
+        "median": 19.89999999999418,
+        "min": 16.60000000000582,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 15.10000000000582,
+        "min": 12.89999999999418,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 63.80000000000291,
+        "min": 63.09999999999127,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q7",
+      "label": "full sort of every route (prefix length, address)",
+      "zamda": {
+        "median": 79.60000000000582,
+        "min": 65.30000000000291,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 69.30000000000291,
+        "min": 66,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 817.1000000000058,
+        "min": 793.1999999999971,
+        "runs": 3
+      }
+    }
+  ],
+  "interactions": [
+    {
+      "label": "nothing selected",
+      "together": {
+        "median": 124.60000000000582,
+        "min": 122.5,
+        "runs": 5
+      },
+      "togetherNoSlice": {
+        "median": 149.5,
+        "min": 138.8000000000029,
+        "runs": 5
+      },
+      "oneByOne": {
+        "median": 122.30000000000291,
+        "min": 119.69999999999709,
+        "runs": 5
+      }
+    },
+    {
+      "label": "prefix /22-/24, region ARIN, name \"cloud\"",
+      "together": {
+        "median": 179.6999999999971,
+        "min": 161.5,
+        "runs": 5
+      },
+      "togetherNoSlice": {
+        "median": 151,
+        "min": 144,
+        "runs": 5
+      },
+      "oneByOne": {
+        "median": 163.1999999999971,
+        "min": 153.8000000000029,
+        "runs": 5
+      }
+    }
+  ]
+}

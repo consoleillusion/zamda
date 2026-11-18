@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>zamda WASM spike (browser)</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 24px; max-width: 900px; }
+      pre { background: #f4f4f2; padding: 12px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>zamda WASM spike (S-301)</h1>
+    <p id="status">Loading…</p>
+    <p>Options in the address: <code>?rows=100000,1000000&amp;runs=7</code>. Runs start automatically; keep this tab in the foreground.</p>
+    <pre id="log"></pre>
+    <pre id="report"></pre>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

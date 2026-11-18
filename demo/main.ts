@@ -5,7 +5,7 @@ import { latest } from '../src';
 import { formatPrefix, loadRoutes } from '../scripts/bgp/file';
 import { createHistogram, drawActivity, drawRegions, drawTopNetworks, formatCount } from './charts';
 import type { ActivityBucket } from './charts';
-import { EMPTY_SELECTION, affectedBy, compilePlans, nameIndex, paramsFor, parseAddressRange } from './dashboard';
+import { EMPTY_SELECTION, affectedBy, compilePlans, nameIndex, paramsFor, parseAddressRange, summariseNetworks } from './dashboard';
 import type { ChartId, RoutesTable, Selection } from './dashboard';
 import {
   ACTIVITY_BUCKET,
@@ -56,20 +56,21 @@ async function start(): Promise<void> {
   const where = source.synthetic ? 'synthetic data' : `RIPE RIS ${String(source.rrc ?? '')} ${String(source.date ?? '')} ${String(source.time ?? '')}`;
   byId<HTMLElement>('source').textContent = `${header.rowCount.toLocaleString()} IPv4 routes from ${where} · loaded in ${Math.round(loadMs)} ms`;
 
-  const dashboard = createDashboard(routes);
+  // The live panel labels networks with names the first unfiltered chart run fills in.
+  const names = new Map<number, string>();
+  const dashboard = createDashboard(routes, names);
   dashboard.runAll();
-  void startLive(routes);
+  startLive(names);
 }
 
-function createDashboard(routes: RoutesTable) {
+function createDashboard(routes: RoutesTable, names: Map<number, string>) {
   // Purpose: the four linked charts, the totals line and the controls
   const plans = compilePlans();
   const runs = {
-    top: latest(plans.top),
+    networks: latest(plans.networks),
     prefixLen: latest(plans.prefixLen),
     pathLen: latest(plans.pathLen),
     regions: latest(plans.regions),
-    totals: latest(plans.totals),
   };
   let selection: Selection = EMPTY_SELECTION;
 
@@ -135,13 +136,15 @@ function createDashboard(routes: RoutesTable) {
       // Purpose: ignore runs replaced by newer ones; report anything else
       if (!isAbort(error)) console.error(`${chart} failed`, error);
     };
-    if (chart === 'top') {
-      runs.top(routes, options).then(function (result) {
-        // Purpose: draw the top networks
-        drawTopNetworks(
-          byId('chart-top'),
-          result.toArray().map(r => ({ origin: r.origin_as ?? 0, name: r.as_name, routes: r.routes ?? 0 })),
-        );
+    if (chart === 'networks') {
+      runs.networks(routes, options).then(function (result) {
+        // Purpose: draw the top networks and the totals line from one per-network result
+        const summary = summariseNetworks(result);
+        drawTopNetworks(byId('chart-top'), summary.top);
+        byId<HTMLElement>('total-routes').textContent = summary.routes.toLocaleString();
+        byId<HTMLElement>('total-networks').textContent = summary.networks.toLocaleString();
+        // With nothing selected this lists every network with its name.
+        if (selection === EMPTY_SELECTION && names.size === 0) for (const [k, v] of nameIndex(result)) names.set(k, v);
         done();
       }, failed);
     } else if (chart === 'prefixLen') {
@@ -172,14 +175,6 @@ function createDashboard(routes: RoutesTable) {
           .map(r => ({ rir: r.rir, routes: r.routes ?? 0, networks: r.networks ?? 0 }))
           .sort((a, b) => (a.rir === null ? 1 : b.rir === null ? -1 : b.routes - a.routes));
         drawRegions(byId('chart-regions'), regionRows, selection.regions, toggleRegion);
-        done();
-      }, failed);
-    } else {
-      runs.totals(routes, options).then(function (result) {
-        // Purpose: show the matching route and network counts
-        const row = result.toArray()[0];
-        byId<HTMLElement>('total-routes').textContent = (row?.routes ?? 0).toLocaleString();
-        byId<HTMLElement>('total-networks').textContent = (row?.networks ?? 0).toLocaleString();
         done();
       }, failed);
     }
@@ -223,7 +218,7 @@ function createDashboard(routes: RoutesTable) {
 
   const runAll = function (): void {
     // Purpose: run every chart
-    for (const chart of ['totals', 'top', 'prefixLen', 'pathLen', 'regions'] as const) run(chart);
+    for (const chart of ['networks', 'prefixLen', 'pathLen', 'regions'] as const) run(chart);
   };
   window.addEventListener('resize', function onResize() {
     // Purpose: charts are drawn at the page width, so redraw on resize
@@ -232,9 +227,8 @@ function createDashboard(routes: RoutesTable) {
   return { runAll };
 }
 
-async function startLive(routes: RoutesTable): Promise<void> {
+function startLive(names: ReadonlyMap<number, string>): void {
   // Purpose: stream updates into a live table and redraw the live panel every second
-  const names = await nameIndex(routes);
   const live = createUpdatesTable();
   const plans = compileLivePlans();
   const runs = { activity: latest(plans.activity), active: latest(plans.active), totals: latest(plans.totals) };
@@ -255,8 +249,16 @@ async function startLive(routes: RoutesTable): Promise<void> {
     return;
   }
   if (mode === 'sim') {
-    const origins = Array.from(names.keys()).slice(0, 400);
-    simulateFeed(origins.length ? origins : [64512], 400, handlers);
+    let known: number[] = [];
+    simulateFeed(
+      function originsNow() {
+        // Purpose: the first 400 networks once their names are known, one placeholder until then
+        if (known.length === 0 && names.size > 0) known = Array.from(names.keys()).slice(0, 400);
+        return known.length ? known : [64512];
+      },
+      400,
+      handlers,
+    );
   } else {
     connectRisLive(new URLSearchParams(location.search).get('host') ?? 'rrc00', handlers);
   }

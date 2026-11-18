@@ -7,7 +7,7 @@
 // values. A filter that is "off" is given values that let every row through.
 
 import { count, list, pipe, t } from '../src';
-import type { JsTable, ParamValues } from '../src';
+import type { JsTable, ParamValues, Result } from '../src';
 import { Routes } from '../scripts/bgp/file';
 
 export type RoutesTable = JsTable<typeof Routes.fields>;
@@ -41,7 +41,9 @@ export interface Selection {
 
 export const EMPTY_SELECTION: Selection = { prefixLen: null, pathLen: null, regions: null, search: '', addr: null };
 
-export type ChartId = 'top' | 'prefixLen' | 'pathLen' | 'regions' | 'totals';
+// 'networks' is one query that feeds both the top-20 chart and the totals line:
+// they apply exactly the same filters, so one grouping by network answers both.
+export type ChartId = 'networks' | 'prefixLen' | 'pathLen' | 'regions';
 
 function filtered() {
   // Purpose: a pipeline over the routes with every dashboard filter applied
@@ -60,11 +62,11 @@ export const TOP_LIMIT = 20;
 export function compilePlans() {
   // Purpose: compile every chart's plan once
   return {
-    top: filtered()
+    // Every network's route count under the current filters. The top 20, the
+    // number of networks and the number of routes are all read from this.
+    networks: filtered()
       .groupBy(c => ({ origin_as: c.origin_as, as_name: c.as_name }))
       .agg(() => ({ routes: count() }))
-      .sort(c => [c.routes.desc(), c.origin_as.asc()])
-      .limit(TOP_LIMIT)
       .compile(),
     prefixLen: filtered()
       .groupBy(c => ({ prefix_len: c.prefix_len }))
@@ -76,9 +78,6 @@ export function compilePlans() {
       .compile(),
     regions: filtered()
       .groupBy(c => ({ rir: c.rir }))
-      .agg(c => ({ routes: count(), networks: c.origin_as.countDistinct() }))
-      .compile(),
-    totals: filtered()
       .agg(c => ({ routes: count(), networks: c.origin_as.countDistinct() }))
       .compile(),
   };
@@ -115,13 +114,65 @@ export function paramsFor(selection: Selection, chart: ChartId): Params {
 // selection does not change that chart, so it is left out.
 export function affectedBy(control: keyof Selection): ChartId[] {
   // Purpose: the charts that depend on one control
-  const all: ChartId[] = ['top', 'prefixLen', 'pathLen', 'regions', 'totals'];
+  const all: ChartId[] = ['networks', 'prefixLen', 'pathLen', 'regions'];
   if (control === 'prefixLen' || control === 'pathLen' || control === 'regions') {
     return all.filter(function (id) {
       return id !== control;
     });
   }
   return all;
+}
+
+export interface NetworkRow {
+  readonly origin: number;
+  readonly name: string | null;
+  readonly routes: number;
+}
+
+export interface NetworkSummary {
+  readonly routes: number;
+  readonly networks: number;
+  readonly top: readonly NetworkRow[];
+}
+
+export function summariseNetworks(result: Result<any>, limit: number = TOP_LIMIT): NetworkSummary {
+  // Purpose: the totals and the top networks from the per-network counts, without building a row object per network
+  const origins = result.column('origin_as').values as ArrayLike<number>;
+  const counts = result.column('routes').values as ArrayLike<number>;
+  const names = result.column('as_name');
+  const n = result.rowCount;
+  let routes = 0;
+  // Best `limit` groups so far, kept sorted: most routes first, ties by lowest origin.
+  const best: number[] = [];
+  const beats = function (a: number, b: number): boolean {
+    // Purpose: true if group a ranks above group b
+    return counts[a]! > counts[b]! || (counts[a] === counts[b] && origins[a]! < origins[b]!);
+  };
+  for (let i = 0; i < n; i++) {
+    routes += counts[i]!;
+    if (best.length === limit && !beats(i, best[limit - 1]!)) continue;
+    let at = best.length;
+    while (at > 0 && beats(i, best[at - 1]!)) at--;
+    best.splice(at, 0, i);
+    if (best.length > limit) best.pop();
+  }
+  const top = best.map(function (i): NetworkRow {
+    // Purpose: one chart row
+    const valid = !names.valid || names.valid[i];
+    return { origin: origins[i]!, name: valid ? ((names.values as readonly string[])[i] ?? null) : null, routes: counts[i]! };
+  });
+  return { routes, networks: n, top };
+}
+
+export function nameIndex(result: Result<any>): Map<number, string> {
+  // Purpose: origin AS to network name, taken from an unfiltered per-network result
+  const origins = result.column('origin_as').values as ArrayLike<number>;
+  const names = result.column('as_name');
+  const out = new Map<number, string>();
+  for (let i = 0; i < result.rowCount; i++) {
+    if (!names.valid || names.valid[i]) out.set(origins[i]!, (names.values as readonly string[])[i]!);
+  }
+  return out;
 }
 
 export function parseAddressRange(text: string): readonly [number, number] | null | 'invalid' {
@@ -137,17 +188,4 @@ export function parseAddressRange(text: string): readonly [number, number] | nul
   const size = 2 ** (32 - length);
   const lo = Math.floor(addr / size) * size;
   return [lo, lo + size - 1];
-}
-
-export async function nameIndex(routes: RoutesTable): Promise<Map<number, string>> {
-  // Purpose: origin AS to network name, for labelling the live panel
-  const plan = pipe(Routes)
-    .groupBy(c => ({ origin_as: c.origin_as, as_name: c.as_name }))
-    .agg(() => ({ n: count() }))
-    .compile();
-  const names = new Map<number, string>();
-  for (const row of (await plan.execute(routes)).toArray()) {
-    if (row.origin_as !== null && row.as_name !== null) names.set(row.origin_as, row.as_name);
-  }
-  return names;
 }

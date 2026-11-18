@@ -1,0 +1,24 @@
+[package]
+name = "zamda-spike"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Throwaway code for S-301 (docs/TASKS.md). No dependencies on purpose: the gate
+# is 400 KB gzipped, and the kernels below are the part being measured.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Overflow-checked counters (the zamda default). Off = wrapping, for the cost measurement only.
+default = ["checked"]
+checked = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

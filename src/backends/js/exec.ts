@@ -37,7 +37,7 @@ import { castColumn } from './kernels-arith';
 import { inList } from './kernels-misc';
 import type { SortColumn } from './sort';
 import { sortSteps } from './sort';
-import { markConstant } from './kernel-util';
+import { isConstant, markConstant } from './kernel-util';
 
 export const DEFAULT_CHUNK_ROWS = 65536;
 export const DEFAULT_SLICE_MS = 8;
@@ -331,6 +331,13 @@ function evaluate(expr: IrExpr, batch: Batch, options: BackendOptions): Column {
 
 function runFilter(input: Batch, predicate: Column, needed: Needed): Stage {
   // Purpose: C-FILTER: select rows where the predicate is true; null and false are dropped
+  if (input.rowCount > 0 && isConstant(predicate) && !predicate.valid) {
+    // The same answer for every row: keep all of them or none, without reading the predicate.
+    const all = nums(predicate)[0] === 1;
+    return all
+      ? { batch: input, selection: null, rowCount: input.rowCount, needed }
+      : { batch: input, selection: new Uint32Array(0), rowCount: 0, needed };
+  }
   const keep = nums(predicate);
   const valid = predicate.valid;
   const selected = new Uint32Array(input.rowCount);

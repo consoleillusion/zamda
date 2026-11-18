@@ -73,6 +73,9 @@ bun run check     # typecheck + tests + size budget
 | `bun run typecheck` | `tsc --noEmit`, including the type-inference tests |
 | `bun run size` | Fails if the core exceeds 40 KB gzipped |
 | `bun run bench` | Group-by benchmark against plain JS and Arquero |
+| `bun run bench:compare` | The reference queries and the dashboard's interactions under Bun, with and without time slicing; compare with `bun run bench:browser` (a page to open in any browser) |
+| `bun run spike:build`, `bun run spike`, `bun run spike:browser` | The WASM spike (S-301, throwaway): build the Rust kernels for wasm32 and as a native library (needs `rustup target add wasm32-unknown-unknown`), time them against the JS executor under Bun, or in a browser |
+| `bun run bench:ref` | Reference benchmark: seven queries at 10k, 100k and 1M routes, zamda vs Arquero, answers checked first; writes `bench/results/` |
 | `bun run prep-bgp` | Download a RIPE RIS routing table dump and build `data/routes.bin` for the demo |
 | `bun run fake-routes` | Write a synthetic `data/routes.bin` (a million routes) for trying the demo offline |
 | `bun run demo` | The reference dashboard on http://localhost:3000; add `?live=sim` for a simulated live feed, `?live=off` for none |

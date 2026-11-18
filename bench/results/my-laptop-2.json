@@ -1,0 +1,410 @@
+{
+  "meta": {
+    "label": "my-laptop-2",
+    "source": "RIPE RIS",
+    "runtime": "Bun 1.4.2",
+    "platform": "linux x64",
+    "cpu": "Intel(R) Core(TM) i5-14500",
+    "cores": 20,
+    "memoryGB": 31,
+    "date": "2026-11-18"
+  },
+  "sizes": [
+    {
+      "rows": 1000000,
+      "load": {
+        "zamdaRows": {
+          "median": 65.53814600000004,
+          "min": 62.407324999999986,
+          "runs": 5
+        },
+        "arqueroRows": {
+          "median": 24.910671999999977,
+          "min": 24.560508000000027,
+          "runs": 5
+        },
+        "zamdaColumns": {
+          "median": 45.38575700000001,
+          "min": 36.110356000000024,
+          "runs": 5
+        },
+        "arqueroColumns": {
+          "median": 0.003471999999987929,
+          "min": 0.0025689999999940483,
+          "runs": 5
+        }
+      },
+      "queries": [
+        {
+          "id": "Q1",
+          "label": "routes per network (group by origin and name)",
+          "gate": true,
+          "zamda": {
+            "median": 17.845735000000104,
+            "min": 17.07456100000013,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 183.0721309999999,
+            "min": 175.56604600000037,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q2",
+          "label": "routes per prefix length",
+          "gate": false,
+          "zamda": {
+            "median": 2.4098650000000816,
+            "min": 2.369513999999981,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 28.615689000000202,
+            "min": 26.316005000000132,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q3",
+          "label": "routes and distinct networks per region",
+          "gate": true,
+          "zamda": {
+            "median": 12.38414899999998,
+            "min": 11.611879999999928,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 89.23190800000066,
+            "min": 84.82093999999961,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q4",
+          "label": "top 20 networks (group, sort, limit)",
+          "gate": true,
+          "zamda": {
+            "median": 10.265062000000398,
+            "min": 10.149970999999823,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 94.336319,
+            "min": 79.3085859999992,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q5",
+          "label": "filtered region chart (prefix /22-/24, path 2-6)",
+          "gate": false,
+          "zamda": {
+            "median": 19.28509000000031,
+            "min": 17.08368900000005,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 92.37374999999975,
+            "min": 88.07643399999961,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q6",
+          "label": "name search (\"cloud\", case-insensitive)",
+          "gate": false,
+          "zamda": {
+            "median": 3.970610999999735,
+            "min": 3.71474599999965,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 107.5186389999999,
+            "min": 106.68639199999961,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q7",
+          "label": "full sort of every route (prefix length, address)",
+          "gate": true,
+          "zamda": {
+            "median": 71.89175299999988,
+            "min": 60.7931609999996,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 30.63907300000028,
+            "min": 30.192353999998886,
+            "runs": 7
+          }
+        }
+      ]
+    },
+    {
+      "rows": 100000,
+      "load": {
+        "zamdaRows": {
+          "median": 6.946329000000333,
+          "min": 6.796855000000505,
+          "runs": 5
+        },
+        "arqueroRows": {
+          "median": 2.874877000000197,
+          "min": 2.599800999998479,
+          "runs": 5
+        },
+        "zamdaColumns": {
+          "median": 5.810783000000811,
+          "min": 4.741363000001002,
+          "runs": 5
+        },
+        "arqueroColumns": {
+          "median": 0.0026960000013787067,
+          "min": 0.002427999999781605,
+          "runs": 5
+        }
+      },
+      "queries": [
+        {
+          "id": "Q1",
+          "label": "routes per network (group by origin and name)",
+          "gate": true,
+          "zamda": {
+            "median": 4.963537000001452,
+            "min": 4.272940999999264,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 25.637880000000223,
+            "min": 24.224662000000535,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q2",
+          "label": "routes per prefix length",
+          "gate": false,
+          "zamda": {
+            "median": 0.2871530000011262,
+            "min": 0.2832959999996092,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 3.7404980000010255,
+            "min": 3.437547999999879,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q3",
+          "label": "routes and distinct networks per region",
+          "gate": true,
+          "zamda": {
+            "median": 2.0375789999998233,
+            "min": 1.8247670000000653,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 10.720886000000974,
+            "min": 10.534276000000318,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q4",
+          "label": "top 20 networks (group, sort, limit)",
+          "gate": true,
+          "zamda": {
+            "median": 1.8708440000009432,
+            "min": 1.8362600000000384,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 17.266324000000168,
+            "min": 17.15595199999916,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q5",
+          "label": "filtered region chart (prefix /22-/24, path 2-6)",
+          "gate": false,
+          "zamda": {
+            "median": 2.3267940000005183,
+            "min": 2.2065720000009605,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 10.683366000001115,
+            "min": 10.478554999999687,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q6",
+          "label": "name search (\"cloud\", case-insensitive)",
+          "gate": false,
+          "zamda": {
+            "median": 0.42672099999981583,
+            "min": 0.41912799999954586,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 14.191267000000153,
+            "min": 12.452723000000333,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q7",
+          "label": "full sort of every route (prefix length, address)",
+          "gate": true,
+          "zamda": {
+            "median": 6.203053000001091,
+            "min": 6.130415999999968,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 3.049974999999904,
+            "min": 3.0163900000006834,
+            "runs": 7
+          }
+        }
+      ]
+    },
+    {
+      "rows": 10000,
+      "load": {
+        "zamdaRows": {
+          "median": 0.864571000000069,
+          "min": 0.8059740000007878,
+          "runs": 5
+        },
+        "arqueroRows": {
+          "median": 0.24559600000065984,
+          "min": 0.238987000000634,
+          "runs": 5
+        },
+        "zamdaColumns": {
+          "median": 0.6712250000000495,
+          "min": 0.6391480000002048,
+          "runs": 5
+        },
+        "arqueroColumns": {
+          "median": 0.0027979999995295657,
+          "min": 0.0022950000002310844,
+          "runs": 5
+        }
+      },
+      "queries": [
+        {
+          "id": "Q1",
+          "label": "routes per network (group by origin and name)",
+          "gate": true,
+          "zamda": {
+            "median": 0.7749409999996715,
+            "min": 0.7418450000004668,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 2.953496999998606,
+            "min": 2.934516999999687,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q2",
+          "label": "routes per prefix length",
+          "gate": false,
+          "zamda": {
+            "median": 0.06403300000056333,
+            "min": 0.059460000000399305,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 0.41862399999990885,
+            "min": 0.3897949999991397,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q3",
+          "label": "routes and distinct networks per region",
+          "gate": true,
+          "zamda": {
+            "median": 0.22827700000016193,
+            "min": 0.2215249999990192,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 1.405441000000792,
+            "min": 1.2610580000000482,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q4",
+          "label": "top 20 networks (group, sort, limit)",
+          "gate": true,
+          "zamda": {
+            "median": 0.4006490000010672,
+            "min": 0.3752679999997781,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 2.9627110000001267,
+            "min": 2.9315369999985705,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q5",
+          "label": "filtered region chart (prefix /22-/24, path 2-6)",
+          "gate": false,
+          "zamda": {
+            "median": 0.345712000000276,
+            "min": 0.3201250000001892,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 1.4424440000002505,
+            "min": 1.413937999999689,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q6",
+          "label": "name search (\"cloud\", case-insensitive)",
+          "gate": false,
+          "zamda": {
+            "median": 0.058069000000614324,
+            "min": 0.05537299999923562,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 1.647863000000143,
+            "min": 1.5717920000006416,
+            "runs": 7
+          }
+        },
+        {
+          "id": "Q7",
+          "label": "full sort of every route (prefix length, address)",
+          "gate": true,
+          "zamda": {
+            "median": 0.6530109999985143,
+            "min": 0.6398630000003322,
+            "runs": 7
+          },
+          "arquero": {
+            "median": 0.3612940000002709,
+            "min": 0.3390959999996994,
+            "runs": 7
+          }
+        }
+      ]
+    }
+  ]
+}

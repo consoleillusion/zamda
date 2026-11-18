@@ -3,3 +3,6 @@ dist/
 data/
 *.log
 .DS_Store
+spike/target/
+spike/target-wrapping/
+spike/Cargo.lock

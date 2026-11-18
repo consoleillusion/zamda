@@ -174,7 +174,7 @@ Substrait mapping.
 - `aggregate.ts` keeps its group table, accumulators and key values across
   chunks. Dictionary codes are mapped onto one canonical dictionary per key,
   because chunks computed separately have separate dictionaries.
-- `sort.ts` sorts runs natively and merges them in bounded steps; top-k uses a heap.
+- `sort.ts` sorts row indexes: integer and boolean keys by a stable radix sort, anything else by native-sorted runs merged in bounded steps; a small limit uses a heap. Every step yields so a sort can be paused or aborted.
 
 ## The reference dashboard (demo/, not part of the package)
 
@@ -185,6 +185,18 @@ demo/dashboard.ts  the linked charts' plans, parameters and selection logic (tes
 demo/live.ts       RIS Live parsing, the live table and its plans, simulated feed (tested)
 demo/charts.ts     SVG drawing: bars, brushable histogram, region toggles, activity
 demo/main.ts       wiring: load, run charts through latest(), feed the live panel
+```
+
+## Benchmarks (bench/, not part of the package)
+
+```
+bench/groupby.ts          the original group-by benchmark (plain JS, Arquero, zamda)
+bench/reference/data.ts   routes file -> sampled columns and row objects -> zamda and Arquero tables
+bench/reference/queries.ts the reference queries once, per engine: exec (timed) and summary (checked)
+bench/reference/run.ts    checks, times and writes bench/results/<name>.{json,md}
+bench/reference/measure.ts timing helpers with no Node imports, so a browser can use them
+bench/reference/compare.ts the runtime comparison: queries and dashboard interactions, with and without slicing
+bench/reference/compare-bun.ts and browser/   run compare.ts under Bun, or in a page served by Bun
 ```
 
 ## Scripts (not part of the package)

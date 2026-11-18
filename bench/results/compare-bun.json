@@ -1,0 +1,177 @@
+{
+  "runtime": "Bun 1.4.4 (JavaScriptCore)",
+  "rows": 1000000,
+  "queries": [
+    {
+      "id": "Q1",
+      "label": "routes per network (group by origin and name)",
+      "zamda": {
+        "median": 45.78400899999997,
+        "min": 42.21392300000002,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 48.84588799999983,
+        "min": 42.84892600000012,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 561.5022709999998,
+        "min": 555.4662250000001,
+        "runs": 3
+      }
+    },
+    {
+      "id": "Q2",
+      "label": "routes per prefix length",
+      "zamda": {
+        "median": 4.944395000000441,
+        "min": 4.842928000000029,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 5.2341239999996105,
+        "min": 5.060674999999719,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 86.49379599999975,
+        "min": 72.5659569999998,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q3",
+      "label": "routes and distinct networks per region",
+      "zamda": {
+        "median": 34.774374999999964,
+        "min": 34.22872699999971,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 31.81199899999956,
+        "min": 28.960196999999425,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 208.06417599999986,
+        "min": 205.89824500000032,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q4",
+      "label": "top 20 networks (group, sort, limit)",
+      "zamda": {
+        "median": 25.740504999999757,
+        "min": 23.511830999999802,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 28.004832000000533,
+        "min": 24.711113000001205,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 347.35520800000086,
+        "min": 331.6053350000002,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q5",
+      "label": "filtered region chart (prefix /22-/24, path 2-6)",
+      "zamda": {
+        "median": 39.70149599999968,
+        "min": 38.4695040000006,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 38.448012000000745,
+        "min": 37.419497999999294,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 198.87346600000092,
+        "min": 185.86449999999968,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q6",
+      "label": "name search (\"cloud\", case-insensitive)",
+      "zamda": {
+        "median": 9.142282999999225,
+        "min": 8.575284000000465,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 8.032008000000133,
+        "min": 7.740354999999909,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 102.31902199999968,
+        "min": 99.35436200000004,
+        "runs": 5
+      }
+    },
+    {
+      "id": "Q7",
+      "label": "full sort of every route (prefix length, address)",
+      "zamda": {
+        "median": 109.5270019999989,
+        "min": 102.84640900000159,
+        "runs": 5
+      },
+      "zamdaNoSlice": {
+        "median": 116.26573999999891,
+        "min": 109.77875000000131,
+        "runs": 5
+      },
+      "arquero": {
+        "median": 669.8615729999983,
+        "min": 610.0356259999971,
+        "runs": 3
+      }
+    }
+  ],
+  "interactions": [
+    {
+      "label": "nothing selected",
+      "together": {
+        "median": 103.97952900000018,
+        "min": 87.68806499999846,
+        "runs": 5
+      },
+      "togetherNoSlice": {
+        "median": 108.95906300000206,
+        "min": 86.27590899999996,
+        "runs": 5
+      },
+      "oneByOne": {
+        "median": 88.59862799999974,
+        "min": 87.08056199999919,
+        "runs": 5
+      }
+    },
+    {
+      "label": "prefix /22-/24, region ARIN, name \"cloud\"",
+      "together": {
+        "median": 86.63206100000025,
+        "min": 84.12110499999835,
+        "runs": 5
+      },
+      "togetherNoSlice": {
+        "median": 85.07333700000163,
+        "min": 84.09185900000011,
+        "runs": 5
+      },
+      "oneByOne": {
+        "median": 86.20024099999864,
+        "min": 83.81762399999934,
+        "runs": 5
+      }
+    }
+  ]
+}

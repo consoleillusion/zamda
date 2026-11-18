@@ -141,8 +141,18 @@ export function readHeader(bytes: Uint8Array): RoutesHeader {
   return header;
 }
 
-export function loadRoutes(input: Uint8Array): { table: JsTable<typeof Routes.fields>; header: RoutesHeader } {
-  // Purpose: build a zamda table from a routes file; the number columns are used without copying
+export interface RouteArrays {
+  readonly rowCount: number;
+  readonly prefix_addr: Uint32Array;
+  readonly prefix_len: Uint8Array;
+  readonly origin_as: Uint32Array;
+  readonly as_name: (string | null)[];
+  readonly path_len: Uint8Array;
+  readonly rir: (string | null)[];
+}
+
+export function decodeRoutes(input: Uint8Array): { arrays: RouteArrays; header: RoutesHeader } {
+  // Purpose: the routes file's columns as plain arrays; the number columns are views of the input, not copies
   // Typed-array views need 4-byte alignment; copy if the input buffer does not provide it.
   const bytes = input.byteOffset % 4 === 0 ? input : input.slice();
   const header = readHeader(bytes);
@@ -166,14 +176,29 @@ export function loadRoutes(input: Uint8Array): { table: JsTable<typeof Routes.fi
     const region = rirCodes[i]!;
     rir[i] = region === NO_RIR ? null : header.rirs[region]!;
   }
+  const arrays: RouteArrays = {
+    rowCount: n,
+    prefix_addr: u32(col.prefix_addr),
+    prefix_len: u8(col.prefix_len),
+    origin_as: u32(col.origin_as),
+    as_name: asName,
+    path_len: u8(col.path_len),
+    rir,
+  };
+  return { arrays, header };
+}
+
+export function loadRoutes(input: Uint8Array): { table: JsTable<typeof Routes.fields>; header: RoutesHeader } {
+  // Purpose: build a zamda table from a routes file; the number columns are used without copying
+  const { arrays, header } = decodeRoutes(input);
   const routes = table(Routes, {
     columns: {
-      prefix_addr: u32(col.prefix_addr),
-      prefix_len: u8(col.prefix_len),
-      origin_as: u32(col.origin_as),
-      as_name: asName,
-      path_len: u8(col.path_len),
-      rir,
+      prefix_addr: arrays.prefix_addr,
+      prefix_len: arrays.prefix_len,
+      origin_as: arrays.origin_as,
+      as_name: arrays.as_name,
+      path_len: arrays.path_len,
+      rir: arrays.rir,
     },
   });
   return { table: routes, header };

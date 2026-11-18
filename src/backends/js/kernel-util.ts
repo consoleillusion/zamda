@@ -1,8 +1,10 @@
 // Helpers shared by the JS backend's kernels, aggregates and sort.
 
 import type { Column } from '../../column';
+import { makeColumn } from '../../column';
 import { ExecutionError } from '../../errors';
 import type { DataType } from '../../types';
+import { t } from '../../types';
 
 export type Kernel = (args: readonly Column[], type: DataType, rowCount: number) => Column;
 
@@ -14,6 +16,25 @@ export function markConstant(column: Column): Column {
   // Purpose: record that a column holds the same value in every row
   constants.add(column);
   return column;
+}
+
+// Read-only arrays of ones and zeros that constant boolean columns share, so a
+// comparison that is true (or false) for every row costs no allocation. Nothing
+// may write to a column's values after a kernel returns it, which holds throughout.
+const sharedBools = new Map<string, Uint8Array>();
+
+export function constantBool(rowCount: number, value: boolean): Column {
+  // Purpose: a boolean column with the same value in every row, no nulls, marked constant
+  const key = `${value ? 1 : 0}:${rowCount}`;
+  let values = sharedBools.get(key);
+  if (!values) {
+    // Keep a handful of sizes (the chunk size, the table size, the last short chunk).
+    if (sharedBools.size >= 8) sharedBools.clear();
+    values = new Uint8Array(rowCount);
+    if (value) values.fill(1);
+    sharedBools.set(key, values);
+  }
+  return markConstant(makeColumn(t.bool, values, null));
 }
 
 export function isConstant(column: Column): boolean {

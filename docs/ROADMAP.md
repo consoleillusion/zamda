@@ -9,7 +9,7 @@ are TypeScript only and produce a usable library on their own.
                                         +--fail--> stop at 2; zamda is a JS library
 ```
 
-**Current position:** Milestone 2. Chunked execution (T-201), `latest()` (T-202), live tables (T-204) and the dataset script (T-205) are done. The dashboard (T-206) is built and runs on synthetic data; next is measuring it on real data in real browsers (T-217).
+**Current position:** Milestone 2. Chunked execution (T-201), `latest()` (T-202), live tables (T-204) and the dataset script (T-205) are done. The dashboard (T-206) is built and measured by the owner on real data in Chromium: 109 to 123 ms per interaction, inside the 200 ms target (T-217). The benchmark harness (T-207) is done and the WASM spike (S-301) has started: Rust kernels exist under `spike/` and are checked against the JS answers; the WASM build awaits measurement on the owner's machine.
 
 ## Milestones
 

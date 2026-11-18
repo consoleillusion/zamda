@@ -12,6 +12,7 @@ import {
   nameIndex,
   paramsFor,
   parseAddressRange,
+  summariseNetworks,
 } from '../demo/dashboard';
 import type { Selection } from '../demo/dashboard';
 import { compileLivePlans, createUpdatesTable, parseRisMessage, subscribeMessage } from '../demo/live';
@@ -26,13 +27,13 @@ const routes = table(Routes, [
 
 const plans = compilePlans();
 
-async function totals(selection: Selection, chart: 'totals' | 'prefixLen' = 'totals') {
+async function totals(selection: Selection, chart: 'networks' | 'prefixLen' = 'networks') {
   // Purpose: matching routes for a selection, as the totals line or one chart sees it
   if (chart === 'prefixLen') {
     const rows = (await plans.prefixLen.execute(routes, { params: paramsFor(selection, 'prefixLen') })).toArray();
     return rows.reduce((sum, r) => sum + r.routes!, 0);
   }
-  return (await plans.totals.execute(routes, { params: paramsFor(selection, 'totals') })).toArray()[0]!.routes;
+  return summariseNetworks(await plans.networks.execute(routes, { params: paramsFor(selection, 'networks') })).routes;
 }
 
 describe('linked filters', () => {
@@ -57,19 +58,33 @@ describe('linked filters', () => {
     expect(await totals(selection)).toBe(0);
   });
 
-  test('the top networks chart', async () => {
-    const out = (await plans.top.execute(routes, { params: paramsFor(EMPTY_SELECTION, 'top') })).toArray();
-    expect(out[0]).toEqual({ origin_as: 13335, as_name: 'CLOUDFLARENET', routes: 2 });
-    expect(out.length).toBe(4);
+  test('the top networks chart and the totals line come from one result', async () => {
+    const summary = summariseNetworks(await plans.networks.execute(routes, { params: paramsFor(EMPTY_SELECTION, 'networks') }));
+    expect(summary.top[0]).toEqual({ origin: 13335, name: 'CLOUDFLARENET', routes: 2 });
+    expect(summary.top.length).toBe(4);
+    expect(summary.networks).toBe(4);
+    expect(summary.routes).toBe(5);
+    // Ties on route count go to the lower AS number; a missing name stays null.
+    expect(summary.top.map(r => r.origin)).toEqual([13335, 3356, 15169, 64512]);
+    expect(summary.top[3]!.name).toBeNull();
+  });
+
+  test('the top list keeps only the requested number, best first', async () => {
+    const result = await plans.networks.execute(routes, { params: paramsFor(EMPTY_SELECTION, 'networks') });
+    const two = summariseNetworks(result, 2);
+    expect(two.top.map(r => r.origin)).toEqual([13335, 3356]);
+    // Totals still cover every network, not just the ones listed.
+    expect(two.routes).toBe(5);
+    expect(two.networks).toBe(4);
   });
 
   test('touching a chart re-runs every chart except that one', () => {
-    expect(affectedBy('prefixLen')).toEqual(['top', 'pathLen', 'regions', 'totals']);
-    expect(affectedBy('search')).toEqual(['top', 'prefixLen', 'pathLen', 'regions', 'totals']);
+    expect(affectedBy('prefixLen')).toEqual(['networks', 'pathLen', 'regions']);
+    expect(affectedBy('search')).toEqual(['networks', 'prefixLen', 'pathLen', 'regions']);
   });
 
   test('network names for the live panel', async () => {
-    const names = await nameIndex(routes);
+    const names = nameIndex(await plans.networks.execute(routes, { params: paramsFor(EMPTY_SELECTION, 'networks') }));
     expect(names.get(15169)).toBe('GOOGLE');
     expect(names.has(64512)).toBe(false);
   });

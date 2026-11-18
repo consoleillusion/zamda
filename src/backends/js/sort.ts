@@ -9,7 +9,8 @@
 
 import type { Column } from '../../column';
 import { bigs, nums, texts } from '../../column';
-import { isBigInt, isString } from '../../types';
+import { isBigInt, isInt, isString } from '../../types';
+import type { DataType } from '../../types';
 import { compareStrings, orderNumbers } from './kernel-util';
 
 export interface SortColumn {
@@ -161,6 +162,160 @@ function* mergeSort(rowCount: number, compare: Compare): Generator<void, Uint32A
   return from;
 }
 
+// ---------------------------------------------------------------------------
+// Radix sort for integer keys
+// ---------------------------------------------------------------------------
+//
+// When every key is an integer or boolean column, rows are ordered by an LSD
+// radix sort over the keys' bits instead of by comparisons. Each key becomes an
+// unsigned 32-bit word whose natural order is the key's order: signed values
+// have their sign bit flipped, descending keys are inverted, and null rows get
+// word 0 plus a separate null rank, so every null ties with every other null.
+// Passes run from the last key to the first and from the low digit to the high
+// digit; each pass is stable, so rows that tie on every key stay in input order,
+// the same total order the comparison sort gets from its row-index tie-break
+// (C-SORT-STABLE, C-NULL-SORT).
+
+interface RadixKey {
+  readonly words: Uint32Array;
+  readonly bits: number;
+  // 0 or 1 per row when the column can be null: where the row sits relative to non-null rows.
+  readonly nullRank: Uint32Array | null;
+}
+
+// Limits up to this many rows use the heap even when the radix sort could run.
+const HEAP_LIMIT_ROWS = 8192;
+
+// Rows processed between two yields inside a pass: the same bound as the merge sort's steps.
+const BLOCK_ROWS = STEP_ROWS;
+// The widest digit: 2^11 buckets keeps the counts in cache.
+const MAX_DIGIT_BITS = 11;
+
+function integerWidth(type: DataType): { bits: number; signed: boolean } | null {
+  // Purpose: the bit width and signedness of a type the radix sort can handle, or null
+  if (type.name === 'bool') return { bits: 8, signed: false };
+  if (!isInt(type)) return null;
+  switch (type.name) {
+    case 'int8':
+      return { bits: 8, signed: true };
+    case 'int16':
+      return { bits: 16, signed: true };
+    case 'int32':
+      return { bits: 32, signed: true };
+    case 'uint8':
+      return { bits: 8, signed: false };
+    case 'uint16':
+      return { bits: 16, signed: false };
+    case 'uint32':
+      return { bits: 32, signed: false };
+    default:
+      return null;
+  }
+}
+
+function radixKeys(keys: readonly SortColumn[], rowCount: number): RadixKey[] | null {
+  // Purpose: turn every sort key into radix words, or null if any key needs the comparison sort
+  const out: RadixKey[] = [];
+  for (const key of keys) {
+    const width = integerWidth(key.column.type);
+    if (!width) return null;
+    const values = nums(key.column);
+    const valid = key.column.valid;
+    const words = new Uint32Array(rowCount);
+    const flip = width.signed ? 2 ** (width.bits - 1) : 0;
+    const top = width.bits === 32 ? 4294967295 : 2 ** width.bits - 1;
+    for (let i = 0; i < rowCount; i++) {
+      let word = (values[i]! + flip) >>> 0;
+      if (key.descending) word = (top - word) >>> 0;
+      words[i] = word;
+    }
+    let nullRank: Uint32Array | null = null;
+    if (valid) {
+      nullRank = new Uint32Array(rowCount);
+      for (let i = 0; i < rowCount; i++) {
+        if (valid[i]) {
+          nullRank[i] = key.nullsFirst ? 1 : 0;
+        } else {
+          nullRank[i] = key.nullsFirst ? 0 : 1;
+          words[i] = 0;
+        }
+      }
+    }
+    out.push({ words, bits: width.bits, nullRank });
+  }
+  return out;
+}
+
+function* radixPass(
+  from: Uint32Array,
+  to: Uint32Array,
+  words: Uint32Array,
+  shift: number,
+  mask: number,
+  counts: Uint32Array,
+  rowCount: number,
+): Generator<void, boolean> {
+  // Purpose: one stable counting-sort pass of `from` into `to` by one digit of `words`; false (and no reordering) if every row has the same digit
+  counts.fill(0, 0, mask + 1);
+  for (let start = 0; start < rowCount; start += BLOCK_ROWS) {
+    const end = Math.min(start + BLOCK_ROWS, rowCount);
+    for (let i = start; i < end; i++) counts[(words[i]! >>> shift) & mask]!++;
+    if (end < rowCount) yield;
+  }
+  if (counts[(words[0]! >>> shift) & mask] === rowCount) return false;
+  let sum = 0;
+  for (let b = 0; b <= mask; b++) {
+    const c = counts[b]!;
+    counts[b] = sum;
+    sum += c;
+  }
+  for (let start = 0; start < rowCount; start += BLOCK_ROWS) {
+    const end = Math.min(start + BLOCK_ROWS, rowCount);
+    for (let i = start; i < end; i++) {
+      const row = from[i]!;
+      to[counts[(words[row]! >>> shift) & mask]!++] = row;
+    }
+    if (end < rowCount) yield;
+  }
+  return true;
+}
+
+function* radixSort(keys: readonly RadixKey[], rowCount: number): Generator<void, Uint32Array> {
+  // Purpose: all row indexes in sorted order, by LSD radix passes over the keys, last key first
+  let from = new Uint32Array(rowCount);
+  for (let i = 0; i < rowCount; i++) from[i] = i;
+  if (rowCount < 2) return from;
+  let to = new Uint32Array(rowCount);
+  const counts = new Uint32Array(1 << MAX_DIGIT_BITS);
+  for (let k = keys.length - 1; k >= 0; k--) {
+    const { words, bits, nullRank } = keys[k]!;
+    const passes = Math.ceil(bits / MAX_DIGIT_BITS);
+    const digitBits = Math.ceil(bits / passes);
+    const mask = (1 << digitBits) - 1;
+    for (let p = 0; p < passes; p++) {
+      const shift = p * digitBits;
+      const moved = yield* radixPass(from, to, words, shift, mask, counts, rowCount);
+      if (moved) {
+        const swap = from;
+        from = to;
+        to = swap;
+      }
+      // Let the driver check the time and the abort signal after every pass.
+      yield;
+    }
+    if (nullRank) {
+      const moved = yield* radixPass(from, to, nullRank, 0, 1, counts, rowCount);
+      if (moved) {
+        const swap = from;
+        from = to;
+        to = swap;
+      }
+      yield;
+    }
+  }
+  return from;
+}
+
 export function* sortSteps(
   keys: readonly SortColumn[],
   rowCount: number,
@@ -168,6 +323,16 @@ export function* sortSteps(
 ): Generator<void, Uint32Array> {
   // Purpose: row indexes in sorted order, computed in steps that yield so the run can pause or abort.
   // With a limit, only the first `limit` indexes are returned.
+  // A small limit is cheaper with a heap than with a full sort: few rows ever replace the worst kept row.
+  const heapIsCheaper = limit !== null && limit <= HEAP_LIMIT_ROWS;
+  if (!heapIsCheaper) {
+    const radix = radixKeys(keys, rowCount);
+    if (radix) {
+      yield;
+      const order = yield* radixSort(radix, rowCount);
+      return limit !== null && limit < rowCount ? order.subarray(0, limit) : order;
+    }
+  }
   const compare = rowCompare(keys);
   if (limit !== null && limit < rowCount) {
     if (limit === 0) return new Uint32Array(0);

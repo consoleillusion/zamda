@@ -80,3 +80,100 @@ describe('expressions over one dictionary column, computed per distinct value', 
     }
   });
 });
+
+// Constants that come out of a comparison, not only literals and parameters
+// (docs/DECISIONS.md, D-052): a range test that covers a column's whole integer
+// type is the same for every row, so and/or and filter can skip the column.
+const T = schema({ n: t.uint8, i: t.int8, b: t.bool });
+const trows = [
+  { n: 0, i: -128, b: true },
+  { n: 255, i: 127, b: null },
+  { n: 7, i: 0, b: false },
+  { n: 200, i: -1, b: null },
+  { n: 3, i: 5, b: true },
+];
+const tinput = table(T, trows);
+const TP = { lo: t.uint8, hi: t.uint8, ilo: t.int8 };
+
+async function tflags(
+  predicate: Parameters<ReturnType<typeof pipe<typeof T.fields, typeof TP>>['select']>[0],
+  params: Record<string, unknown>,
+  data: typeof tinput = tinput,
+): Promise<(boolean | null)[]> {
+  // Purpose: one boolean per row of T, identical at every chunk size
+  const plan = pipe(T, TP).select(predicate).compile();
+  const results: (boolean | null)[][] = [];
+  for (const chunkRows of [1, 2, 3, 5, 100]) {
+    const out = (await plan.execute(data, { params: params as never, chunkRows })).toArray() as { v: boolean | null }[];
+    results.push(out.map(r => r.v));
+  }
+  for (const r of results) expect(r).toEqual(results[0]!);
+  return results[0]!;
+}
+
+const tbase = { lo: 0, hi: 255, ilo: -128 };
+
+describe('constant comparisons (every row answers the same)', () => {
+  test('a covering test is true for all rows and drops out of and/or', async () => {
+    // n >= 0 on a uint8 is always true: "true and b" is b, "true or b" is true.
+    expect(await tflags((c, p) => ({ v: c.n.gte(p.lo).and(c.b) }), tbase)).toEqual([true, null, false, null, true]);
+    expect(await tflags((c, p) => ({ v: c.b.and(c.n.gte(p.lo)) }), tbase)).toEqual([true, null, false, null, true]);
+    expect(await tflags((c, p) => ({ v: c.n.gte(p.lo).or(c.b) }), tbase)).toEqual([true, true, true, true, true]);
+    expect(await tflags((c, p) => ({ v: c.n.lte(p.hi).and(c.i.gte(p.ilo)) }), tbase)).toEqual([true, true, true, true, true]);
+  });
+
+  test('an impossible test is false for all rows, null in the other operand included', async () => {
+    // n < 0 on a uint8 is never true: "false and b" is false even for null b, "false or b" is b.
+    expect(await tflags((c, p) => ({ v: c.n.lt(p.lo).and(c.b) }), tbase)).toEqual([false, false, false, false, false]);
+    expect(await tflags((c, p) => ({ v: c.n.lt(p.lo).or(c.b) }), tbase)).toEqual([true, null, false, null, true]);
+    expect(await tflags((c, p) => ({ v: c.n.gt(p.hi) }), tbase)).toEqual([false, false, false, false, false]);
+  });
+
+  test('bounds that cut part of the range still compare row by row', async () => {
+    expect(await tflags((c, p) => ({ v: c.n.between(p.lo, p.hi) }), { ...tbase, lo: 1, hi: 254 })).toEqual([false, false, true, true, true]);
+    expect(await tflags((c, p) => ({ v: c.i.gte(p.ilo) }), { ...tbase, ilo: -1 })).toEqual([false, true, true, true, true]);
+    expect(await tflags((c, p) => ({ v: c.n.gte(p.lo).and(c.i.lt(0)) }), tbase)).toEqual([true, false, false, true, false]);
+  });
+
+  test('strict tests at the very edge of the range are not mistaken for constants', async () => {
+    // n > 0 is false only for 0; n < 255 is false only for 255; n >= 255 and n <= 0 are true for one value each.
+    expect(await tflags((c, p) => ({ v: c.n.gt(p.lo) }), tbase)).toEqual([false, true, true, true, true]);
+    expect(await tflags((c, p) => ({ v: c.n.lt(p.hi) }), tbase)).toEqual([true, false, true, true, true]);
+    expect(await tflags((c, p) => ({ v: c.n.gte(p.hi) }), tbase)).toEqual([false, true, false, false, false]);
+    expect(await tflags((c, p) => ({ v: c.n.lte(p.lo) }), tbase)).toEqual([true, false, false, false, false]);
+    // And a swapped operand: 0 < n.
+    expect(await tflags((c, p) => ({ v: lit(0, t.uint8).lt(c.n) }), tbase)).toEqual([false, true, true, true, true]);
+  });
+
+  test('two literals compare to a constant', async () => {
+    expect(await tflags(c => ({ v: lit(3, t.uint8).lt(5).and(c.b) }), tbase)).toEqual([true, null, false, null, true]);
+    expect(await tflags(c => ({ v: lit(9, t.uint8).lt(5).or(c.b) }), tbase)).toEqual([true, null, false, null, true]);
+  });
+
+  test('filter keeps every row, or none, when its predicate is constant', async () => {
+    const all = pipe(T, TP).filter((c, p) => c.n.gte(p.lo)).agg(() => ({ n: count() })).compile();
+    const none = pipe(T, TP).filter((c, p) => c.n.lt(p.lo)).agg(() => ({ n: count() })).compile();
+    const rowsOf = pipe(T, TP).filter((c, p) => c.n.gte(p.lo)).compile();
+    for (const chunkRows of [1, 2, 5, 100]) {
+      expect((await all.execute(tinput, { params: tbase as never, chunkRows })).toArray()).toEqual([{ n: 5 }]);
+      expect((await none.execute(tinput, { params: tbase as never, chunkRows })).toArray()).toEqual([{ n: 0 }]);
+      expect((await rowsOf.execute(tinput, { params: tbase as never, chunkRows })).toArray()).toEqual(trows);
+    }
+  });
+
+  test('an empty table gives the right empty answers', async () => {
+    const empty = table(T, []);
+    expect(await tflags((c, p) => ({ v: c.n.gte(p.lo).and(c.b) }), tbase, empty)).toEqual([]);
+    const count0 = pipe(T, TP).filter((c, p) => c.n.gte(p.lo)).agg(() => ({ n: count() })).compile();
+    expect((await count0.execute(empty, { params: tbase as never })).toArray()).toEqual([{ n: 0 }]);
+  });
+
+  test('a nullable column is never treated as constant', async () => {
+    // S.n can be null: a covering range must still give null for the null row.
+    expect(await flags((c, p) => ({ v: c.n.gte(p.lo) }), base)).toEqual([true, true, null, true, true]);
+    const keep = pipe(S, P).filter((c, p) => c.n.gte(p.lo)).agg(() => ({ n: count() })).compile();
+    for (const chunkRows of [1, 2, 5]) {
+      expect((await keep.execute(input, { params: base as never, chunkRows })).toArray()).toEqual([{ n: 4 }]);
+    }
+  });
+});

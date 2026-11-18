@@ -104,6 +104,160 @@ panel's three queries take 2 to 6 ms per second.
 What remains is aggregation, not filtering: the two distinct counts and the
 two-key group. Sharing one filter pass across the five charts is T-218.
 
+### Measured by the owner (real data, Chromium)
+
+On a real `data/routes.bin` from `bun run prep-bgp`, with the real RIS Live feed
+(collector rrc00): first load, 111 to 225 ms per chart; after typing a name and
+selecting in each chart, 109 to 123 ms per chart; live panel refresh 20 to 40 ms
+(5 to 12 ms at first, before the window filled). Each chart's time is close to
+the whole interaction's, because the five charts share the page's time slices.
+This was before T-218. In the sandbox that change cut the work of one
+interaction by about 20% (161 to 124 ms with nothing selected, 180 to 143 ms
+with a prefix brush, 117 to 94 ms with a region and a search).
+
+## Reference benchmark (T-207)
+
+`bun run bench:ref` runs seven queries (group-bys, distinct counts, top-k, a
+filter, a case-insensitive search, a full sort) on 10k, 100k and 1M routes from
+`data/routes.bin`, in zamda and Arquero, after checking that both give the same
+answer. Results go to `bench/results/<name>.md` and `.json`; `--out my-laptop`
+names them. This is the harness the WASM spike runs, and the zamda column at
+1M rows is the number it must beat by 3x.
+
+Owner's machine (`bench/results/my-laptop.md`: Bun 1.4.2, Intel Core i5-14500,
+20 threads, 31 GB, real RIPE RIS data), 1,000,000 rows, medians in ms:
+
+| Query | zamda | Arquero |
+| --- | ---: | ---: |
+| Q1 routes per network | 19 | 180 |
+| Q3 routes and distinct networks per region | 13 | 92 |
+| Q4 top 20 networks | 10 | 94 |
+| Q6 name search | 4.0 | 109 |
+| Q7 full sort of every route | **87** | **31** |
+
+The spike gate's set (Q1, Q3, Q4, Q7) takes 129 ms in zamda, 197 ms with the 68 ms
+to load row objects. At 3x, WASM would have to do all of it in about 66 ms.
+Two thirds of the 129 ms is the sort. This machine is about 3x faster than the
+sandbox, not the 6x assumed earlier.
+
+The same table measured in the sandbox on synthetic routes
+(`bench/results/sandbox.md`), 1,000,000 rows, medians in ms:
+
+| Query | zamda | Arquero |
+| --- | ---: | ---: |
+| Q1 routes per network | 57 | 489 |
+| Q3 routes and distinct networks per region | 27 | 255 |
+| Q4 top 20 networks | 38 | 407 |
+| Q6 name search | 9.4 | 112 |
+| Q7 full sort of every route | **1,422** | **604** |
+
+Before T-221, zamda was 4x to 18x faster than Arquero on every query except the
+full sort, where it was 2.4x to 2.8x slower. T-221 (D-051, a radix sort) made the
+sort 4x faster than the old comparison sort on the sandbox's random-order data, so
+there it now beats Arquero (zamda 149 ms, Arquero 841 ms). On the owner's real
+routing table, which is already in address order, it improved only from 87 to
+72 ms and Arquero's 31 ms still wins (`my-laptop-2.md`). Native comparison sorts
+speed up on partly ordered input and radix sorts do not, so synthetic random data
+flatters the change. Real data is the one to quote. Building a zamda table from columns costs
+127 ms when a column holds strings, against none for Arquero (T-222). The
+gate's sort component is zamda's weakest spot: on real data the gate queries take
+112 ms (`my-laptop-2.md`), 72 of it the sort.
+
+## Bun against Chrome (T-223)
+
+`bun run bench:compare` (Bun, JavaScriptCore) and `bun run bench:browser` (open the
+page in any browser) run the same measurements: every reference query with and
+without the executor's time slicing, and the dashboard's four charts started
+together, as the page starts them. Same sandbox, 1,000,000 synthetic rows,
+medians in ms (`bench/results/compare-bun.json`, `compare-chrome.json`):
+
+| | Bun | Chrome |
+| --- | ---: | ---: |
+| Q1 routes per network | 63 | 68 |
+| Q3 routes and distinct networks per region | 31 | 35 |
+| Q4 top 20 networks | 38 | 49 |
+| Q5 filtered region chart | 41 | **88** |
+| Q6 name search | 9.1 | **19** |
+| Q7 full sort | 160 | **78** |
+| Dashboard interaction, nothing selected | 137 | **241** |
+| Dashboard interaction, brush, region and name | 108 | **301** |
+
+- **Time slicing is not the cause:** the dashboard interaction takes the same
+  time with slicing off, in both runtimes.
+- **V8 is about 2x slower on the filter path** (Q5, Q6 and the interaction),
+  about equal on group-by, and faster on the sort. The owner's 109 to 123 ms in
+  Chromium against roughly 60 to 75 ms of work in Bun fits this.
+- Aggregate the same way and the engines tie, so the loss is in the filtering
+  kernels' code shape, which can be changed (T-224).
+- Why it matters for the WASM question: a browser's JS engine is a moving
+  target and WASM is not, so a WASM filter would be steadier. But the JS gap is
+  a fixable 2x, found cheaply, before a second engine is considered.
+
+### In browsers, on the owner's machine (T-223, T-224)
+
+`bench/results/browser-my-laptop.md`: Chrome 156 and Firefox 158, 1,000,000 real
+routes, before D-052, medians in ms:
+
+| | Chrome | Firefox |
+| --- | ---: | ---: |
+| Q1 routes per network | 21 | 23 |
+| Q5 filtered region chart | 25 | 20 |
+| Q6 name search | 6.2 | 3.0 |
+| Q7 full sort | 27 (Arquero 128) | 37 (Arquero 45) |
+| Dashboard interaction, nothing selected | 96 | 67 |
+| Dashboard interaction, brush, region and name | 103 | 92 |
+
+- Single queries are within about 1.3x of Bun on the same machine, so the browser
+  is not much slower than Bun on the engine's own work. (The sandbox showed a 2x
+  gap on filtering; the owner's machine shows about 1.3x.)
+- The full sort is not a problem in browsers: 27 ms in Chrome and 37 ms in
+  Firefox. It was 72 ms in Bun on real data, so the sort that looked slow was
+  Bun-specific.
+- The interaction was about twice the sum of its single queries (96 ms against
+  about 41 ms in Chrome). The reason was the five filter controls evaluated for
+  every chart even when off, fixed by D-052.
+
+Same sandbox, before and after D-052 (`compare-chrome.json`, `compare-bun.json`),
+dashboard interaction, ms:
+
+| | Chrome before | Chrome after | Bun before | Bun after |
+| --- | ---: | ---: | ---: | ---: |
+| Nothing selected | 241 | 125 | 137 | 104 |
+| Brush, region and name | 301 | 180 | 108 | 87 |
+
+Applying the same proportions to the owner's Chrome numbers gives roughly 50 to
+65 ms per interaction. That is an estimate until measured.
+
+## WASM spike, native upper bound (S-301)
+
+`spike/` holds Rust versions of the gate queries (Q1, Q3, Q4, Q7; D-053). The sandbox cannot
+download the wasm32 target (`static.rust-lang.org` is not reachable from it), so these numbers
+are the same Rust code built **natively** and called through Bun FFI. WASM runs that code at
+or below native speed, so this is the best case, not the answer. Synthetic data, the sandbox's
+2-core Xeon, Bun. Every answer was checked against zamda's before timing. Full tables:
+`bench/results/spike-sandbox.md`.
+
+| 1,000,000 rows | zamda JS (ms) | Rust native (ms) |
+| --- | ---: | ---: |
+| load from row objects | 176 | 61 |
+| Q1 routes per network | 63 | 11.3 |
+| Q3 routes and distinct networks per region | 37 | 10.4 |
+| Q4 top 20 networks | 28 | 16.0 |
+| Q7 full sort (radix) | 159 | 18.9 |
+| **Gate queries** | **288** | **56.6** (5.1x) |
+| **With row loading** | **464** | **118** (3.9x) |
+
+At 100,000 rows the same comparison is 3.3x with loading. What it shows:
+
+- **The queries are not the limit; loading is.** Half of the Rust total is the JS loop that
+  copies row objects into the module and encodes two string columns (61 ms). WASM cannot
+  speed that up, so the 3x gate is mostly a test of the loader.
+- **Overflow checking is free in this measurement.** Checked and wrapping counters differ by
+  less than the run-to-run noise (`native` against `native-wrapping`).
+- **Not measured yet:** the WASM build itself (expected 1x to 2x slower than native on the
+  query part), the module size, and the owner's machine, where zamda's own sort and group-bys
+  are faster than in the sandbox (`my-laptop.md`), so the ratio will be lower there.
+
 ## What the numbers say
 
 - zamda's JS backend beats Arquero on every query, by 3.5x to 15x.

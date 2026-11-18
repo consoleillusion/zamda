@@ -167,7 +167,7 @@ export function connectRisLive(host: string, handlers: FeedHandlers): Feed {
 }
 
 export function simulateFeed(
-  origins: readonly number[],
+  originsNow: () => readonly number[],
   updatesPerSecond: number,
   handlers: FeedHandlers,
 ): Feed {
@@ -183,6 +183,8 @@ export function simulateFeed(
     // Purpose: emit a quarter-second of updates, with an occasional burst from one network
     const now = Math.floor(Date.now() / 1000);
     const rows: UpdateRow[] = [];
+    // The network list may not exist yet when the feed starts.
+    const origins = originsNow();
     const burst = random() < 0.05 ? origins[Math.floor(random() * origins.length)]! : null;
     const n = Math.round((updatesPerSecond / 4) * (0.5 + random()) * (burst ? 6 : 1));
     for (let i = 0; i < n; i++) {

@@ -13,7 +13,7 @@ import { bigs, makeColumn, nums, texts } from '../../column';
 import type { DataType } from '../../types';
 import { INT_RANGES, isBigInt, isInt, isString, t } from '../../types';
 import type { Kernel } from './kernel-util';
-import { compareStrings, isConstant, mergeValid } from './kernel-util';
+import { compareStrings, constantBool, isConstant, markConstant, mergeValid } from './kernel-util';
 import { ARITHMETIC_KERNELS } from './kernels-arith';
 import { MISC_KERNELS } from './kernels-misc';
 import { STRING_KERNELS } from './kernels-string';
@@ -70,12 +70,13 @@ function coversType(op: CompareOp, type: DataType, b: number): boolean | null {
   return null;
 }
 
-function compareScalar(op: CompareOp, a: NumCells, b: number, out: Uint8Array, n: number, type: DataType): void {
-  // Purpose: a number column against one value, read once instead of from a broadcast array
+function compareScalar(op: CompareOp, a: NumCells, b: number, out: Uint8Array, n: number, type: DataType): boolean {
+  // Purpose: a number column against one value, read once instead of from a broadcast array.
+  // True when every row got the same answer without reading the column (see coversType).
   const fixed = coversType(op, type, b);
   if (fixed !== null) {
     if (fixed) out.fill(1);
-    return;
+    return true;
   }
   switch (op) {
     case 'eq':
@@ -97,6 +98,7 @@ function compareScalar(op: CompareOp, a: NumCells, b: number, out: Uint8Array, n
       for (let i = 0; i < n; i++) out[i] = a[i]! >= b ? 1 : 0;
       break;
   }
+  return false;
 }
 
 function compareBigInts(x: Column, y: Column, test: (order: number) => boolean, out: Uint8Array, n: number): void {
@@ -116,14 +118,23 @@ function comparison(op: CompareOp): Kernel {
   return function (args, _type, n) {
     const x = args[0]!;
     const y = args[1]!;
+    if (n > 0 && !isBigInt(x.type) && !isString(x.type) && !x.valid && !y.valid) {
+      // A range test that covers the column's whole integer type is the same for every row.
+      let fixed: boolean | null = null;
+      if (isConstant(y)) fixed = coversType(op, x.type, nums(y)[0]!);
+      else if (isConstant(x)) fixed = coversType(FLIPPED[op], y.type, nums(x)[0]!);
+      if (fixed !== null) return constantBool(n, fixed);
+    }
     const valid = mergeValid(x.valid, y.valid, n);
     const out = new Uint8Array(n);
+    // Set when every row has the same answer, so later operators can skip the whole column.
+    let constant = isConstant(x) && isConstant(y);
     if (isBigInt(x.type)) {
       compareBigInts(x, y, test, out, n);
     } else if (!isString(x.type) && isConstant(y)) {
-      compareScalar(op, nums(x), nums(y)[0]!, out, n, x.type);
+      if (compareScalar(op, nums(x), nums(y)[0]!, out, n, x.type)) constant = true;
     } else if (!isString(x.type) && isConstant(x)) {
-      compareScalar(FLIPPED[op], nums(y), nums(x)[0]!, out, n, y.type);
+      if (compareScalar(FLIPPED[op], nums(y), nums(x)[0]!, out, n, y.type)) constant = true;
     } else if (!isString(x.type)) {
       compareNumbers(op, nums(x), nums(y), out, n);
     } else if ((op === 'eq' || op === 'neq') && x.dictionary && y.dictionary && y.dictionary.length === 1) {
@@ -140,7 +151,9 @@ function comparison(op: CompareOp): Kernel {
         out[i] = test(compareStrings(a[i]!, b[i]!)) ? 1 : 0;
       }
     }
-    return makeColumn(t.bool, out, valid);
+    const result = makeColumn(t.bool, out, valid);
+    // A null row is neither true nor false, so only a column without nulls can be constant.
+    return constant && !valid ? markConstant(result) : result;
   };
 }
 
@@ -149,6 +162,16 @@ function kleene(isAnd: boolean): Kernel {
   return function (args, _type, n) {
     const x = args[0]!;
     const y = args[1]!;
+    if (n > 0) {
+      // A side that is the same in every row (and never null) decides the result or is neutral:
+      // true and y = y, false and y = false, true or y = true, false or y = y.
+      for (const [side, other] of [[x, y], [y, x]] as const) {
+        if (!isConstant(side) || side.valid) continue;
+        const value = nums(side)[0]!;
+        if (value === (isAnd ? 0 : 1)) return side;
+        return other;
+      }
+    }
     const a = nums(x);
     const b = nums(y);
     const out = new Uint8Array(n);
