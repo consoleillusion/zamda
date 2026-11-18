@@ -4,12 +4,16 @@
 pub mod decode;
 pub mod encode;
 pub mod error;
+pub mod eval_abi;
+pub mod eval;
 pub mod ir;
+pub mod kernels;
 pub mod signatures;
 pub mod store;
 pub mod store_abi;
 pub mod types;
 pub mod validate;
+pub mod vector;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 

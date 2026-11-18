@@ -98,6 +98,13 @@ a string keeps a leading byte order mark. The Rust engine (`engine/`) decodes
 the same bytes; its error codes are in `engine/src/error.rs` (1-19 decoding,
 101-122 validation).
 
+## Parameter values
+
+The values a run gives the engine are a separate byte string, not part of the
+plan: for each parameter the plan declares, in the order it declares them, one
+literal (a scalar parameter) or a count followed by that many literals (a list
+parameter). Literals use the table above. Nothing precedes or follows them.
+
 ## Changing the format
 
 Append new type numbers, ops, expression kinds or literal tags; never reorder or

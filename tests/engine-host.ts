@@ -7,11 +7,30 @@ import type { Pointer } from 'bun:ffi';
 import { existsSync } from 'node:fs';
 import type { EngineHost } from '../src/backends/wasm/store';
 
+// The evaluation entry points of engine/src/eval_abi.rs, for tests.
+export interface EvalHost extends EngineHost {
+  planLoad(bytes: Uint8Array): number;
+  planFree(plan: number): number;
+  paramsLoad(plan: number, bytes: Uint8Array): number;
+  paramsFree(params: number): number;
+  exprCount(plan: number, node: number): number;
+  exprSupported(plan: number, node: number, expr: number): number;
+  eval(plan: number, params: number, node: number, expr: number, snapshot: number, segment: number, start: number, rows: number): number;
+  resultType(result: number): number;
+  resultRows(result: number): number;
+  resultValues(result: number): number;
+  resultValid(result: number): number;
+  resultFree(result: number): number;
+  evalError(): number;
+  evalErrorWhat(): number;
+  evalErrorType(): number;
+}
+
 const ROOT = new URL('../engine/', import.meta.url).pathname;
 const SUFFIX = process.platform === 'darwin' ? 'dylib' : process.platform === 'win32' ? 'dll' : 'so';
 const LIBRARY = `${ROOT}target/release/${process.platform === 'win32' ? '' : 'lib'}zamda_engine.${SUFFIX}`;
 
-export function nativeHost(): EngineHost | null {
+export function nativeHost(): EvalHost | null {
   // Purpose: open the engine library (building it first if needed), wrapped in the EngineHost shape
   if (!existsSync(LIBRARY)) {
     const built = Bun.spawnSync(['cargo', 'build', '--release'], { cwd: ROOT, stdout: 'ignore', stderr: 'ignore' });
@@ -45,7 +64,32 @@ export function nativeHost(): EngineHost | null {
     zs_snapshot_values: { args: [u, u, u], returns: p },
     zs_snapshot_valid: { args: [u, u, u], returns: p },
     zs_snapshot_dict_len: { args: [u, u, u], returns: u },
+    zs_plan_load: { args: [p, FFIType.u64], returns: u },
+    zs_plan_free: { args: [u], returns: u },
+    zs_params_load: { args: [u, p, FFIType.u64], returns: u },
+    zs_params_free: { args: [u], returns: u },
+    zs_expr_count: { args: [u, u], returns: FFIType.i32 },
+    zs_expr_supported: { args: [u, u, u], returns: u },
+    zs_eval: { args: [u, u, u, u, u, u, u, u], returns: u },
+    zs_result_type: { args: [u], returns: u },
+    zs_result_rows: { args: [u], returns: u },
+    zs_result_values: { args: [u], returns: p },
+    zs_result_valid: { args: [u], returns: p },
+    zs_result_free: { args: [u], returns: u },
+    zs_eval_error: { args: [], returns: u },
+    zs_eval_error_what: { args: [], returns: u },
+    zs_eval_error_type: { args: [], returns: u },
   });
+  const withBytes = <R>(bytes: Uint8Array, f: (at: number) => R): R => {
+    // Purpose: copy bytes into engine memory for the duration of a call
+    const at = Number(s.zs_alloc!(Math.max(bytes.length, 1)) ?? 0);
+    try {
+      new Uint8Array(toArrayBuffer(at as unknown as Pointer, 0, Math.max(bytes.length, 1))).set(bytes);
+      return f(at);
+    } finally {
+      s.zs_free!(at as unknown as Pointer, Math.max(bytes.length, 1));
+    }
+  };
   const ptr = (n: number) => n as unknown as Pointer;
   const num = (r: unknown) => Number(r ?? 0);
   return {
@@ -74,5 +118,21 @@ export function nativeHost(): EngineHost | null {
     snapshotValues: (h, i, c) => num(s.zs_snapshot_values!(h, i, c)),
     snapshotValid: (h, i, c) => num(s.zs_snapshot_valid!(h, i, c)),
     snapshotDictLen: (h, i, c) => s.zs_snapshot_dict_len!(h, i, c),
+    planLoad: bytes => withBytes(bytes, at => s.zs_plan_load!(ptr(at), bytes.length)),
+    planFree: h => s.zs_plan_free!(h),
+    paramsLoad: (plan, bytes) => withBytes(bytes, at => s.zs_params_load!(plan, ptr(at), bytes.length)),
+    paramsFree: h => s.zs_params_free!(h),
+    exprCount: (plan, node) => s.zs_expr_count!(plan, node),
+    exprSupported: (plan, node, expr) => s.zs_expr_supported!(plan, node, expr),
+    eval: (plan, params, node, expr, snapshot, segment, start, rows) =>
+      s.zs_eval!(plan, params, node, expr, snapshot, segment, start, rows),
+    resultType: r => s.zs_result_type!(r),
+    resultRows: r => s.zs_result_rows!(r),
+    resultValues: r => num(s.zs_result_values!(r)),
+    resultValid: r => num(s.zs_result_valid!(r)),
+    resultFree: r => s.zs_result_free!(r),
+    evalError: () => s.zs_eval_error!(),
+    evalErrorWhat: () => s.zs_eval_error_what!(),
+    evalErrorType: () => s.zs_eval_error_type!(),
   };
 }

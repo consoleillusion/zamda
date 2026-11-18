@@ -38,7 +38,7 @@ fn with_table<R>(handle: u32, f: impl FnOnce(&mut Table) -> Result<R, StoreError
     })
 }
 
-fn with_snapshot<R>(handle: u32, f: impl FnOnce(&Snapshot) -> Result<R, StoreError>) -> Result<R, StoreError> {
+pub(crate) fn with_snapshot<R>(handle: u32, f: impl FnOnce(&Snapshot) -> Result<R, StoreError>) -> Result<R, StoreError> {
     // Purpose: run `f` on the snapshot behind a handle
     REGISTRY.with(|r| {
         let r = r.borrow();

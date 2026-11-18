@@ -138,6 +138,11 @@ impl View {
         self.data.columns[col].dict_len
     }
 
+    pub fn column_type(&self, col: usize) -> Type {
+        // Purpose: the data type of a column
+        self.data.columns[col].ty
+    }
+
     pub fn column_count(&self) -> usize {
         // Purpose: number of columns in the segment
         self.data.columns.len()

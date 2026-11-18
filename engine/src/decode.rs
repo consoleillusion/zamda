@@ -316,3 +316,26 @@ pub fn decode(bytes: &[u8]) -> Result<Plan, Error> {
     }
     Ok(Plan { version, input, nodes, root, output, params })
 }
+
+pub fn decode_params(bytes: &[u8], declared: &[Param]) -> Result<crate::eval::Params, Error> {
+    // Purpose: parameter values written by the host: for each declared parameter in order, one literal, or a count and that many literals for a list
+    let mut r = Reader { bytes, at: 0 };
+    let mut values = std::collections::HashMap::new();
+    for p in declared {
+        let value = if p.list {
+            let n = r.count()?;
+            let mut list = Vec::with_capacity(n.min(1024));
+            for _ in 0..n {
+                list.push(read_literal(&mut r)?);
+            }
+            crate::eval::ParamValue::List(list)
+        } else {
+            crate::eval::ParamValue::Scalar(read_literal(&mut r)?)
+        };
+        values.insert(p.name.clone(), value);
+    }
+    if r.left() != 0 {
+        return fail(Code::TrailingBytes, r.at);
+    }
+    Ok(crate::eval::Params { values })
+}

@@ -77,7 +77,7 @@ T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`
 The spike met its gate (D-054) and the dashboard target (D-057). What is left is to turn
 hard-coded kernels into an engine that runs any plan the JS backend runs, with the same answers
 and the same errors. Code goes in a new `engine/` crate; `spike/` stays throwaway. Order of work:
-the first vertical slice is T-401 (done) to T-406, T-408 and T-413 (the dashboard runs on WASM), then T-407,
+the first vertical slice is T-401 (done) to T-406, T-414, T-408 and T-413 (the dashboard runs on WASM), then T-407,
 T-409, T-410 and T-411. Known risk: a general expression engine will be slower than the spike's
 hard-coded mask pass, so T-413 is the real test of the 50 ms target.
 
@@ -86,7 +86,7 @@ hard-coded mask pass, so T-413 is the real test of the 50 ms target.
 | T-401 | Binary IR: a compact byte format for `IrPlan` (nodes, expressions, parameters, types, a version byte), with a JS encoder and decoder and `docs/IR-BINARY.md`. **Done** (D-058): `src/ir-binary.ts`; 12 tests (the dashboard's plans, every node and expression kind, literal edge cases, 1,000-value lists, all truncations, every single-bit corruption, 2,000 random inputs, bad counts and numbers, over-deep nesting); every golden test also round-trips its plan. A mutation of each decoder check is caught except the count limit, which is redundant (every element read consumes bytes) and only rejects earlier. | none |
 | T-402 (done) | The `engine/` Rust crate: decoder and validator for the binary IR (types, column and parameter references, limits) with error codes the JS side maps to `PlanError`; a fuzz test that random bytes never panic | T-401 |
 | T-403 (done) | Tables in WASM memory: segments of typed columns, validity bytes, dictionary columns taking ready-made codes (D-055), appends and the retain window with the same "a run sees the table as of its start" rule (C-LIVE). A JS loader that copies each column once | T-402 |
-| T-404 | Expression evaluation over a batch of 65,536 rows: field, literal, parameter, comparisons, arithmetic with checked overflow raising the same error as JS, Kleene `and`/`or`/`not`, `between`, `in`, `cast`, null handling, the constant shortcuts of D-045 and D-052. Functions in the order the dashboard and the reference queries use them; the rest follow as separate tasks | T-402, T-403 |
+| T-404 (done) | Expression evaluation over a batch of 65,536 rows: field, literal, parameter, comparisons, arithmetic with checked overflow raising the same error as JS, Kleene `and`/`or`/`not`, `between`, `in`, `cast`, null handling, the constant shortcuts of D-045 and D-052. Functions in the order the dashboard and the reference queries use them; the rest follow as separate tasks | T-402, T-403 |
 | T-405 | Filter and project operators, with selection vectors and a shared failed-controls style evaluation where several charts filter the same rows (D-056) | T-404 |
 | T-406 | Aggregate operator: hash group-by with the key-type specialisations of D-043, `count`, `sum` (checked), `min`, `max`, `count_distinct`, dictionary canonicalisation, group order as `docs/CONTRACT.md` fixes it | T-405 |
 | T-407 | Sort and limit: radix on integer and boolean keys, comparison sort otherwise, heap for small limits (D-051), stable, null placement as the contract says | T-405 |
@@ -96,6 +96,8 @@ hard-coded mask pass, so T-413 is the real test of the 50 ms target.
 | T-411 | Cross-backend tests: the golden suite runs on both backends; a generator of random schemas, data and plans runs each plan on JS and WASM and requires equal results, equal errors and equal group and sort order. This is Milestone 3's "done when" | T-408 |
 | T-412 | Build and size: one command builds the module with `wasm-opt`, the script fails above 400 KB gzipped, and the built `.wasm` ships in the package so users need no Rust toolchain | T-402 |
 | T-413 | The reference dashboard on `wasmBackend`, unchanged except the table's backend option: measure one interaction in Chrome and Firefox against the 50 ms target, and the load time of the routes file. Record the result in `docs/BENCHMARKS.md` | T-405, T-406, T-408 |
+| T-414 | String expressions over dictionary columns (`lower`, `contains`, `starts_with`, `ends_with`, `upper`, `length`, `eq` and `in` on strings, `coalesce` on strings). Strings stay on the host (D-060), so the host evaluates such an expression once per dictionary entry and gives the engine a per-code table; the engine then evaluates the expression as a lookup by code. Needed by the dashboard's name search | T-404 |
+| T-415 | `date_trunc` and `extract` for date32 and timestamp (UTC calendar arithmetic, C-TIME) | T-404 |
 
 ## Later
 

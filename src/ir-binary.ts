@@ -241,6 +241,27 @@ function writeNode(w: Writer, node: IrNode): void {
   }
 }
 
+export function encodeParams(
+  declared: readonly IrParam[],
+  values: ReadonlyMap<string, LiteralValue | readonly LiteralValue[]>,
+): Uint8Array {
+  // Purpose: parameter values as bytes for the engine: for each declared parameter in order, one literal, or a count and that many literals for a list
+  const w = new Writer();
+  for (const param of declared) {
+    const value = values.get(param.name);
+    if (value === undefined) bad(`no value for parameter "${param.name}"`);
+    if (param.list) {
+      if (!Array.isArray(value)) bad(`parameter "${param.name}" is a list`);
+      w.varint(value.length);
+      for (const v of value as readonly LiteralValue[]) writeLiteral(w, v);
+    } else {
+      if (Array.isArray(value)) bad(`parameter "${param.name}" is not a list`);
+      writeLiteral(w, value as LiteralValue);
+    }
+  }
+  return w.done();
+}
+
 export function encodePlan(plan: IrPlan): Uint8Array {
   // Purpose: the plan as bytes in the format of docs/IR-BINARY.md
   if (plan.version !== IR_VERSION) bad(`plan version ${plan.version} is not ${IR_VERSION}`);
