@@ -19,7 +19,7 @@ const MAGIC = [0x5a, 0x49, 0x52, 0x01]; // "ZIR" and the format version
 const MAX_DEPTH = 200;
 
 // The order is part of the format: never reorder, only append.
-const TYPE_NAMES: readonly TypeName[] = [
+export const TYPE_NAMES: readonly TypeName[] = [
   'bool', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64',
   'float32', 'float64', 'utf8', 'dictionary', 'date32', 'timestamp',
 ];

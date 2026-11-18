@@ -1,11 +1,13 @@
-// The zamda WASM engine. This slice (T-402) reads and validates plans; the
-// operators arrive in T-404 onward. See docs/TASKS.md, Milestone 3.
+// The zamda WASM engine. Plans are read and validated (T-402) and tables live in
+// the engine's memory (T-403); the operators arrive in T-404 onward. See docs/TASKS.md, Milestone 3.
 
 pub mod decode;
 pub mod encode;
 pub mod error;
 pub mod ir;
 pub mod signatures;
+pub mod store;
+pub mod store_abi;
 pub mod types;
 pub mod validate;
 

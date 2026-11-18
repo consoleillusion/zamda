@@ -47,7 +47,7 @@ export const jsBackend: Backend = {
   },
 };
 
-function load<F extends Fields>(schema: Schema<F>, data: TableInput<F>): Segment {
+export function loadSegment<F extends Fields>(schema: Schema<F>, data: TableInput<F>): Segment {
   // Purpose: check and convert row objects or column arrays into one segment
   if (Array.isArray(data)) return { columns: loadRows(schema, data), rowCount: data.length };
   const input = data as ColumnInput<F>;
@@ -104,7 +104,7 @@ export class JsTable<F extends Fields = Fields> implements Table<F> {
 
   append(data: TableInput<F>): void {
     // Purpose: C-LIVE: add rows at the end; runs already started do not see them
-    const segment = load(this.schema, data);
+    const segment = loadSegment(this.schema, data);
     if (segment.rowCount === 0) return;
     this.segments = [...this.segments, segment];
     this.count += segment.rowCount;
@@ -136,5 +136,5 @@ export function table<F extends Fields>(
   options: TableOptions = {},
 ): JsTable<F> {
   // Purpose: create a JS-backend table from row objects or from one array per column
-  return new JsTable(schema, load(schema, data), options);
+  return new JsTable(schema, loadSegment(schema, data), options);
 }
