@@ -12,6 +12,7 @@ import { expect } from 'bun:test';
 import { table } from '../../src';
 import type { Fields, NoParams, Pipeline, RowInput, RowOf, Schema } from '../../src';
 import { pipe } from '../../src';
+import { decodePlan, encodePlan } from '../../src/ir-binary';
 
 export const backends = ['js'] as const;
 
@@ -32,6 +33,8 @@ export async function run<F extends Fields, Out extends Fields>(
 ): Promise<RowOf<Out>[]> {
   // Purpose: build a pipeline, run it on the JS backend at several chunk sizes, and return the rows
   const plan = build(pipe(schema)).compile();
+  // T-401: every plan the golden suite runs must also survive the binary format unchanged.
+  expect(decodePlan(encodePlan(plan.ir))).toEqual(plan.ir);
   const input = table(schema, rows);
   const attempt = async function (chunkRows?: number): Promise<Outcome<RowOf<Out>>> {
     // Purpose: run once, capturing either the rows or the error

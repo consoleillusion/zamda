@@ -1,3 +1,7 @@
+$ bun spike/run.ts --out "spike-my-laptop-2"
+100,000 rows
+1,000,000 rows
+
 # Spike S-301: Rust kernels against the JS executor
 
 - label: spike-my-laptop-2
@@ -49,3 +53,118 @@
 **native:** gate queries 109 ms in JS against 16.5 ms (6.6x); with row loading 186 against 45.6 ms (**4.1x**).
 
 The gate needs 3x or more at 1,000,000 rows with loading included, and a win from 100,000 rows. Every spike answer was checked against zamda's before timing.
+
+**Chromium**
+
+zamda WASM spike (S-301)
+Done.
+
+Options in the address: ?rows=100000,1000000&runs=7. Runs start automatically; keep this tab in the foreground.
+
+100,000 rows
+1,000,000 rows
+# Spike S-301: Rust kernels against the JS executor
+
+- runtime: Chrome/156.0.0.0
+- wasm size (bytes, uncompressed): 45008
+- date: 2026-11-18
+
+## 100,000 rows
+
+| Step | zamda JS (ms) | wasm (ms) |
+| --- | ---: | ---: |
+| load from row objects | 8.80 | 4.20 |
+| load from columns (strings encoded) |  | 3.30 |
+| Q1 routes per network | 4.40 | 0.90 |
+| Q3 routes and distinct networks per region | 2.80 | 0.60 |
+| Q4 top 20 networks | 2.50 | 1.00 |
+| Q7 full sort, radix | 2.80 | 1.00 |
+| Q7 full sort, pdqsort |  | 0.30 |
+
+| Dashboard interaction (four charts) | zamda JS (ms) | wasm (ms) |
+| --- | ---: | ---: |
+| nothing selected | 9.70 | 2.30 (4.2x) |
+| prefix /22-/24, region ARIN, name "cloud" | 10.1 | 0.60 (16.8x) |
+
+**wasm:** gate queries 12.5 ms in JS against 2.80 ms (4.5x); with row loading 21.3 against 7.00 ms (**3.0x**).
+
+## 1,000,000 rows
+
+| Step | zamda JS (ms) | wasm (ms) |
+| --- | ---: | ---: |
+| load from row objects | 73.7 | 24.7 |
+| load from columns (strings encoded) |  | 21.7 |
+| Q1 routes per network | 21.3 | 5.60 |
+| Q3 routes and distinct networks per region | 19.7 | 5.10 |
+| Q4 top 20 networks | 13.6 | 6.50 |
+| Q7 full sort, radix | 27.5 | 10.5 |
+| Q7 full sort, pdqsort |  | 2.60 |
+
+| Dashboard interaction (four charts) | zamda JS (ms) | wasm (ms) |
+| --- | ---: | ---: |
+| nothing selected | 61.2 | 16.6 (3.7x) |
+| prefix /22-/24, region ARIN, name "cloud" | 85.3 | 4.80 (17.8x) |
+
+**wasm:** gate queries 82.1 ms in JS against 19.8 ms (4.1x); with row loading 156 against 44.5 ms (**3.5x**).
+
+The gate needs 3x or more at 1,000,000 rows with loading included, and a win from 100,000 rows. Every spike answer was checked against zamda's before timing.
+
+**Firefox**
+
+
+zamda WASM spike (S-301)
+
+Done.
+
+Options in the address: ?rows=100000,1000000&runs=7. Runs start automatically; keep this tab in the foreground.
+
+100,000 rows
+1,000,000 rows
+
+# Spike S-301: Rust kernels against the JS executor
+
+- runtime: Firefox/158.0
+- wasm size (bytes, uncompressed): 45008
+- date: 2026-11-18
+
+## 100,000 rows
+
+| Step | zamda JS (ms) | wasm (ms) |
+| --- | ---: | ---: |
+| load from row objects | 6.00 | 3.00 |
+| load from columns (strings encoded) |  | 5.00 |
+| Q1 routes per network | 4.00 | 1.00 |
+| Q3 routes and distinct networks per region | 2.00 | 1.00 |
+| Q4 top 20 networks | 3.00 | 1.00 |
+| Q7 full sort, radix | 3.00 | 1.00 |
+| Q7 full sort, pdqsort |  | 0.00 |
+
+| Dashboard interaction (four charts) | zamda JS (ms) | wasm (ms) |
+| --- | ---: | ---: |
+| nothing selected | 8.00 | 2.00 (4.0x) |
+| prefix /22-/24, region ARIN, name "cloud" | 9.00 | 1.00 (9.0x) |
+
+**wasm:** gate queries 12.0 ms in JS against 3.00 ms (4.0x); with row loading 18.0 against 6.00 ms (**3.0x**).
+
+## 1,000,000 rows
+
+| Step | zamda JS (ms) | wasm (ms) |
+| --- | ---: | ---: |
+| load from row objects | 60.0 | 23.0 |
+| load from columns (strings encoded) |  | 31.0 |
+| Q1 routes per network | 26.0 | 6.00 |
+| Q3 routes and distinct networks per region | 18.0 | 5.00 |
+| Q4 top 20 networks | 13.0 | 7.00 |
+| Q7 full sort, radix | 38.0 | 10.0 |
+| Q7 full sort, pdqsort |  | 3.00 |
+
+| Dashboard interaction (four charts) | zamda JS (ms) | wasm (ms) |
+| --- | ---: | ---: |
+| nothing selected | 58.0 | 17.0 (3.4x) |
+| prefix /22-/24, region ARIN, name "cloud" | 61.0 | 5.00 (12.2x) |
+
+**wasm:** gate queries 95.0 ms in JS against 21.0 ms (4.5x); with row loading 155 against 44.0 ms (**3.5x**).
+
+The gate needs 3x or more at 1,000,000 rows with loading included, and a win from 100,000 rows. Every spike answer was checked against zamda's before timing.
+
+

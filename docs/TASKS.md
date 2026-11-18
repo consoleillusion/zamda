@@ -4,7 +4,7 @@ Work packages, sized so one agent can finish one in a single session. Read
 `AGENTS.md` first. Take a task only when everything in its "Needs" column is done.
 
 **IDs.** The prefix says where a task sits: `T-1xx` Milestone 1, `T-2xx`
-Milestone 2, `S-3xx` the spike, `T-5xx` later work. Numbers are given out in the
+Milestone 2, `S-3xx` the spike, `T-4xx` Milestone 3, `T-5xx` later work. Numbers are given out in the
 order tasks are written down, not by priority, and are never reused, so there are
 gaps. The owner can reorder tasks freely; the "Needs" column is what is binding.
 
@@ -70,13 +70,32 @@ T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`
 | ID | Task | Needs |
 | --- | --- | --- |
 | S-301 | Under `spike/`: Rust/WASM prototypes of group-by and sort, measured against the spike gate with JS row loading included. **Done, gate met** (D-053, D-054): 4.2x Bun, 3.4x Chrome, 3.5x Firefox at 1M rows, 42.9 KB module, ahead at 100k (`bench/results/spike-my-laptop.md`). Not done and not needed for the gate: arrow-rs and DataFusion comparisons (the hand-written kernels fit the size limit by a wide margin). Throwaway code. | T-207 |
-| S-302 | The dashboard on WASM, first slice (D-056): a per-row failed-controls mask and the four chart kernels (per-network counts, prefix and path length histograms, routes and distinct networks per region), each checked against zamda's answers for two selections. **Built and measured natively in the sandbox only** (1M rows: 94 to 28 ms with nothing selected, 104 to 6.8 ms with selections); the WASM numbers and the 50 ms target check need `bun run spike:build` and `bun run spike` on the owner's machine, and Chrome and Firefox through `bun run spike:browser`. Not covered: the live panel, top-20 selection in JS, parameter binding through the IR. | S-301 |
+| S-302 | The dashboard on WASM, first slice (D-056): a per-row failed-controls mask and the four chart kernels, each checked against zamda's answers for two selections. **Done, target met** (D-057): on the owner's machine at 1M rows one interaction takes 16.6 ms in Chrome and 17 ms in Firefox with nothing selected (zamda JS: 61 and 58 ms), and 4.8 and 5 ms with selections (JS: 85 and 61 ms), against the 50 ms target; Bun 30 ms (`bench/results/spike-my-laptop-2.md`). The kernels are hard-coded to the dashboard's charts, so this shows the ceiling, not what a general engine will reach (T-413 measures that). | S-301 |
 
 ## Milestone 3: WASM engine
 
-Broken into tasks after the spike passes. Expected areas: binary IR encoding,
-Rust validator, kernels, worker host, row loader, memory budget, failure model,
-cross-backend property tests.
+The spike met its gate (D-054) and the dashboard target (D-057). What is left is to turn
+hard-coded kernels into an engine that runs any plan the JS backend runs, with the same answers
+and the same errors. Code goes in a new `engine/` crate; `spike/` stays throwaway. Order of work:
+the first vertical slice is T-401 (done) to T-406, T-408 and T-413 (the dashboard runs on WASM), then T-407,
+T-409, T-410 and T-411. Known risk: a general expression engine will be slower than the spike's
+hard-coded mask pass, so T-413 is the real test of the 50 ms target.
+
+| ID | Task | Needs |
+| --- | --- | --- |
+| T-401 | Binary IR: a compact byte format for `IrPlan` (nodes, expressions, parameters, types, a version byte), with a JS encoder and decoder and `docs/IR-BINARY.md`. **Done** (D-058): `src/ir-binary.ts`; 12 tests (the dashboard's plans, every node and expression kind, literal edge cases, 1,000-value lists, all truncations, every single-bit corruption, 2,000 random inputs, bad counts and numbers, over-deep nesting); every golden test also round-trips its plan. A mutation of each decoder check is caught except the count limit, which is redundant (every element read consumes bytes) and only rejects earlier. | none |
+| T-402 | The `engine/` Rust crate: decoder and validator for the binary IR (types, column and parameter references, limits) with error codes the JS side maps to `PlanError`; a fuzz test that random bytes never panic | T-401 |
+| T-403 | Tables in WASM memory: segments of typed columns, validity bytes, dictionary columns taking ready-made codes (D-055), appends and the retain window with the same "a run sees the table as of its start" rule (C-LIVE). A JS loader that copies each column once | T-402 |
+| T-404 | Expression evaluation over a batch of 65,536 rows: field, literal, parameter, comparisons, arithmetic with checked overflow raising the same error as JS, Kleene `and`/`or`/`not`, `between`, `in`, `cast`, null handling, the constant shortcuts of D-045 and D-052. Functions in the order the dashboard and the reference queries use them; the rest follow as separate tasks | T-402, T-403 |
+| T-405 | Filter and project operators, with selection vectors and a shared failed-controls style evaluation where several charts filter the same rows (D-056) | T-404 |
+| T-406 | Aggregate operator: hash group-by with the key-type specialisations of D-043, `count`, `sum` (checked), `min`, `max`, `count_distinct`, dictionary canonicalisation, group order as `docs/CONTRACT.md` fixes it | T-405 |
+| T-407 | Sort and limit: radix on integer and boolean keys, comparison sort otherwise, heap for small limits (D-051), stable, null placement as the contract says | T-405 |
+| T-408 | `wasmBackend`: a `Backend` whose `execute` loads nothing it does not need, binds parameters, runs the plan in time slices so `AbortSignal`, progress and `latest()` behave as on the JS backend, and returns the same `ResultData` | T-405, T-406 |
+| T-409 | Worker host: the engine in a Web Worker (and a Bun worker), columns moved with `transfer`, abort and progress by message; a plan never blocks the page's thread | T-408 |
+| T-410 | Memory budget and failure model: a byte limit option, allocation failure raised as a typed error, a trap (`panic = abort`) recovered by re-creating the module and reloading, never a half-written result | T-408 |
+| T-411 | Cross-backend tests: the golden suite runs on both backends; a generator of random schemas, data and plans runs each plan on JS and WASM and requires equal results, equal errors and equal group and sort order. This is Milestone 3's "done when" | T-408 |
+| T-412 | Build and size: one command builds the module with `wasm-opt`, the script fails above 400 KB gzipped, and the built `.wasm` ships in the package so users need no Rust toolchain | T-402 |
+| T-413 | The reference dashboard on `wasmBackend`, unchanged except the table's backend option: measure one interaction in Chrome and Firefox against the 50 ms target, and the load time of the routes file. Record the result in `docs/BENCHMARKS.md` | T-405, T-406, T-408 |
 
 ## Later
 

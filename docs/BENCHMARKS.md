@@ -303,6 +303,30 @@ The no-selection case is the slow one for both engines: every row passes, so the
 count hashes a million rows. The WASM target is 50 ms per interaction. Measure on the owner's
 machine before reading anything into the margin.
 
+### Owner's machine: the dashboard on the spike's WASM kernels (S-302)
+
+`bench/results/spike-my-laptop-2.md` (i5-14500, real RIPE data; module 45,008 bytes). One
+interaction, four charts, 1M rows, with results copied out of module memory:
+
+| | zamda JS | WASM | Ratio |
+| --- | ---: | ---: | ---: |
+| Chrome, nothing selected | 61.2 ms | 16.6 ms | 3.7x |
+| Chrome, prefix /22-/24, ARIN, "cloud" | 85.3 ms | 4.8 ms | 17.8x |
+| Firefox, nothing selected | 58 ms | 17 ms | 3.4x |
+| Firefox, same selections | 61 ms | 5 ms | 12x |
+| Bun, nothing selected | 47.5 ms | 30.4 ms | 1.6x |
+| Bun, same selections | 51.0 ms | 7.8 ms | 6.5x |
+
+- **Both targets are met:** the JS backend is under 200 ms in every case (the D-052 estimate of
+  50 to 65 ms for Chrome with nothing selected was close: 61 ms), and WASM is far under 50 ms
+  in both browsers.
+- **Bun is the outlier:** its WASM and its native build are both 30.4 ms, against 17 in the
+  browsers, so the cost is something the two Bun runs share, not WASM. Unexplained and not
+  important for a browser dashboard.
+- **A ceiling, not a forecast:** the kernels know the dashboard's five controls in advance. A
+  general engine (T-404 to T-406) will be slower; T-413 measures that.
+- Gate numbers were stable between the two runs (Chrome 3.5x, Firefox 3.5x, Bun 4.2x with loading).
+
 ## What the numbers say
 
 - zamda's JS backend beats Arquero on every query, by 3.5x to 15x.
