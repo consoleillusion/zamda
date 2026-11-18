@@ -37,7 +37,7 @@ Complete. Gate review: `docs/MILESTONE-1.md`.
 
 ## Milestone 2: JS release
 
-T-201, T-202, T-204 to T-207, T-215, T-216, T-218 and T-221 are done, and T-217 is done except Firefox. T-223 and T-224 are done. Ready now: T-222 (found by T-207), T-208, T-203, T-220. The spike (S-301) has started.
+T-201, T-202, T-204 to T-207, T-215, T-216, T-218 and T-221 are done, and T-217 is done except Firefox. T-222, T-223 and T-224 are done. Ready now: T-208, T-203, T-220. The spike (S-301) is done and the gate is met.
 T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`; the rest are independent.
 
 | ID | Task | Needs |
@@ -61,7 +61,7 @@ T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`
 | T-221 | Full sort was zamda's weakest query: 87 ms for 1M rows on the owner's machine against Arquero's 31 ms, and two thirds of the spike gate's JS time. **Done as far as it goes:** the sort itself was slow (3 closure calls per comparison); integer and boolean keys now use a stable LSD radix sort (D-051), 4x faster than the comparison sort on random order and 2.5x on address-ordered data in the sandbox. On the owner's real data the full sort only went from 87 to 72 ms (`my-laptop-2.md`) and Arquero still wins it (31 ms): the real table is already in address order, which native comparison sorts exploit, and about half of what remains is gathering the sorted columns. Not worth more work now. | T-207 |
 | T-223 | Why is the same dashboard work slower in Chromium than in Bun? **Done:** `bun run bench:compare` and `bun run bench:browser` run the same measurements under Bun (JavaScriptCore) and Chrome (V8). Same machine, 1M rows: not time slicing (identical with it off), but V8 is about 2x slower on the filter path (the dashboard's four charts started together: Chrome 241 to 301 ms, Bun 108 to 137 ms; the filtered query Q5: 88 against 41 ms) while plain group-bys are about equal (Q1 68 against 63 ms) and the full sort is faster in V8 (78 against 160 ms). Results in `docs/BENCHMARKS.md`. Firefox not measured. | T-207 |
 | T-224 | The dashboard's four charts cost about twice what the same queries cost alone, because every chart carries all five filter controls and each was evaluated over a million rows even when switched off (the owner's real numbers, `bench/results/browser-my-laptop.md`: interaction 96 to 103 ms in Chrome, 67 to 92 ms in Firefox, against about 41 ms of single queries). **Done** (D-052): a comparison that every row answers the same way (a range covering the column's whole integer type) is now a constant, `and`/`or` skip the other side, and a constant filter keeps all rows or none without reading anything. In the sandbox the interaction fell from 241 to 125 ms (nothing selected) and 301 to 180 ms (with selections) in Chrome, and from 137 to 104 and 108 to 87 ms in Bun. Not yet measured on the owner's machine. | T-223 |
-| T-222 | `table()` from columns takes 127 ms at 1M rows when a column is a `string[]`, because every string is re-encoded into a dictionary; Arquero takes none. Accept ready-made dictionary columns (codes plus the list of unique strings) in `ColumnInput`, so the routes file loads without re-encoding | T-207 |
+| T-222 | `table()` from columns took 172 ms at 1M rows (sandbox) when a column is a `string[]`, because every string is re-encoded into a dictionary. **Done** (D-055): `{ codes, dictionary, nullCode? }` is accepted for dictionary columns and the routes file loads through it: 172 ms down to 32 ms in the sandbox, 5 new tests (a mutation of each check is caught). Not yet measured on the owner's machine (was 42 to 45 ms). | T-207 |
 | T-219 | `lower`/`upper` on a dictionary column return `utf8`, so the strings are materialised per row. Keep dictionary encoding through them (entries must be re-deduplicated: "A" and "a" both lower to "a"). The shortcut in D-045 covers the dashboard's search, so this only matters when the result is stored or grouped | T-211 |
 | T-212 | Sort directly over a large table copies every needed column once before sorting; sort a selection over the source instead | T-201 |
 
@@ -69,7 +69,7 @@ T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`
 
 | ID | Task | Needs |
 | --- | --- | --- |
-| S-301 | Under `spike/`: Rust/WASM prototypes of group-by and sort, measured against the spike gate in `docs/ROADMAP.md` with JS row loading included. **Started** (D-053): kernels for Q1, Q3, Q4 and Q7 written, tested and checked against zamda's answers; native upper bound measured in the sandbox (3.9x at 1M rows, loading included, synthetic data). Not yet done: the WASM build and its measurement on the owner's machine (`bun run spike:build`, `bun run spike`, `bun run spike:browser`), the module size, and the arrow-rs and DataFusion comparisons. Throwaway code. | T-207 |
+| S-301 | Under `spike/`: Rust/WASM prototypes of group-by and sort, measured against the spike gate with JS row loading included. **Done, gate met** (D-053, D-054): 4.2x Bun, 3.4x Chrome, 3.5x Firefox at 1M rows, 42.9 KB module, ahead at 100k (`bench/results/spike-my-laptop.md`). Not done and not needed for the gate: arrow-rs and DataFusion comparisons (the hand-written kernels fit the size limit by a wide margin). Throwaway code. | T-207 |
 
 ## Milestone 3: WASM engine
 

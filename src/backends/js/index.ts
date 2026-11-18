@@ -15,14 +15,18 @@ import type { Fields, RowOf, Schema } from '../../schema';
 import type { Segment } from './exec';
 import { executeJs } from './exec';
 import { loadColumns, loadRows } from './load';
+import type { DictionaryInput } from './load';
+export type { DictionaryInput };
 
 // A row as accepted by table() and append(): a missing property means null.
 export type RowInput<F extends Fields> = Partial<RowOf<F>>;
 
 // One array per column. A typed array of the column's own storage type is used
 // without copying; a plain array is checked value by value and may hold nulls.
+// A dictionary column may also arrive already encoded as { codes, dictionary }:
+// the strings are not re-encoded, only the codes are checked.
 export interface ColumnInput<F extends Fields> {
-  readonly columns: { readonly [K in keyof F]: ArrayLike<unknown> };
+  readonly columns: { readonly [K in keyof F]: ArrayLike<unknown> | DictionaryInput };
 }
 
 export type TableInput<F extends Fields> = readonly RowInput<F>[] | ColumnInput<F>;

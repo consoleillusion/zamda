@@ -147,14 +147,82 @@ function numericStorage(type: DataType): boolean {
   return isInt(type) || isBigInt(type) || isFloat(type);
 }
 
+// A dictionary column that is already encoded: one code per row and the list of
+// distinct strings the codes point into. A negative code is null, or `nullCode`
+// when given (a file may store null as 255 in a uint8 column, say).
+export interface DictionaryInput {
+  readonly codes: Int32Array | Uint32Array | Uint16Array | Uint8Array;
+  readonly dictionary: readonly string[];
+  readonly nullCode?: number;
+}
+
+function isDictionaryInput(value: unknown): value is DictionaryInput {
+  // Purpose: true for an object holding codes and a dictionary (a plain object, not an array)
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    isTypedArray((value as { codes?: unknown }).codes) &&
+    Array.isArray((value as { dictionary?: unknown }).dictionary)
+  );
+}
+
+function loadEncoded(field: Field, input: DictionaryInput): Column {
+  // Purpose: check an already encoded dictionary column and adopt it; an Int32Array without nulls is not copied
+  const { codes, dictionary } = input;
+  if (field.type.name !== 'dictionary') {
+    throw new SchemaError(`Column "${field.name}" (${field.type.name}) cannot be loaded from { codes, dictionary }`);
+  }
+  const unique = new Set<string>();
+  for (let d = 0; d < dictionary.length; d++) {
+    const entry = dictionary[d];
+    if (typeof entry !== 'string') throw new SchemaError(`Column "${field.name}": dictionary entry ${d} is not a string`);
+    unique.add(entry);
+  }
+  if (unique.size !== dictionary.length) {
+    throw new SchemaError(`Column "${field.name}": dictionary entries must be unique`);
+  }
+  const n = codes.length;
+  const nullCode = input.nullCode;
+  const size = dictionary.length;
+  let nulls = 0;
+  for (let r = 0; r < n; r++) {
+    const code = codes[r]!;
+    if (nullCode !== undefined ? code === nullCode : code < 0) nulls++;
+    else if (code < 0 || code >= size) {
+      throw new SchemaError(`Row ${r}, column "${field.name}": code ${code} is outside the dictionary of ${size} entries`);
+    }
+  }
+  if (nulls === 0 && codes instanceof Int32Array) return makeColumn(field.type, codes, null, dictionary);
+  const out = new Int32Array(n);
+  const valid = new Uint8Array(n);
+  for (let r = 0; r < n; r++) {
+    const code = codes[r]!;
+    if (nullCode !== undefined ? code === nullCode : code < 0) continue;
+    out[r] = code;
+    valid[r] = 1;
+  }
+  return makeColumn(field.type, out, valid, dictionary);
+}
+
 export function loadColumns(
   schema: Schema,
-  columns: Readonly<Record<string, ArrayLike<unknown>>>,
+  columns: Readonly<Record<string, ArrayLike<unknown> | DictionaryInput>>,
 ): { columns: Column[]; rowCount: number } {
   // Purpose: build a table from one array per column; a matching typed array is used without copying
   let rowCount = -1;
   const out = schema.list.map(function (field) {
-    const input = columns[field.name];
+    const raw = columns[field.name];
+    if (isDictionaryInput(raw)) {
+      if (rowCount === -1) rowCount = raw.codes.length;
+      if (raw.codes.length !== rowCount) {
+        throw new SchemaError(
+          `Column "${field.name}" has ${raw.codes.length} values but "${schema.list[0]!.name}" has ${rowCount}`,
+        );
+      }
+      return loadEncoded(field, raw);
+    }
+    const input = raw as ArrayLike<unknown> | undefined;
     if (input === undefined || input === null || typeof input.length !== 'number') {
       throw new SchemaError(`Column "${field.name}" is missing or is not an array`);
     }

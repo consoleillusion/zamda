@@ -258,6 +258,33 @@ At 100,000 rows the same comparison is 3.3x with loading. What it shows:
   query part), the module size, and the owner's machine, where zamda's own sort and group-bys
   are faster than in the sandbox (`my-laptop.md`), so the ratio will be lower there.
 
+## WASM spike on the owner's machine (S-301)
+
+i5-14500, real RIPE data, `bench/results/spike-my-laptop.md`. The module is **42,895 bytes**
+uncompressed for the four gate kernels. Every answer was checked against zamda's first.
+
+| 1,000,000 rows | zamda JS | WASM | Ratio |
+| --- | ---: | ---: | ---: |
+| Bun: gate queries | 111 ms | 19.6 ms | 5.7x |
+| Bun: with row loading | 181 ms | 43.6 ms | **4.2x** |
+| Chrome: gate queries | 81.0 ms | 20.2 ms | 4.0x |
+| Chrome: with row loading | 155 ms | 45.1 ms | **3.4x** |
+| Firefox: gate queries | 97 ms | 22 ms | 4.4x |
+| Firefox: with row loading | 159 ms | 46 ms | **3.5x** |
+
+At 100,000 rows with loading: 3.3x (Bun), 3.2x (Chrome), 2.6x (Firefox). WASM was within about
+1.3x of the native build on the queries. All three gate conditions hold: 3x at 1M, far under
+400 KB, ahead at 100k. What the table hides:
+
+- **The sort carries the result.** The spike's Q7 is 2.9 ms because pdqsort is adaptive and the
+  real table is already in address order; zamda's radix sort is not adaptive (74 ms in Bun, 26 in
+  Chrome). On unordered data the Rust sort takes 19 to 27 ms (sandbox). Without Q7, the ratio
+  with loading is 2.6x (Bun), 3.0x (Chrome) and 2.8x (Firefox): at or under the gate.
+- **Loading is about half of the WASM time** (24 ms of 44). Loading from columns with strings
+  encoded is 21 ms. Ready-made dictionary columns (T-222) would remove most of it.
+- **Not measured:** the filter path (Q5), so the dashboard's 50 ms target is unconfirmed; sizes
+  below 100,000 rows; Firefox timings are rounded to whole milliseconds.
+
 ## What the numbers say
 
 - zamda's JS backend beats Arquero on every query, by 3.5x to 15x.

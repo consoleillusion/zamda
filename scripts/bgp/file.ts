@@ -189,16 +189,28 @@ export function decodeRoutes(input: Uint8Array): { arrays: RouteArrays; header: 
 }
 
 export function loadRoutes(input: Uint8Array): { table: JsTable<typeof Routes.fields>; header: RoutesHeader } {
-  // Purpose: build a zamda table from a routes file; the number columns are used without copying
-  const { arrays, header } = decodeRoutes(input);
+  // Purpose: build a zamda table from a routes file; the number columns are used without copying and the two
+  // dictionary columns keep the file's own codes and lists, so no string is decoded or encoded again (T-222)
+  const bytes = input.byteOffset % 4 === 0 ? input : input.slice();
+  const header = readHeader(bytes);
+  const n = header.rowCount;
+  const col = header.columns;
+  const u32 = function (ref: ColumnRef): Uint32Array {
+    // Purpose: a Uint32Array view of one column
+    return new Uint32Array(bytes.buffer, bytes.byteOffset + ref.offset, n);
+  };
+  const u8 = function (ref: ColumnRef): Uint8Array {
+    // Purpose: a Uint8Array view of one column
+    return new Uint8Array(bytes.buffer, bytes.byteOffset + ref.offset, n);
+  };
   const routes = table(Routes, {
     columns: {
-      prefix_addr: arrays.prefix_addr,
-      prefix_len: arrays.prefix_len,
-      origin_as: arrays.origin_as,
-      as_name: arrays.as_name,
-      path_len: arrays.path_len,
-      rir: arrays.rir,
+      prefix_addr: u32(col.prefix_addr),
+      prefix_len: u8(col.prefix_len),
+      origin_as: u32(col.origin_as),
+      as_name: { codes: u32(col.as_name), dictionary: header.names, nullCode: NO_NAME },
+      path_len: u8(col.path_len),
+      rir: { codes: u8(col.rir), dictionary: header.rirs, nullCode: NO_RIR },
     },
   });
   return { table: routes, header };

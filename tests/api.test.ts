@@ -106,3 +106,48 @@ describe('table() from columns', () => {
     expect(tb.rowCount).toBe(0);
   });
 });
+
+describe('encoded dictionary columns (T-222)', () => {
+  const S = schema({ id: t.uint32, tag: t.dictionary });
+  const tagOf = async (tb: ReturnType<typeof table<typeof S.fields>>): Promise<unknown[]> => {
+    // Purpose: the tag of every row, in order
+    const result = await pipe(S).select(c => ({ tag: c.tag })).compile().execute(tb);
+    return result.toArray().map(row => (row as { tag: string | null }).tag);
+  };
+
+  test('codes and dictionary load as the strings they stand for, with nulls', async () => {
+    const tb = table(S, { columns: { id: new Uint32Array(4), tag: { codes: new Int32Array([1, -1, 0, 1]), dictionary: ['a', 'b'] } } });
+    expect(await tagOf(tb)).toEqual(['b', null, 'a', 'b']);
+  });
+
+  test('a null code of your own and narrower code arrays work', async () => {
+    const tb = table(S, { columns: { id: new Uint32Array(3), tag: { codes: new Uint8Array([0, 255, 1]), dictionary: ['x', 'y'], nullCode: 255 } } });
+    expect(await tagOf(tb)).toEqual(['x', null, 'y']);
+  });
+
+  test('an Int32Array with no nulls is adopted without a copy', () => {
+    const codes = new Int32Array([0, 1, 0]);
+    const tb = table(S, { columns: { id: new Uint32Array(3), tag: { codes, dictionary: ['p', 'q'] } } });
+    const column = tb.snapshot()[0]!.columns[1]!;
+    expect(column.values).toBe(codes);
+    expect(column.valid).toBeNull();
+  });
+
+  test('bad input is rejected', () => {
+    const id = new Uint32Array(2);
+    expect(() => table(S, { columns: { id, tag: { codes: new Int32Array([0, 2]), dictionary: ['a', 'b'] } } })).toThrow(SchemaError);
+    expect(() => table(S, { columns: { id, tag: { codes: new Int32Array([0, 1]), dictionary: ['a', 'a'] } } })).toThrow(SchemaError);
+    expect(() => table(S, { columns: { id, tag: { codes: new Int32Array([0, 1]), dictionary: ['a', 1 as never] } } })).toThrow(SchemaError);
+    expect(() => table(S, { columns: { id: new Uint32Array(3), tag: { codes: new Int32Array([0, 1]), dictionary: ['a', 'b'] } } })).toThrow(SchemaError);
+    expect(() => table(schema({ n: t.uint32 }), { columns: { n: { codes: new Int32Array(1), dictionary: [] } as never } })).toThrow(SchemaError);
+  });
+
+  test('a table built from codes gives the same answers as one built from strings', async () => {
+    const strings = ['a', null, 'b', 'a', 'b', 'b'];
+    const encoded = table(S, { columns: { id: new Uint32Array(6), tag: { codes: new Int32Array([0, -1, 1, 0, 1, 1]), dictionary: ['a', 'b'] } } });
+    const plain = table(S, { columns: { id: new Uint32Array(6), tag: strings } });
+    const plan = pipe(S).groupBy(c => ({ tag: c.tag })).agg(() => ({ n: count() })).compile();
+    const rows = async (tb: typeof plain) => (await plan.execute(tb)).toArray().map(r => `${(r as { tag: string | null }).tag}=${(r as { n: number }).n}`).sort();
+    expect(await rows(encoded)).toEqual(await rows(plain));
+  });
+});
