@@ -91,7 +91,8 @@ function call(fn: string, args: IrExpr[]): IrExpr {
 function leaf(ctx: Ctx, type: TypeName): IrExpr {
   // Purpose: a column, a literal or a parameter of a type
   const r = ctx.rng();
-  if (r < 0.55) return { kind: 'field', index: pick(ctx.rng, ctx.fields.get(type)!), type: dt(type) };
+  const columns = ctx.fields.get(type);
+  if (r < 0.55 && columns !== undefined && columns.length > 0) return { kind: 'field', index: pick(ctx.rng, columns), type: dt(type) };
   const value = dataValue(ctx.rng, type, ctx.wild);
   if (r < 0.85) return { kind: 'literal', value, type: dt(type) };
   const name = `p${ctx.params.length}`;

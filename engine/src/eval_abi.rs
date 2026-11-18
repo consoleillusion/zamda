@@ -18,39 +18,40 @@ use crate::store_abi::with_snapshot;
 use crate::types::Type;
 use crate::vector::Values;
 
-const OVERFLOW: u32 = 301;
-const DIVIDE_BY_ZERO: u32 = 302;
-const UNSUPPORTED: u32 = 303;
-const BAD_LITERAL: u32 = 304;
-const MISSING_PARAM: u32 = 305;
-const INTERNAL: u32 = 306;
-const SCHEMA_MISMATCH: u32 = 307;
-const BAD_HANDLE: u32 = 308;
-const BAD_ARGUMENT: u32 = 309;
+pub(crate) const OVERFLOW: u32 = 301;
+pub(crate) const DIVIDE_BY_ZERO: u32 = 302;
+pub(crate) const UNSUPPORTED: u32 = 303;
+pub(crate) const BAD_LITERAL: u32 = 304;
+pub(crate) const MISSING_PARAM: u32 = 305;
+pub(crate) const INTERNAL: u32 = 306;
+pub(crate) const SCHEMA_MISMATCH: u32 = 307;
+pub(crate) const BAD_HANDLE: u32 = 308;
+pub(crate) const BAD_ARGUMENT: u32 = 309;
 
 // The operation names an overflow or division error can carry, by index.
 const WHATS: [&str; 9] = ["add", "sub", "mul", "div", "intDiv", "mod", "neg", "abs", "cast"];
 
-struct EvalResult {
-    ty: Type,
-    rows: usize,
-    values: Values<'static>,
-    valid: Option<Vec<u8>>,
+pub(crate) struct EvalResult {
+    pub(crate) ty: Type,
+    pub(crate) rows: usize,
+    pub(crate) values: Values<'static>,
+    pub(crate) valid: Option<Vec<u8>>,
 }
 
-struct Registry {
-    plans: Vec<Option<Rc<Plan>>>,
-    params: Vec<Option<Rc<Params>>>,
-    results: Vec<Option<EvalResult>>,
+pub(crate) struct Registry {
+    pub(crate) plans: Vec<Option<Rc<Plan>>>,
+    pub(crate) params: Vec<Option<Rc<Params>>>,
+    pub(crate) results: Vec<Option<EvalResult>>,
+    pub(crate) runs: Vec<Option<crate::exec::Run>>,
 }
 
 thread_local! {
-    static REGISTRY: RefCell<Registry> = const { RefCell::new(Registry { plans: Vec::new(), params: Vec::new(), results: Vec::new() }) };
+    pub(crate) static REGISTRY: RefCell<Registry> = const { RefCell::new(Registry { plans: Vec::new(), params: Vec::new(), results: Vec::new(), runs: Vec::new() }) };
     // (code, which operation, which type)
     static LAST: Cell<(u32, u32, u32)> = const { Cell::new((0, 0, 0)) };
 }
 
-fn set_error(code: u32, what: u32, ty: u32) -> u32 {
+pub(crate) fn set_error(code: u32, what: u32, ty: u32) -> u32 {
     // Purpose: remember an error for zs_eval_error and friends
     LAST.with(|c| c.set((code, what, ty)));
     code
@@ -61,7 +62,7 @@ fn plan_error(e: Error) -> u32 {
     set_error(e.code as u32, e.at as u32, 0)
 }
 
-fn eval_error(e: &EvalError) -> u32 {
+pub(crate) fn eval_error(e: &EvalError) -> u32 {
     // Purpose: remember an evaluation error with its operation and type
     let what = |w: &str| WHATS.iter().position(|x| *x == w).unwrap_or(0) as u32;
     match e {
@@ -74,7 +75,7 @@ fn eval_error(e: &EvalError) -> u32 {
     }
 }
 
-fn place<T>(slots: &mut Vec<Option<T>>, value: T) -> u32 {
+pub(crate) fn place<T>(slots: &mut Vec<Option<T>>, value: T) -> u32 {
     // Purpose: store a value in the first free slot and return its handle (index + 1)
     if let Some(i) = slots.iter().position(|s| s.is_none()) {
         slots[i] = Some(value);
@@ -84,7 +85,7 @@ fn place<T>(slots: &mut Vec<Option<T>>, value: T) -> u32 {
     slots.len() as u32
 }
 
-fn release<T>(slots: &mut [Option<T>], handle: u32) -> u32 {
+pub(crate) fn release<T>(slots: &mut [Option<T>], handle: u32) -> u32 {
     // Purpose: free a handle, or report that it was not in use
     match (handle as usize).checked_sub(1).and_then(|i| slots.get_mut(i)) {
         Some(slot) if slot.is_some() => {

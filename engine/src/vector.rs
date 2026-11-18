@@ -199,6 +199,90 @@ impl Values<'_> {
         }
     }
 
+    pub fn truncate(&mut self, n: usize) {
+        // Purpose: keep only the first n values
+        fn cut<T: Clone>(c: &mut Cow<'_, [T]>, n: usize) {
+            if n >= c.len() {
+                return;
+            }
+            match c {
+                Cow::Borrowed(s) => *s = &s[..n],
+                Cow::Owned(v) => v.truncate(n),
+            }
+        }
+        match self {
+            Values::I8(v) => cut(v, n),
+            Values::I16(v) => cut(v, n),
+            Values::I32(v) => cut(v, n),
+            Values::I64(v) => cut(v, n),
+            Values::U8(v) => cut(v, n),
+            Values::U16(v) => cut(v, n),
+            Values::U32(v) => cut(v, n),
+            Values::U64(v) => cut(v, n),
+            Values::F32(v) => cut(v, n),
+            Values::F64(v) => cut(v, n),
+        }
+    }
+
+    pub fn reborrow(&self) -> Values<'_> {
+        // Purpose: the same values borrowed from this one, so an owned column can be read as a batch column without copying
+        match self {
+            Values::I8(v) => Values::I8(Cow::Borrowed(&**v)),
+            Values::I16(v) => Values::I16(Cow::Borrowed(&**v)),
+            Values::I32(v) => Values::I32(Cow::Borrowed(&**v)),
+            Values::I64(v) => Values::I64(Cow::Borrowed(&**v)),
+            Values::U8(v) => Values::U8(Cow::Borrowed(&**v)),
+            Values::U16(v) => Values::U16(Cow::Borrowed(&**v)),
+            Values::U32(v) => Values::U32(Cow::Borrowed(&**v)),
+            Values::U64(v) => Values::U64(Cow::Borrowed(&**v)),
+            Values::F32(v) => Values::F32(Cow::Borrowed(&**v)),
+            Values::F64(v) => Values::F64(Cow::Borrowed(&**v)),
+        }
+    }
+
+    pub fn gather(&self, sel: &[u32]) -> Values<'static> {
+        // Purpose: the values at the given row indexes, in that order
+        macro_rules! pick {
+            ($v:expr, $variant:ident) => {
+                Values::$variant(Cow::Owned(sel.iter().map(|&i| $v[i as usize]).collect()))
+            };
+        }
+        match self {
+            Values::I8(v) => pick!(v, I8),
+            Values::I16(v) => pick!(v, I16),
+            Values::I32(v) => pick!(v, I32),
+            Values::I64(v) => pick!(v, I64),
+            Values::U8(v) => pick!(v, U8),
+            Values::U16(v) => pick!(v, U16),
+            Values::U32(v) => pick!(v, U32),
+            Values::U64(v) => pick!(v, U64),
+            Values::F32(v) => pick!(v, F32),
+            Values::F64(v) => pick!(v, F64),
+        }
+    }
+
+    pub fn append(&mut self, other: &Values<'_>) {
+        // Purpose: add another column's values of the same storage class at the end
+        macro_rules! ext {
+            ($a:expr, $b:expr) => {
+                $a.to_mut().extend_from_slice($b)
+            };
+        }
+        match (self, other) {
+            (Values::I8(a), Values::I8(b)) => ext!(a, b),
+            (Values::I16(a), Values::I16(b)) => ext!(a, b),
+            (Values::I32(a), Values::I32(b)) => ext!(a, b),
+            (Values::I64(a), Values::I64(b)) => ext!(a, b),
+            (Values::U8(a), Values::U8(b)) => ext!(a, b),
+            (Values::U16(a), Values::U16(b)) => ext!(a, b),
+            (Values::U32(a), Values::U32(b)) => ext!(a, b),
+            (Values::U64(a), Values::U64(b)) => ext!(a, b),
+            (Values::F32(a), Values::F32(b)) => ext!(a, b),
+            (Values::F64(a), Values::F64(b)) => ext!(a, b),
+            _ => panic!("appending values of another storage class"),
+        }
+    }
+
     pub fn into_owned(self) -> Values<'static> {
         // Purpose: the same values, owned
         match self {
@@ -246,6 +330,46 @@ impl<'a> Vector<'a> {
         match &self.data {
             Data::Const(_) => None,
             Data::Col { valid, .. } => valid.as_deref(),
+        }
+    }
+
+    pub fn truncate(&mut self, n: usize) {
+        // Purpose: keep only the first n rows (a constant is unchanged)
+        if let Data::Col { values, valid } = &mut self.data {
+            values.truncate(n);
+            if let Some(v) = valid {
+                match v {
+                    Cow::Borrowed(s) if n < s.len() => *s = &s[..n],
+                    Cow::Owned(o) => o.truncate(n),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub fn reborrow(&self) -> Vector<'_> {
+        // Purpose: the same vector borrowed from this one
+        let data = match &self.data {
+            Data::Const(s) => Data::Const(*s),
+            Data::Col { values, valid } => Data::Col {
+                values: values.reborrow(),
+                valid: valid.as_ref().map(|v| Cow::Borrowed(&**v)),
+            },
+        };
+        Vector { ty: self.ty, data }
+    }
+
+    pub fn gather(&self, sel: &[u32]) -> Vector<'static> {
+        // Purpose: the rows at the given indexes as an owned vector (a constant stays a constant)
+        match &self.data {
+            Data::Const(s) => Vector { ty: self.ty, data: Data::Const(*s) },
+            Data::Col { values, valid } => Vector {
+                ty: self.ty,
+                data: Data::Col {
+                    values: values.gather(sel),
+                    valid: valid.as_ref().map(|v| Cow::Owned(sel.iter().map(|&i| v[i as usize]).collect())),
+                },
+            },
         }
     }
 

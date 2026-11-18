@@ -87,7 +87,7 @@ hard-coded mask pass, so T-413 is the real test of the 50 ms target.
 | T-402 (done) | The `engine/` Rust crate: decoder and validator for the binary IR (types, column and parameter references, limits) with error codes the JS side maps to `PlanError`; a fuzz test that random bytes never panic | T-401 |
 | T-403 (done) | Tables in WASM memory: segments of typed columns, validity bytes, dictionary columns taking ready-made codes (D-055), appends and the retain window with the same "a run sees the table as of its start" rule (C-LIVE). A JS loader that copies each column once | T-402 |
 | T-404 (done) | Expression evaluation over a batch of 65,536 rows: field, literal, parameter, comparisons, arithmetic with checked overflow raising the same error as JS, Kleene `and`/`or`/`not`, `between`, `in`, `cast`, null handling, the constant shortcuts of D-045 and D-052. Functions in the order the dashboard and the reference queries use them; the rest follow as separate tasks | T-402, T-403 |
-| T-405 | Filter and project operators, with selection vectors and a shared failed-controls style evaluation where several charts filter the same rows (D-056) | T-404 |
+| T-405 (done) | Run scan, filter, project and limit chains in the engine with selection vectors, one chunk per step (D-062), checked against the JS executor on random plans. The shared failed-controls evaluation across charts (D-056) is not built: each chart's plan filters on its own, and T-413's measurement decides whether it is needed (T-416) | T-404 |
 | T-406 | Aggregate operator: hash group-by with the key-type specialisations of D-043, `count`, `sum` (checked), `min`, `max`, `count_distinct`, dictionary canonicalisation, group order as `docs/CONTRACT.md` fixes it | T-405 |
 | T-407 | Sort and limit: radix on integer and boolean keys, comparison sort otherwise, heap for small limits (D-051), stable, null placement as the contract says | T-405 |
 | T-408 | `wasmBackend`: a `Backend` whose `execute` loads nothing it does not need, binds parameters, runs the plan in time slices so `AbortSignal`, progress and `latest()` behave as on the JS backend, and returns the same `ResultData` | T-405, T-406 |
@@ -98,6 +98,7 @@ hard-coded mask pass, so T-413 is the real test of the 50 ms target.
 | T-413 | The reference dashboard on `wasmBackend`, unchanged except the table's backend option: measure one interaction in Chrome and Firefox against the 50 ms target, and the load time of the routes file. Record the result in `docs/BENCHMARKS.md` | T-405, T-406, T-408 |
 | T-414 | String expressions over dictionary columns (`lower`, `contains`, `starts_with`, `ends_with`, `upper`, `length`, `eq` and `in` on strings, `coalesce` on strings). Strings stay on the host (D-060), so the host evaluates such an expression once per dictionary entry and gives the engine a per-code table; the engine then evaluates the expression as a lookup by code. Needed by the dashboard's name search | T-404 |
 | T-415 | `date_trunc` and `extract` for date32 and timestamp (UTC calendar arithmetic, C-TIME) | T-404 |
+| T-416 | Only if T-413 misses the 50 ms target: evaluate the dashboard's controls once per interaction and share the result between charts (D-056) | T-413 |
 
 ## Later
 

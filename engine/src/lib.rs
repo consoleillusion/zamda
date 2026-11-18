@@ -5,6 +5,8 @@ pub mod decode;
 pub mod encode;
 pub mod error;
 pub mod eval_abi;
+pub mod exec;
+pub mod run_abi;
 pub mod eval;
 pub mod ir;
 pub mod kernels;

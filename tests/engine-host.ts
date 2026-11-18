@@ -21,6 +21,12 @@ export interface EvalHost extends EngineHost {
   resultValues(result: number): number;
   resultValid(result: number): number;
   resultFree(result: number): number;
+  runNew(plan: number, params: number, snapshot: number, chunkRows: number): number;
+  runStep(run: number): number;
+  runScanned(run: number): number;
+  runFinish(run: number): number;
+  runColumn(index: number): number;
+  runFree(run: number): number;
   evalError(): number;
   evalErrorWhat(): number;
   evalErrorType(): number;
@@ -76,6 +82,12 @@ export function nativeHost(): EvalHost | null {
     zs_result_values: { args: [u], returns: p },
     zs_result_valid: { args: [u], returns: p },
     zs_result_free: { args: [u], returns: u },
+    zs_run_new: { args: [u, u, u, u], returns: u },
+    zs_run_step: { args: [u], returns: u },
+    zs_run_scanned: { args: [u], returns: FFIType.u64 },
+    zs_run_finish: { args: [u], returns: u },
+    zs_run_column: { args: [u], returns: u },
+    zs_run_free: { args: [u], returns: u },
     zs_eval_error: { args: [], returns: u },
     zs_eval_error_what: { args: [], returns: u },
     zs_eval_error_type: { args: [], returns: u },
@@ -131,6 +143,12 @@ export function nativeHost(): EvalHost | null {
     resultValues: r => num(s.zs_result_values!(r)),
     resultValid: r => num(s.zs_result_valid!(r)),
     resultFree: r => s.zs_result_free!(r),
+    runNew: (plan, params, snapshot, chunkRows) => s.zs_run_new!(plan, params, snapshot, chunkRows),
+    runStep: r => s.zs_run_step!(r),
+    runScanned: r => Number(s.zs_run_scanned!(r)),
+    runFinish: r => s.zs_run_finish!(r),
+    runColumn: i => s.zs_run_column!(i),
+    runFree: r => s.zs_run_free!(r),
     evalError: () => s.zs_eval_error!(),
     evalErrorWhat: () => s.zs_eval_error_what!(),
     evalErrorType: () => s.zs_eval_error_type!(),

@@ -18,6 +18,8 @@ import { t } from '../src/types';
 import type { TypeName } from '../src/types';
 import { validate } from '../src/validate';
 import { nativeHost } from './engine-host';
+import { compareValues } from './engine-compare';
+import type { Engine } from './engine-compare';
 import { ALL, dataValue, makeCase, seeded } from './engine-eval-gen';
 import type { Case } from './engine-eval-gen';
 
@@ -70,13 +72,6 @@ function planFor(c: Case): IrPlan {
   };
 }
 
-interface Engine {
-  rows: number;
-  type: number;
-  values: Uint8Array;
-  valid: Uint8Array | null;
-}
-
 type Outcome = { ok: true; engine: Engine } | { ok: false; code: number; what: string; type: string };
 
 function evaluate(plan: number, params: number, snapshot: number, start: number, rows: number): Outcome {
@@ -95,44 +90,6 @@ function evaluate(plan: number, params: number, snapshot: number, start: number,
   const valid = v === 0 ? null : h.view(v, n).slice();
   h.resultFree(r);
   return { ok: true, engine: { rows: n, type, values, valid } };
-}
-
-function same(a: number, b: number, float: boolean): boolean {
-  // Purpose: equal values, with NaN equal to NaN and -0 different from 0
-  return float ? (Number.isNaN(a) && Number.isNaN(b)) || Object.is(a, b) : a === b;
-}
-
-function compareValues(type: TypeName, js: Column, e: Engine, label: string): void {
-  // Purpose: the engine's result equals the JS column in null rows and, for rows that are not null, in value
-  const n = e.rows;
-  expect(js.values.length, label).toBe(n);
-  const jsValid = js.valid;
-  for (let i = 0; i < n; i++) {
-    const jv = jsValid ? jsValid[i]! : 1;
-    const ev = e.valid ? e.valid[i]! : 1;
-    if (jv !== ev) throw new Error(`${label}: row ${i} validity differs (js ${jv}, engine ${ev})`);
-  }
-  const copy = e.values.buffer.slice(e.values.byteOffset, e.values.byteOffset + e.values.byteLength);
-  const typed =
-    type === 'float64' || type === 'timestamp' ? new Float64Array(copy)
-    : type === 'float32' ? new Float32Array(copy)
-    : type === 'int64' ? new BigInt64Array(copy)
-    : type === 'uint64' ? new BigUint64Array(copy)
-    : type === 'int32' || type === 'date32' ? new Int32Array(copy)
-    : type === 'uint32' ? new Uint32Array(copy)
-    : type === 'int16' ? new Int16Array(copy)
-    : type === 'uint16' ? new Uint16Array(copy)
-    : type === 'int8' ? new Int8Array(copy)
-    : new Uint8Array(copy);
-  const float = type.startsWith('float') || type === 'timestamp';
-  const jsValues = js.values as unknown as ArrayLike<number | bigint>;
-  for (let i = 0; i < n; i++) {
-    if (jsValid && !jsValid[i]) continue;
-    const a = jsValues[i]!;
-    const b = typed[i]!;
-    const ok = typeof a === 'bigint' ? a === b : same(a as number, b as number, float);
-    if (!ok) throw new Error(`${label}: row ${i} differs (js ${String(a)}, engine ${String(b)})`);
-  }
 }
 
 async function runCase(c: Case, rows: Record<string, unknown>[], label: string): Promise<'ok' | 'error'> {

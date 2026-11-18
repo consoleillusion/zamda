@@ -30,7 +30,7 @@
     "spike:test": "cargo test --release --manifest-path spike/Cargo.toml",
     "gen:engine": "bun scripts/engine-fixtures.ts",
     "engine:build": "cargo build --release --manifest-path engine/Cargo.toml",
-    "engine:test": "bun run engine:build && bun test tests/engine-store.test.ts tests/engine-eval.test.ts && cargo test --release --manifest-path engine/Cargo.toml"
+    "engine:test": "bun run engine:build && bun test tests/engine-store.test.ts tests/engine-eval.test.ts tests/engine-run.test.ts && cargo test --release --manifest-path engine/Cargo.toml"
   },
   "devDependencies": {
     "@types/bun": "latest",

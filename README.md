@@ -76,7 +76,7 @@ bun run check     # typecheck + tests + size budget
 | `bun run bench:compare` | The reference queries and the dashboard's interactions under Bun, with and without time slicing; compare with `bun run bench:browser` (a page to open in any browser) |
 | `bun run spike:build`, `bun run spike`, `bun run spike:browser` | The WASM spike (S-301, throwaway): build the Rust kernels for wasm32 and as a native library (needs `rustup target add wasm32-unknown-unknown`), time them against the JS executor under Bun, or in a browser |
 | `bun run gen:engine` | Regenerate `engine/src/signatures.rs` and the plan corpus the Rust tests read; `cd engine && cargo test --release` runs them |
-| `bun run engine:test` | Build the engine natively, run the JS tests that load tables into it through bun:ffi, then the Rust tests |
+| `bun run engine:test` | Build the engine natively, run the JS tests that load tables, evaluate expressions and run plans in it through bun:ffi, then the Rust tests |
 | `bun run bench:ref` | Reference benchmark: seven queries at 10k, 100k and 1M routes, zamda vs Arquero, answers checked first; writes `bench/results/` |
 | `bun run prep-bgp` | Download a RIPE RIS routing table dump and build `data/routes.bin` for the demo |
 | `bun run fake-routes` | Write a synthetic `data/routes.bin` (a million routes) for trying the demo offline |
