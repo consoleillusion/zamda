@@ -27,7 +27,8 @@
     "spike:build": "cargo build --release --manifest-path spike/Cargo.toml --target wasm32-unknown-unknown && cargo build --release --manifest-path spike/Cargo.toml",
     "spike": "bun spike/run.ts",
     "spike:browser": "bun spike/browser/server.ts",
-    "spike:test": "cargo test --release --manifest-path spike/Cargo.toml"
+    "spike:test": "cargo test --release --manifest-path spike/Cargo.toml",
+    "gen:engine": "bun scripts/engine-fixtures.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

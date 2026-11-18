@@ -322,9 +322,10 @@ class Reader {
   }
 
   f64(): number {
-    // Purpose: the next 8 bytes as a float64
+    // Purpose: the next 8 bytes as a float64; a NaN must be the standard one, so a value has one encoding
     if (this.left < 8) bad('the data ends early');
     const value = this.view.getFloat64(this.at, true);
+    if (Number.isNaN(value) && this.view.getBigUint64(this.at, true) !== 0x7ff8000000000000n) bad('a NaN is not the standard NaN');
     this.at += 8;
     return value;
   }
@@ -336,7 +337,8 @@ class Reader {
     const slice = this.bytes.subarray(this.at, this.at + length);
     this.at += length;
     try {
-      return new TextDecoder('utf-8', { fatal: true }).decode(slice);
+      // ignoreBOM keeps a leading U+FEFF as part of the string instead of dropping it.
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(slice);
     } catch {
       return bad('a string is not valid UTF-8');
     }
@@ -370,10 +372,18 @@ function readLiteral(r: Reader): LiteralValue {
       return false;
     case L_TRUE:
       return true;
-    case L_INT:
-      return r.zigzag();
-    case L_FLOAT:
-      return r.f64();
+    case L_INT: {
+      const n = r.zigzag();
+      // Larger integers are written as floats; accepting one here would give a plan two encodings.
+      if (Math.abs(n) > MAX_ZIGZAG_INT) bad('an integer literal is larger than the integer form allows');
+      return n;
+    }
+    case L_FLOAT: {
+      const v = r.f64();
+      // The same value must have one encoding: integers in range are written as integers, NaN has one bit pattern.
+      if (Number.isInteger(v) && Math.abs(v) <= MAX_ZIGZAG_INT && !Object.is(v, -0)) bad('an integer literal is written as a float');
+      return v;
+    }
     case L_BIG:
       return r.u64();
     case L_NEG_BIG: {

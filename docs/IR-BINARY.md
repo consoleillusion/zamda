@@ -91,6 +91,13 @@ comes back as the same value.
 | 5 | bigint, negative | u64 magnitude (the value is its negative) |
 | 6 | string | string |
 
+Every plan has exactly one encoding, and the decoder refuses the others: an
+integer that fits tag 2 is never written as tag 3, a NaN is always
+`0x7ff8000000000000`, a varint has no extra zero bytes and stays below 2^53, and
+a string keeps a leading byte order mark. The Rust engine (`engine/`) decodes
+the same bytes; its error codes are in `engine/src/error.rs` (1-19 decoding,
+101-122 validation).
+
 ## Changing the format
 
 Append new type numbers, ops, expression kinds or literal tags; never reorder or

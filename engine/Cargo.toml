@@ -1,0 +1,18 @@
+[package]
+name = "zamda-engine"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# The WASM engine (Milestone 3). No dependencies: the size budget is 400 KB gzipped.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

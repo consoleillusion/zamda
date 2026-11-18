@@ -58,7 +58,7 @@ describe('round trip', () => {
     const values: LiteralValue[] = [
       0, -0, 1, -1, 2 ** 52 - 1, -(2 ** 52 - 1), 2 ** 52, -(2 ** 52), 2 ** 52 + 1, -(2 ** 52) - 1, 2 ** 53 - 1, Number.MAX_VALUE, Number.MIN_VALUE, 0.1, -1.5,
       NaN, Infinity, -Infinity, 0n, 1n, -1n, 2n ** 63n - 1n, -(2n ** 63n), 2n ** 64n - 1n, -(2n ** 64n) + 1n,
-      '', 'x', 'naïve ☃ 😀', 'line\nbreak', 'a'.repeat(300), true, false,
+      '', 'x', '\ufeffbom first', 'naïve ☃ 😀', 'line\nbreak', 'a'.repeat(300), true, false,
     ];
     const back = roundTrip(literalPlan(values));
     const got = (back.nodes[1] as unknown as { exprs: { value: LiteralValue }[] }).exprs.map(e => e.value);
@@ -161,6 +161,31 @@ describe('bad input', () => {
     for (let i = 0; i < 400; i++) deep = { kind: 'call', fn: 'not', args: [deep], type: t.bool };
     const plan: IrPlan = { version: IR_VERSION, input: [field], nodes: [{ op: 'scan', schema: [field] }, { op: 'filter', input: 0, predicate: deep, schema: [field] }], root: 1, output: [field], params: [] };
     expect(() => encodePlan(plan)).toThrow(PlanError);
+  });
+
+  test('a value with a second encoding is refused: big integers as ints, whole floats, odd NaNs', () => {
+    const plan = literalPlan([7]);
+    const bytes = encodePlan(plan);
+    // The literal is the last three bytes of the project node's expression list: kind 2 (int), then zigzag 14.
+    const at = bytes.findIndex((b, i) => b === 2 && bytes[i + 1] === 14);
+    expect(at).toBeGreaterThan(0);
+    const asFloat = (value: number): Uint8Array => {
+      // Purpose: the same plan with the literal rewritten as a float64
+      const f = new Uint8Array(9);
+      f[0] = 3;
+      new DataView(f.buffer).setFloat64(1, value, true);
+      return new Uint8Array([...bytes.subarray(0, at), ...f, ...bytes.subarray(at + 2)]);
+    };
+    expect(() => decodePlan(asFloat(7))).toThrow(PlanError); // 7 must be an int
+    expect(decodePlan(asFloat(7.5))).toBeTruthy(); // a real fraction is a float
+    const nan = asFloat(NaN);
+    expect(decodePlan(nan)).toBeTruthy(); // the standard NaN is fine
+    nan[at + 8] = 0x7f; // flip a high byte into another NaN pattern
+    nan[at + 7] = 0xf9;
+    expect(() => decodePlan(nan)).toThrow(PlanError);
+    // An int literal of -2^52 (zigzag 2^53 - 1) is refused: integers that large are written as floats.
+    const big = new Uint8Array([...bytes.subarray(0, at), 2, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0f, ...bytes.subarray(at + 2)]);
+    expect(() => decodePlan(big)).toThrow(PlanError);
   });
 
   test('a string that is not UTF-8, or has a lone surrogate, is refused', () => {
