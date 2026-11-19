@@ -166,6 +166,20 @@ maybe('wasm backend', () => {
     expect(backend.stats.engine).toBeGreaterThan(before.engine);
   });
 
+  test('a mixed-string call over one column stays in the engine (D-074, T-219)', async () => {
+    // lower(dictionary) keeps dictionary storage, so contains() mixes it with
+    // the utf8 parameter before deriveLookups turns the whole call into a lookup.
+    const before = { ...backend.stats };
+    const plan = pipe(S, { needle: t.utf8 })
+      .filter((c, p) => c.d.lower().contains(p.needle))
+      .agg(c => ({ n: count() }))
+      .compile();
+    const params = { needle: 'G1' };
+    expect((await plan.execute(big, { params })).toArray()).toEqual((await plan.execute(jsBig, { params })).toArray());
+    expect(backend.stats.engine).toBe(before.engine + 1);
+    expect(backend.stats.fallback).toBe(before.fallback);
+  });
+
   test('a table of another backend is refused', async () => {
     await expect(grouped.execute(table(S, rows.slice(0, 3)), {})).resolves.toBeDefined();
     const other = createWasmBackend(host!);

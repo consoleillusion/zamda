@@ -256,7 +256,7 @@ export function createWasmBackend(host: EngineRunHost): WasmFactory {
 }
 
 function hasMixedStringTypes(plan: IrPlan): boolean {
-  // Purpose: detect expressions that combine utf8 and dictionary operands; the engine's validator rejects them, so the JS reference runs them (T-211)
+  // Purpose: detect expressions still combining utf8 and dictionary operands after lookups are derived; the engine's validator rejects them, so the JS reference runs them (T-211)
   for (const node of plan.nodes) {
     for (const expr of nodeExprs(node)) {
       let mixed = false;
@@ -302,7 +302,6 @@ async function runInEngine(
   sessionHandle: number,
 ): Promise<ResultData | null> {
   // Purpose: run the plan in the engine; null when the engine cannot (the caller then runs it on the JS executor)
-  if (hasMixedStringTypes(plan)) return null;
   const clock = performance.now();
   let last = clock;
   const phase = (name: keyof WasmStats['phasesMs']): void => {
@@ -312,7 +311,11 @@ async function runInEngine(
     last = now;
   };
   const derived = deriveLookups(foldConstants(plan, options.params));
-  if (hasStringResultCall(derived.plan)) return null;
+  // Check the derived plan, not the original: deriveLookups turns a mixed-string
+  // call over one string column into an engine lookup, so the engine never sees
+  // the mixed types. Checking the original made every dashboard chart fall back
+  // (T-211, T-219; the regression measured after T-210).
+  if (hasMixedStringTypes(derived.plan) || hasStringResultCall(derived.plan)) return null;
   const planHandle = host.planLoad(encodePlan(derived.plan));
   if (planHandle === 0) throw new ExecutionError(`The engine refused a valid plan (error ${host.evalError()}); this is a bug in zamda`);
   let paramsHandle = 0;

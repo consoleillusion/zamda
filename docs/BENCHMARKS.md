@@ -421,9 +421,14 @@ Arquero, and every WASM answer against the JS backend, before timing. Raw result
 The four-chart "nothing selected" interaction took 67 ms in Chrome and 58 ms in Firefox;
 with /22-/24, ARIN and "cloud" it took 80 ms and 53 ms. On this machine the WASM backend was
 faster than JS on six queries in both browsers, but slower on the full sort (113 ms in Chrome,
-117 ms in Firefox), and the four-chart interaction was slower on WASM (95 to 105 ms in Chrome,
-75 to 88 ms in Firefox) because the engine falls back to JS for string results and mixed-string
-expressions (D-074, T-219): 127 runs in the engine and 168 on the JS executor.
+117 ms in Firefox). The T-210 run recorded 95 to 105 ms in Chrome and 75 to 88 ms in Firefox
+for the four-chart WASM interaction: every chart fell back to JS because the fallback check
+looked at the original plan, where the name search mixes `dictionary` and `utf8`, instead of
+the plan after folding and lookups that the engine actually receives (127 engine runs and 168
+JS runs; D-078 fixed this). A Chrome rerun with the fix, on the same data and harness, gives
+38.7 ms together / 36.7 ms one by one with nothing selected and 37.7 / 34.0 ms with /22-/24,
+ARIN and "cloud": 295 engine runs and no fallbacks. Raw result and table:
+`bench/results/t210-chrome-fallback-fix.json` and `.md`.
 
 These are headless-browser numbers on the development machine, not the owner's machine, and
 they use the saved RIPE file rather than the live RIS feed. They close T-210's gap of having no

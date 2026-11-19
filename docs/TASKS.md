@@ -107,4 +107,4 @@ hard-coded mask pass, so T-413 is the real test of the 50 ms target.
 | --- | --- |
 | T-501 (done; `src/substrait.ts`, pinned Substrait 0.108.0, 14 tests) | Substrait export and import; verify the registry's Substrait names against a pinned spec version |
 | T-502 (done, C-LIVE-KEY, D-075) | Keyed live tables |
-| T-503 (done, C-JOIN, C-WINDOW, D-076, D-077; 456 tests pass, core 29.7 KB gzipped; WASM rejects both nodes with PlanError until the engine supports them) | Joins, then window functions |
+| T-503 (done, C-JOIN, C-WINDOW, D-076, D-077; 456 tests pass, core 29.7 KB gzipped; WASM rejects both nodes with PlanError until the engine supports them. Follow-up D-078: the WASM fallback check now inspects the derived plan, so the dashboard stays in the engine: Chrome selected interaction 37.7 ms, 0 fallbacks) | Joins, then window functions |
