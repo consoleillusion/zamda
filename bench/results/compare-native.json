@@ -1,0 +1,236 @@
+{
+  "runtime": "Bun 1.4.4 with the engine as a native library",
+  "rows": 1000000,
+  "queries": [
+    {
+      "id": "Q1",
+      "label": "routes per network (group by origin and name)",
+      "zamda": {
+        "median": 41.09522300000003,
+        "min": 39.134817999999996,
+        "runs": 7
+      },
+      "zamdaNoSlice": {
+        "median": 49.074569999999994,
+        "min": 39.670072999999775,
+        "runs": 7
+      },
+      "arquero": {
+        "median": 545.6222579999994,
+        "min": 530.9535379999998,
+        "runs": 3
+      },
+      "wasm": {
+        "median": 21.601167999999234,
+        "min": 20.89724699999988,
+        "runs": 7
+      }
+    },
+    {
+      "id": "Q2",
+      "label": "routes per prefix length",
+      "zamda": {
+        "median": 3.1985730000005788,
+        "min": 3.0519610000001194,
+        "runs": 7
+      },
+      "zamdaNoSlice": {
+        "median": 3.0474420000000464,
+        "min": 2.6999729999997726,
+        "runs": 7
+      },
+      "arquero": {
+        "median": 45.26626800000031,
+        "min": 34.146208000000115,
+        "runs": 7
+      },
+      "wasm": {
+        "median": 3.1562889999995605,
+        "min": 3.095683999999892,
+        "runs": 7
+      }
+    },
+    {
+      "id": "Q3",
+      "label": "routes and distinct networks per region",
+      "zamda": {
+        "median": 20.902579999999944,
+        "min": 18.983202000000347,
+        "runs": 7
+      },
+      "zamdaNoSlice": {
+        "median": 23.95397800000046,
+        "min": 22.284005000000434,
+        "runs": 7
+      },
+      "arquero": {
+        "median": 260.9420429999991,
+        "min": 216.34583600000042,
+        "runs": 7
+      },
+      "wasm": {
+        "median": 18.72068500000023,
+        "min": 18.237185999998474,
+        "runs": 7
+      }
+    },
+    {
+      "id": "Q4",
+      "label": "top 20 networks (group, sort, limit)",
+      "zamda": {
+        "median": 25.789660999998887,
+        "min": 24.001110999999582,
+        "runs": 7
+      },
+      "zamdaNoSlice": {
+        "median": 24.09626600000047,
+        "min": 23.23137299999871,
+        "runs": 7
+      },
+      "arquero": {
+        "median": 350.0577109999995,
+        "min": 306.10509699999966,
+        "runs": 7
+      },
+      "wasm": {
+        "median": 13.085659000000305,
+        "min": 12.442825000000084,
+        "runs": 7
+      }
+    },
+    {
+      "id": "Q5",
+      "label": "filtered region chart (prefix /22-/24, path 2-6)",
+      "zamda": {
+        "median": 33.9085070000001,
+        "min": 32.817440999999235,
+        "runs": 7
+      },
+      "zamdaNoSlice": {
+        "median": 35.05979800000023,
+        "min": 33.464944999999716,
+        "runs": 7
+      },
+      "arquero": {
+        "median": 158.70218999999997,
+        "min": 144.59575699999914,
+        "runs": 7
+      },
+      "wasm": {
+        "median": 14.860028999999486,
+        "min": 14.106031999999686,
+        "runs": 7
+      }
+    },
+    {
+      "id": "Q6",
+      "label": "name search (\"cloud\", case-insensitive)",
+      "zamda": {
+        "median": 7.392421999997168,
+        "min": 6.35105399999884,
+        "runs": 7
+      },
+      "zamdaNoSlice": {
+        "median": 7.506422999998904,
+        "min": 6.726376000002347,
+        "runs": 7
+      },
+      "arquero": {
+        "median": 93.79355900000155,
+        "min": 91.99545000000217,
+        "runs": 7
+      },
+      "wasm": {
+        "median": 4.022239999998419,
+        "min": 3.9409320000013395,
+        "runs": 7
+      }
+    },
+    {
+      "id": "Q7",
+      "label": "full sort of every route (prefix length, address)",
+      "zamda": {
+        "median": 116.19232399999964,
+        "min": 105.48821399999724,
+        "runs": 7
+      },
+      "zamdaNoSlice": {
+        "median": 100.45077500000116,
+        "min": 86.735520000002,
+        "runs": 7
+      },
+      "arquero": {
+        "median": 495.8006549999991,
+        "min": 485.48197100000107,
+        "runs": 3
+      },
+      "wasm": {
+        "median": 155.37165500000265,
+        "min": 134.31831500000044,
+        "runs": 7
+      }
+    }
+  ],
+  "interactions": [
+    {
+      "label": "nothing selected",
+      "together": {
+        "median": 93.23123599999963,
+        "min": 78.46882600000026,
+        "runs": 7
+      },
+      "togetherNoSlice": {
+        "median": 97.65290800000002,
+        "min": 88.47360000000117,
+        "runs": 7
+      },
+      "oneByOne": {
+        "median": 81.73905499999819,
+        "min": 76.50698299999931,
+        "runs": 7
+      },
+      "wasmTogether": {
+        "median": 41.224803000000975,
+        "min": 39.258490000000165,
+        "runs": 7
+      },
+      "wasmOneByOne": {
+        "median": 48.77450400000089,
+        "min": 47.81850300000224,
+        "runs": 7
+      }
+    },
+    {
+      "label": "prefix /22-/24, region ARIN, name \"cloud\"",
+      "together": {
+        "median": 70.1864659999992,
+        "min": 67.97681800000282,
+        "runs": 7
+      },
+      "togetherNoSlice": {
+        "median": 53.51535199999853,
+        "min": 52.433703999999125,
+        "runs": 7
+      },
+      "oneByOne": {
+        "median": 55.5986269999994,
+        "min": 53.482074999999895,
+        "runs": 7
+      },
+      "wasmTogether": {
+        "median": 26.484158999999636,
+        "min": 26.288651999999274,
+        "runs": 7
+      },
+      "wasmOneByOne": {
+        "median": 26.571742000000086,
+        "min": 26.292474000001675,
+        "runs": 7
+      }
+    }
+  ],
+  "wasmRuns": {
+    "engine": 237,
+    "fallback": 0
+  }
+}

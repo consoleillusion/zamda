@@ -5,34 +5,10 @@
 import { dlopen, FFIType, toArrayBuffer } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import { existsSync } from 'node:fs';
-import type { EngineHost } from '../src/backends/wasm/store';
+import type { EngineRunHost } from '../src/backends/wasm/host';
 
-// The evaluation entry points of engine/src/eval_abi.rs, for tests.
-export interface EvalHost extends EngineHost {
-  planLoad(bytes: Uint8Array): number;
-  planFree(plan: number): number;
-  paramsLoad(plan: number, bytes: Uint8Array): number;
-  paramsFree(params: number): number;
-  paramsTable(params: number, index: number, values: Uint8Array, valid: Uint8Array | null, entries: number): number;
-  exprCount(plan: number, node: number): number;
-  exprSupported(plan: number, node: number, expr: number): number;
-  eval(plan: number, params: number, node: number, expr: number, snapshot: number, segment: number, start: number, rows: number): number;
-  resultType(result: number): number;
-  resultRows(result: number): number;
-  resultValues(result: number): number;
-  resultValid(result: number): number;
-  resultFree(result: number): number;
-  runNew(plan: number, params: number, snapshot: number, chunkRows: number): number;
-  runStep(run: number): number;
-  runScanned(run: number): number;
-  runFinish(run: number): number;
-  runColumn(index: number): number;
-  runFree(run: number): number;
-  runCanon(run: number, column: number, segment: number, map: Uint32Array): number;
-  evalError(): number;
-  evalErrorWhat(): number;
-  evalErrorType(): number;
-}
+// The engine's evaluation and run entry points (engine/src/eval_abi.rs, run_abi.rs), as the backend uses them.
+export type EvalHost = EngineRunHost;
 
 const ROOT = new URL('../engine/', import.meta.url).pathname;
 const SUFFIX = process.platform === 'darwin' ? 'dylib' : process.platform === 'win32' ? 'dll' : 'so';

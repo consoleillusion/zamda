@@ -17,7 +17,7 @@ use std::rc::Rc;
 use crate::agg::{Aggregator, Rows, Table};
 use crate::sort::Sorter;
 use crate::eval::{eval, supported, Batch, Params};
-use crate::ir::{Expr, ExprKind, Op, Plan};
+use crate::ir::{Aggregate, Expr, ExprKind, Node, Op, Plan, SortKey};
 use crate::kernels::EvalError;
 use crate::store::{Snapshot, View};
 use crate::types::Type;
@@ -336,9 +336,35 @@ fn out_columns(table: Table, types: &[Type]) -> Vec<OutColumn> {
         .collect()
 }
 
+fn simplified(plan: &Plan, params: &Params) -> Plan {
+    // Purpose: the plan with constant booleans folded out of every expression (see eval::simplify)
+    let nodes = plan
+        .nodes
+        .iter()
+        .map(|node| {
+            let simple = |e: &Expr| crate::eval::simplify(e, params);
+            let op = match &node.op {
+                Op::Scan => Op::Scan,
+                Op::Filter { input, predicate } => Op::Filter { input: *input, predicate: simple(predicate) },
+                Op::Project { input, exprs } => Op::Project { input: *input, exprs: exprs.iter().map(simple).collect() },
+                Op::Aggregate { input, keys, aggs } => Op::Aggregate {
+                    input: *input,
+                    keys: keys.iter().map(simple).collect(),
+                    aggs: aggs.iter().map(|a| Aggregate { func: a.func.clone(), ty: a.ty, arg: a.arg.as_ref().map(simple) }).collect(),
+                },
+                Op::Sort { input, keys } => Op::Sort { input: *input, keys: keys.iter().map(|k| SortKey { descending: k.descending, nulls_first: k.nulls_first, expr: simple(&k.expr) }).collect() },
+                Op::Limit { input, count } => Op::Limit { input: *input, count: *count },
+            };
+            Node { schema: node.schema.clone(), op }
+        })
+        .collect();
+    Plan { version: plan.version, input: plan.input.clone(), nodes, root: plan.root, output: plan.output.clone(), params: plan.params.clone() }
+}
+
 impl Run {
     pub fn new(plan: Rc<Plan>, params: Rc<Params>, snapshot: Snapshot, chunk_rows: usize) -> Result<Run, EvalError> {
         // Purpose: prepare a run; refuses a plan the engine cannot execute
+        let plan = Rc::new(simplified(&plan, &params));
         check_supported(&plan)?;
         let chain = chain_of(&plan);
         let needed = needed_columns(&plan, &chain);

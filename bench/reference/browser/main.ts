@@ -3,7 +3,12 @@
 // exposes the result as window.__benchResult for scripted runs.
 
 import { decodeRoutes } from '../../../scripts/bgp/file';
+import { createWasmBackend } from '../../../src/backends/wasm';
+import { loadEngine } from '../../../src/backends/wasm/load';
+import { Routes } from '../../../scripts/bgp/file';
+import { columnInput } from '../data';
 import { comparisonMarkdown, runComparison } from '../compare';
+import type { WasmTarget } from '../compare';
 import type { Comparison } from '../compare';
 
 declare global {
@@ -31,7 +36,17 @@ async function main(): Promise<void> {
     // Purpose: show progress
     byId('log').textContent += `${line}\n`;
   };
-  const result = await runComparison(arrays, rows, runs, `${navigator.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] ?? 'browser'}`, log);
+  // The engine module, when the server has one (`bun run wasm:build` first): measured beside the JS backend.
+  let wasm: WasmTarget | undefined;
+  const module = await fetch('/engine.wasm');
+  if (module.ok) {
+    const { backend, table } = createWasmBackend(await loadEngine(await module.arrayBuffer()));
+    wasm = { table: a => table(Routes, columnInput(a)), stats: () => ({ ...backend.stats }) };
+    log('Loaded the WASM engine.');
+  } else {
+    log('No WASM engine on the server (run `bun run wasm:build`); measuring the JS backend only.');
+  }
+  const result = await runComparison(arrays, rows, runs, `${navigator.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] ?? 'browser'}`, log, wasm);
   byId('status').textContent = 'Done.';
   byId('report').textContent = comparisonMarkdown(result);
   window.__benchResult = result;

@@ -120,22 +120,55 @@ struct GroupTable {
     keys: Vec<u64>,
     slots: Vec<u32>,
     groups: usize,
+    // For one key of at most 16 bits: the group of each value (index 65536 is null), instead of hashing.
+    direct: Option<Vec<u32>>,
 }
 
+const MULT: u64 = 0x9E37_79B9_7F4A_7C15;
+
+#[inline]
 fn hash(t: &[u64]) -> u64 {
-    // Purpose: mix a key tuple into a slot number
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for &x in t {
-        h = (h ^ x).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        h ^= h >> 29;
+    // Purpose: mix a key tuple into a slot number (short tuples, the common case, take a shorter path)
+    match t.len() {
+        1 => {
+            let h = t[0].wrapping_mul(MULT);
+            h ^ (h >> 32)
+        }
+        2 => {
+            let h = (t[0] ^ t[1].wrapping_mul(0xC2B2_AE3D_27D4_EB4F)).wrapping_mul(MULT);
+            h ^ (h >> 32)
+        }
+        _ => {
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            for &x in t {
+                h = (h ^ x).wrapping_mul(MULT);
+                h ^= h >> 29;
+            }
+            h
+        }
     }
-    h
 }
 
 impl GroupTable {
-    fn new(w: usize) -> GroupTable {
-        // Purpose: an empty table for tuples of w words
-        GroupTable { w, keys: Vec::new(), slots: vec![EMPTY; 1024], groups: 0 }
+    fn new(w: usize, direct: bool) -> GroupTable {
+        // Purpose: an empty table for tuples of w words; `direct` for one key of at most 16 bits
+        GroupTable { w, keys: Vec::new(), slots: if direct { Vec::new() } else { vec![EMPTY; 1024] }, groups: 0, direct: direct.then(|| vec![EMPTY; 65537]) }
+    }
+
+    #[inline]
+    fn direct_group(&mut self, word: u64) -> u32 {
+        // Purpose: the group of a narrow key, adding it if new
+        let at = if word == u64::MAX { 65536 } else { word as usize };
+        let direct = self.direct.as_mut().expect("a direct table");
+        let g = direct[at];
+        if g != EMPTY {
+            return g;
+        }
+        let id = self.groups as u32;
+        direct[at] = id;
+        self.keys.push(word);
+        self.groups += 1;
+        id
     }
 
     fn grow(&mut self) {
@@ -151,6 +184,35 @@ impl GroupTable {
             slots[s] = g as u32;
         }
         self.slots = slots;
+    }
+
+    #[inline(always)]
+    fn insert_n<const W: usize>(&mut self, t: [u64; W]) -> u32 {
+        // Purpose: `insert` for a tuple of a width known at compile time (one or two keys are the common case), with the loops unrolled
+        let mask = self.slots.len() - 1;
+        let mut s = hash(&t) as usize & mask;
+        loop {
+            let g = self.slots[s];
+            if g == EMPTY {
+                let id = self.groups as u32;
+                self.keys.extend_from_slice(&t);
+                self.slots[s] = id;
+                self.groups += 1;
+                if self.groups * 2 > self.slots.len() {
+                    self.grow();
+                }
+                return id;
+            }
+            let at = g as usize * W;
+            let mut same = true;
+            for j in 0..W {
+                same &= self.keys[at + j] == t[j];
+            }
+            if same {
+                return g;
+            }
+            s = (s + 1) & mask;
+        }
     }
 
     #[inline]
@@ -172,7 +234,12 @@ impl GroupTable {
                 return id;
             }
             let at = g as usize * w;
-            if self.keys[at..at + w] == *t {
+            let same = match w {
+                1 => self.keys[at] == t[0],
+                2 => self.keys[at] == t[0] && self.keys[at + 1] == t[1],
+                _ => self.keys[at..at + w] == *t,
+            };
+            if same {
                 return g;
             }
             s = (s + 1) & mask;
@@ -246,49 +313,51 @@ fn order_f(a: f64, b: f64) -> i32 {
     }
 }
 
-// Open-addressing set of (group, value) pairs, for count_distinct.
+// Open-addressing set of (group, value) pairs, for count_distinct. A slot holds the value and the
+// group together (one memory access per probe); a group of u32::MAX marks an empty slot.
 struct PairSet {
-    entries: Vec<(u32, u64)>,
-    used: Vec<bool>,
+    entries: Vec<(u64, u32)>,
     size: usize,
 }
 
 impl PairSet {
     fn new() -> PairSet {
         // Purpose: an empty set
-        PairSet { entries: vec![(0, 0); 1024], used: vec![false; 1024], size: 0 }
+        PairSet { entries: vec![(0, EMPTY); 1024], size: 0 }
     }
 
+    #[inline]
     fn slot(group: u32, value: u64, mask: usize) -> usize {
         // Purpose: first slot to try for a pair
         hash(&[value, group as u64]) as usize & mask
     }
 
+    #[inline]
     fn add(&mut self, group: u32, value: u64) -> bool {
         // Purpose: put a pair in the set; true if it was not there
-        let mask = self.used.len() - 1;
+        let mask = self.entries.len() - 1;
         let mut s = Self::slot(group, value, mask);
-        while self.used[s] {
-            if self.entries[s] == (group, value) {
+        loop {
+            let (v, g) = self.entries[s];
+            if g == EMPTY {
+                break;
+            }
+            if g == group && v == value {
                 return false;
             }
             s = (s + 1) & mask;
         }
-        self.used[s] = true;
-        self.entries[s] = (group, value);
+        self.entries[s] = (value, group);
         self.size += 1;
-        if self.size * 2 > self.used.len() {
-            let old: Vec<(u32, u64)> = self.entries.iter().zip(&self.used).filter(|(_, u)| **u).map(|(e, _)| *e).collect();
-            let capacity = self.used.len() * 2;
-            self.entries = vec![(0, 0); capacity];
-            self.used = vec![false; capacity];
-            for (g, v) in old {
+        if self.size * 2 > self.entries.len() {
+            let capacity = self.entries.len() * 2;
+            let old = std::mem::replace(&mut self.entries, vec![(0, EMPTY); capacity]);
+            for (v, g) in old.into_iter().filter(|e| e.1 != EMPTY) {
                 let mut s = Self::slot(g, v, capacity - 1);
-                while self.used[s] {
+                while self.entries[s].1 != EMPTY {
                     s = (s + 1) & (capacity - 1);
                 }
-                self.used[s] = true;
-                self.entries[s] = (g, v);
+                self.entries[s] = (v, g);
             }
         }
         true
@@ -356,6 +425,11 @@ impl Acc {
         match self {
             Acc::Count { counts } => {
                 grown(counts, groups, 0);
+                if arg.is_none() && groups == 1 {
+                    // No keys and nothing to skip: every row is in the one group.
+                    counts[0] = counts[0].wrapping_add(n as u32);
+                    return Ok(());
+                }
                 for i in 0..n {
                     if arg.is_none() || live(i) {
                         let c = &mut counts[ids[i] as usize];
@@ -552,7 +626,8 @@ impl Aggregator {
         }
         let wide: Vec<bool> = key_types.iter().map(|&t| wide(t)).collect();
         let has_mask = wide.iter().any(|&w| w);
-        let table = if key_types.is_empty() { None } else { Some(GroupTable::new(key_types.len() + has_mask as usize)) };
+        let narrow = key_types.len() == 1 && !wide[0] && matches!(storage(key_types[0]), Storage::I8 | Storage::U8 | Storage::I16 | Storage::U16);
+        let table = if key_types.is_empty() { None } else { Some(GroupTable::new(key_types.len() + has_mask as usize, narrow)) };
         let accs = aggs.iter().map(|a| Acc::new(a, a.arg.as_ref().map(|e| e.ty))).collect::<Result<Vec<_>, _>>()?;
         Ok(Aggregator { key_types: key_types.to_vec(), agg_types: aggs.iter().map(|a| a.ty).collect(), wide, has_mask, table, accs, consumed: false })
     }
@@ -578,6 +653,25 @@ impl Aggregator {
                     }
                 }
                 let mut ids = Vec::with_capacity(n);
+                if table.direct.is_some() {
+                    for &word in &words[0] {
+                        ids.push(table.direct_group(word));
+                    }
+                    let groups = table.groups;
+                    for (acc, arg) in self.accs.iter_mut().zip(args) {
+                        acc.add(arg.as_ref(), rows, &ids, groups)?;
+                    }
+                    return Ok(());
+                }
+                if !self.has_mask && k == 1 {
+                    for &a in &words[0] {
+                        ids.push(table.insert_n([a]));
+                    }
+                } else if !self.has_mask && k == 2 {
+                    for (&a, &b) in words[0].iter().zip(&words[1]) {
+                        ids.push(table.insert_n([a, b]));
+                    }
+                } else {
                 let mut tuple = [0u64; MAX_KEYS + 1];
                 for i in 0..n {
                     for j in 0..k {
@@ -593,6 +687,7 @@ impl Aggregator {
                         tuple[k] = mask;
                     }
                     ids.push(table.insert(&tuple[..table.w]));
+                }
                 }
                 ids
             }

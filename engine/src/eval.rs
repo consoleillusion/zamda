@@ -153,6 +153,39 @@ fn bool_literal(expr: &Expr, params: &Params) -> Option<bool> {
     }
 }
 
+pub fn simplify(expr: &Expr, params: &Params) -> Expr {
+    // Purpose: the expression with every `and`/`or` that a directly constant boolean operand (literal or parameter) decides replaced by its answer, so columns only the dropped side reads are never scanned; `call` makes the same shortcut at run time
+    let kind = match &expr.kind {
+        ExprKind::Call { func, args } => {
+            if (func == "and" || func == "or") && args.len() == 2 {
+                // Only an operand that is itself a literal or parameter decides (as in `call`): a nested and/or that folds to a constant does not, so which errors a plan raises is the same on every backend.
+                let decisive = func == "or";
+                for (constant, other) in [(&args[0], &args[1]), (&args[1], &args[0])] {
+                    if let Some(v) = bool_literal(constant, params) {
+                        return if v == decisive { Expr { ty: expr.ty, kind: ExprKind::Literal(Literal::Bool(decisive)) } } else { simplify(other, params) };
+                    }
+                }
+            }
+            let mut folded: Vec<Expr> = args.iter().map(|a| simplify(a, params)).collect();
+            if (func == "and" || func == "or") && args.len() == 2 {
+                // An operand that only folded to a deciding constant (it was not one already) must not decide here: the run-time shortcut would then skip an operand the other executors evaluate, and a plan could raise on one backend only.
+                let decisive = func == "or";
+                for i in 0..2 {
+                    if matches!(&folded[i].kind, ExprKind::Literal(Literal::Bool(b)) if *b == decisive) {
+                        folded[i] = args[i].clone();
+                    }
+                }
+            }
+            ExprKind::Call { func: func.clone(), args: folded }
+        }
+        ExprKind::Cast(a) => ExprKind::Cast(Box::new(simplify(a, params))),
+        ExprKind::In { arg, list } => ExprKind::In { arg: Box::new(simplify(arg, params)), list: list.clone() },
+        ExprKind::Lookup { arg, table } => ExprKind::Lookup { arg: Box::new(simplify(arg, params)), table: *table },
+        other => other.clone(),
+    };
+    Expr { ty: expr.ty, kind }
+}
+
 const UNSUPPORTED_CALLS: [&str; 8] = ["lower", "upper", "length", "starts_with", "ends_with", "contains", "date_trunc", "extract"];
 
 pub fn supported(expr: &Expr) -> Result<(), &'static str> {

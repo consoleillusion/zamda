@@ -11,10 +11,10 @@
 import { op, desc } from 'arquero';
 import type { ColumnTable } from 'arquero';
 import { count, pipe } from '../../src';
-import type { ExecuteOptions, JsTable, Result } from '../../src';
+import type { ExecuteOptions, Result, Table } from '../../src';
 import { Routes } from '../../scripts/bgp/file';
 
-type ZTable = JsTable<typeof Routes.fields>;
+type ZTable = Table<typeof Routes.fields>;
 
 export interface Query {
   readonly id: string;

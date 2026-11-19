@@ -73,7 +73,10 @@ bun run check     # typecheck + tests + size budget
 | `bun run typecheck` | `tsc --noEmit`, including the type-inference tests |
 | `bun run size` | Fails if the core exceeds 40 KB gzipped |
 | `bun run bench` | Group-by benchmark against plain JS and Arquero |
-| `bun run bench:compare` | The reference queries and the dashboard's interactions under Bun, with and without time slicing; compare with `bun run bench:browser` (a page to open in any browser) |
+| `bun run wasm:build` | Builds the engine as WebAssembly (`dist/zamda-engine.wasm`), runs `wasm-opt` if installed, prints the size and fails above 400 KB gzipped. Needs `rustup target add wasm32-unknown-unknown` once |
+| `bun run wasm:measure` | `wasm:build`, then the reference queries and dashboard interactions on the JS backend and on the WASM module in Bun, checking every answer against the JS backend |
+| `bun run bench:native` | The same measurement with the engine as a native library (no WASM toolchain needed): an upper bound |
+| `bun run bench:compare` | The reference queries and the dashboard's interactions under Bun, with and without time slicing; compare with `bun run bench:browser` (a page to open in any browser; it also measures the WASM engine if `dist/zamda-engine.wasm` exists) |
 | `bun run spike:build`, `bun run spike`, `bun run spike:browser` | The WASM spike (S-301, throwaway): build the Rust kernels for wasm32 and as a native library (needs `rustup target add wasm32-unknown-unknown`), time them against the JS executor under Bun, or in a browser |
 | `bun run gen:engine` | Regenerate `engine/src/signatures.rs` and the plan corpus the Rust tests read; `cd engine && cargo test --release` runs them |
 | `bun run engine:test` | Build the engine natively, run the JS tests that load tables, evaluate expressions and run plans in it through bun:ffi, then the Rust tests |

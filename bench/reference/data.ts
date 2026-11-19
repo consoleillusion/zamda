@@ -80,6 +80,20 @@ export function zamdaFromColumns(arrays: RouteArrays): JsTable<typeof Routes.fie
   });
 }
 
+export function columnInput(arrays: RouteArrays) {
+  // Purpose: the table input for a set of route columns, for any backend
+  return {
+    columns: {
+      prefix_addr: arrays.prefix_addr,
+      prefix_len: arrays.prefix_len,
+      origin_as: arrays.origin_as,
+      as_name: arrays.as_name,
+      path_len: arrays.path_len,
+      rir: arrays.rir,
+    },
+  };
+}
+
 export function zamdaFromRows(rows: readonly RouteRow[]): JsTable<typeof Routes.fields> {
   // Purpose: a zamda table built from row objects, validating every value
   return table(Routes, rows);

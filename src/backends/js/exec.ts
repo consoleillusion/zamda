@@ -49,7 +49,7 @@ export interface Batch {
 }
 
 // Column indexes of a node's output that later nodes read; null means all of them.
-type Needed = Set<number> | null;
+export type Needed = Set<number> | null;
 
 // Rows flowing between nodes: `batch` read directly, or through `selection` when set.
 interface Stage {
@@ -81,7 +81,7 @@ function chainOf(plan: IrPlan): number[] {
   return chain.reverse();
 }
 
-function neededColumns(plan: IrPlan): Needed[] {
+export function neededColumns(plan: IrPlan): Needed[] {
   // Purpose: work out, for each node, which of its output columns are read downstream
   const needed: (Needed | undefined)[] = new Array(plan.nodes.length);
   needed[plan.root] = null;
@@ -639,7 +639,7 @@ export function* runPlan(
 // The driver
 // ---------------------------------------------------------------------------
 
-function pause(): Promise<void> {
+export function pause(): Promise<void> {
   // Purpose: return to the event loop once, so the page can paint and an abort can arrive.
   // setTimeout(0) is avoided where possible: browsers clamp nested timers to 4 ms.
   const g = globalThis as {

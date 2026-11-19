@@ -273,7 +273,7 @@ async function compareRun(built: Built, rows: Record<string, unknown>[], cut: nu
     }
     if (jsError !== null) {
       h.runFree(run);
-      throw new Error(`${label}: JS raised "${(jsError as Error).message}" but the engine returned a result`);
+      throw new Error(`${label}: JS raised "${(jsError as Error).message}" but the engine returned a result\n${JSON.stringify(built.plan.nodes.slice(1), (_k, v) => (typeof v === 'bigint' ? `${v}n` : _k === 'schema' ? undefined : v))}\n${JSON.stringify([...built.values], (_k, v) => (typeof v === 'bigint' ? `${v}n` : v))}`);
     }
     // Rows read: the same count as the JS backend reports (it reads the same chunks).
     if (jsScanned > 0) expect(h.runScanned(run), `${label}: rows scanned`).toBe(jsScanned);

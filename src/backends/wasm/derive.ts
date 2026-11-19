@@ -63,6 +63,73 @@ function stringField(expr: IrExpr, input: readonly { type: DataType }[]): { inde
   return { index: found, type: input[found]!.type };
 }
 
+function mapExprs(plan: IrPlan, f: (expr: IrExpr, node: IrNode) => IrExpr): IrPlan {
+  // Purpose: the plan with every expression of every node replaced by f(expression, node)
+  const nodes: IrNode[] = plan.nodes.map(node => {
+    const r = (e: IrExpr) => f(e, node);
+    switch (node.op) {
+      case 'scan':
+      case 'limit':
+        return node;
+      case 'filter':
+        return { ...node, predicate: r(node.predicate) };
+      case 'project':
+        return { ...node, exprs: node.exprs.map(r) };
+      case 'sort':
+        return { ...node, keys: node.keys.map(k => ({ ...k, expr: r(k.expr) })) };
+      case 'aggregate':
+        return { ...node, keys: node.keys.map(r), aggs: node.aggs.map(a => ({ ...a, arg: a.arg === null ? null : r(a.arg) })) };
+    }
+  });
+  return { ...plan, nodes };
+}
+
+export function foldConstants(plan: IrPlan, params: ReadonlyMap<string, LiteralValue | readonly LiteralValue[]>): IrPlan {
+  // Purpose: replace every and/or that a boolean literal or parameter decides by its answer, as the executors do at run time (D-045), so the dropped side is never tabulated or scanned
+  const constant = (e: IrExpr): boolean | undefined => {
+    // Purpose: the value of a boolean literal or parameter, undefined for anything that depends on rows
+    if (e.kind === 'literal') return typeof e.value === 'boolean' ? e.value : undefined;
+    if (e.kind === 'param') {
+      const v = params.get(e.name);
+      return typeof v === 'boolean' ? v : undefined;
+    }
+    return undefined;
+  };
+  const fold = (e: IrExpr): IrExpr => {
+    // Purpose: fold constants out of one expression, innermost first
+    switch (e.kind) {
+      case 'call': {
+        if ((e.fn === 'and' || e.fn === 'or') && e.args.length === 2) {
+          // Only an operand that is itself a literal or parameter decides, as in the executors: a nested and/or
+          // that folds to a constant does not, so every backend raises the same errors.
+          const decisive = e.fn === 'or';
+          for (const [c, other] of [[e.args[0]!, e.args[1]!], [e.args[1]!, e.args[0]!]] as const) {
+            const v = constant(c);
+            if (v !== undefined) return v === decisive ? { kind: 'literal', value: decisive, type: e.type } : fold(other);
+          }
+        }
+        const args = e.args.map(fold);
+        if ((e.fn === 'and' || e.fn === 'or') && args.length === 2) {
+          // An operand that only folded to a deciding constant (it was not one already) must not decide here:
+          // the executors' shortcut would then skip an operand they evaluate otherwise, and a plan could raise on one backend only.
+          const decisive = e.fn === 'or';
+          for (let i = 0; i < 2; i++) {
+            const a = args[i]!;
+            if (a.kind === 'literal' && a.value === decisive) args[i] = e.args[i]!;
+          }
+        }
+        return { ...e, args };
+      }
+      case 'cast':
+      case 'in':
+        return { ...e, arg: fold(e.arg) };
+      default:
+        return e;
+    }
+  };
+  return mapExprs(plan, fold);
+}
+
 export function deriveLookups(plan: IrPlan): { plan: IrPlan; lookups: LookupSpec[] } {
   // Purpose: replace every expression that is a function of one string column by a lookup; the specs say what each table holds
   const lookups: LookupSpec[] = [];
@@ -88,22 +155,8 @@ export function deriveLookups(plan: IrPlan): { plan: IrPlan; lookups: LookupSpec
         return expr;
     }
   };
-  const nodes: IrNode[] = plan.nodes.map(node => {
-    if (node.op === 'scan' || node.op === 'limit') return node;
-    const input = plan.nodes[node.input]!.schema;
-    const r = (e: IrExpr) => rewrite(e, input);
-    switch (node.op) {
-      case 'filter':
-        return { ...node, predicate: r(node.predicate) };
-      case 'project':
-        return { ...node, exprs: node.exprs.map(r) };
-      case 'sort':
-        return { ...node, keys: node.keys.map(k => ({ ...k, expr: r(k.expr) })) };
-      case 'aggregate':
-        return { ...node, keys: node.keys.map(r), aggs: node.aggs.map(a => ({ ...a, arg: a.arg === null ? null : r(a.arg) })) };
-    }
-  });
-  return { plan: { ...plan, nodes }, lookups };
+  const rewritten = mapExprs(plan, (e, node) => rewrite(e, plan.nodes[(node as { input: number }).input]!.schema));
+  return { plan: rewritten, lookups };
 }
 
 export interface LookupTable {
