@@ -1,0 +1,21 @@
+{
+  "runtime": "Firefox/158.0",
+  "source": "1,163,624 IPv4 routes from RIPE RIS    · loaded in 63 ms",
+  "feed": "live from RIS Live, collector rrc00",
+  "initial": {
+    "networks": "91 ms",
+    "prefixLen": "34 ms",
+    "pathLen": "15 ms",
+    "regions": "69 ms",
+    "live": "4.0 ms"
+  },
+  "withSelection": {
+    "networks": "75 ms",
+    "prefixLen": "36 ms",
+    "pathLen": "14 ms",
+    "regions": "8.0 ms",
+    "live": "4.0 ms"
+  },
+  "selection": "Showing: name contains \"cloud\"",
+  "userAgent": "Firefox/158.0 (headless, WebDriver BiDi)"
+}

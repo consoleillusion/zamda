@@ -37,7 +37,7 @@ Complete. Gate review: `docs/MILESTONE-1.md`.
 
 ## Milestone 2: JS release
 
-T-201, T-202, T-204 to T-207, T-215, T-216, T-218 and T-221 are done, and T-217 is done except Firefox. T-222, T-223 and T-224 are done. Ready now: T-208, T-203, T-220. The spike (S-301) is done and the gate is met.
+T-201, T-202, T-204 to T-207, T-215 to T-218 and T-221 to T-224 are done. Ready now: T-208 and T-203. The spike (S-301) is done and the gate is met.
 T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`; the rest are independent.
 
 | ID | Task | Needs |
@@ -55,7 +55,7 @@ T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`
 | T-211 (done, C-STR-MIX, D-074) | Allow `utf8` and `dictionary` expressions to be mixed in one operation | T-112 |
 | T-215 | Run `bun run prep-bgp` against a real RIS dump; record row count, skipped prefixes and timings in `docs/BENCHMARKS.md`. **Done** (`docs/BENCHMARKS.md`). | T-205 |
 | T-216 | The first real run stopped at ~930k prefixes with "Path attribute runs past the entry"; a second run of the same dump found no bad entries. **Closed:** `scripts/check-dump.ts` gave identical results under four different splits of the same dump, with no bad entries; the first failure was most likely damage in that one download. | T-205 |
-| T-217 | Run `bun run demo` on a real `data/routes.bin` with the real RIS Live feed. **Done in Chromium** (owner, real RIPE data, real feed): 109 to 123 ms per interaction against the 200 ms target; live refresh 20 to 40 ms. Firefox not yet measured. | T-206 |
+| T-217 (done; owner's Chromium run 109 to 123 ms per chart, headless Firefox 158 measured on real data and real RIS Live, `bench/results/t217-firefox.md`) | Run `bun run demo` on a real `data/routes.bin` with the real RIS Live feed | T-206 |
 | T-218 | Cut the work in one dashboard interaction. **Done:** the top-20 chart and the totals line share one per-network query (they apply identical filters), the top 20 is picked in JS, and the live panel's name table is read from the first unfiltered result instead of its own pass over every route. About 20% less work per interaction in the sandbox (161 to 124 ms, 180 to 143 ms, 117 to 94 ms). | T-206 |
 | T-220 (closed: not needed; the spike gate was met and D-056 already records the shared failed-controls pass) | What is left per interaction: the per-network group-by (about 40 ms of a million rows), the distinct-network count in the regions chart (about 20 ms) and five filter passes (about 11 ms each). Ideas: share one filter pass across charts with a per-row bitmask of failing controls; cache chart results by parameter values; a cheaper distinct count for 32-bit keys. Only worth doing if the spike gate needs it | T-218 |
 | T-221 | Full sort was zamda's weakest query: 87 ms for 1M rows on the owner's machine against Arquero's 31 ms, and two thirds of the spike gate's JS time. **Done as far as it goes:** the sort itself was slow (3 closure calls per comparison); integer and boolean keys now use a stable LSD radix sort (D-051), 4x faster than the comparison sort on random order and 2.5x on address-ordered data in the sandbox. On the owner's real data the full sort only went from 87 to 72 ms (`my-laptop-2.md`) and Arquero still wins it (31 ms): the real table is already in address order, which native comparison sorts exploit, and about half of what remains is gathering the sorted columns. Not worth more work now. | T-207 |

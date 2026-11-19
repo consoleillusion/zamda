@@ -115,6 +115,16 @@ This was before T-218. In the sandbox that change cut the work of one
 interaction by about 20% (161 to 124 ms with nothing selected, 180 to 143 ms
 with a prefix brush, 117 to 94 ms with a region and a search).
 
+### Measured in headless Firefox (real data, real RIS Live; T-217)
+
+The same page, driven in headless Firefox 158 against the real rrc00 dump
+(1,163,624 routes) and the real RIS Live feed, first loaded its charts in 91,
+34, 15 and 69 ms (networks, prefix length, path length, regions). After typing
+`cloud` in the name search the four charts took 75, 36, 14 and 8 ms; the live
+panel refresh was 4 ms. All stayed under the 200 ms target. Raw result and
+detail: `bench/results/t217-firefox.md`. These are one headless run on the
+development machine, not repeated medians on the owner's hardware.
+
 ## Reference benchmark (T-207)
 
 `bun run bench:ref` runs seven queries (group-bys, distinct counts, top-k, a
