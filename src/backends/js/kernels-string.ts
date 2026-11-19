@@ -7,7 +7,7 @@
 // Results for a dictionary are cached for as long as the dictionary lives.
 
 import type { Column } from '../../column';
-import { makeColumn, nums, texts } from '../../column';
+import { makeColumn, nums, stringColumn, texts } from '../../column';
 import type { DataType } from '../../types';
 import { t } from '../../types';
 import type { Kernel } from './kernel-util';
@@ -31,8 +31,8 @@ function perEntry(dictionary: readonly string[], key: string, fn: (s: string) =>
 }
 
 function mapStrings(key: string, fn: (s: string) => string): Kernel {
-  // Purpose: C-STR-CASE: apply a string-to-string function; the result is always utf8
-  return function (args, _type, n) {
+  // Purpose: C-STR-CASE: apply a string-to-string function, keeping the input storage type (T-219)
+  return function (args, type, n) {
     const x = args[0]!;
     const out: string[] = new Array(n);
     if (x.dictionary) {
@@ -43,7 +43,7 @@ function mapStrings(key: string, fn: (s: string) => string): Kernel {
       const a = texts(x);
       for (let i = 0; i < n; i++) out[i] = fn(a[i]!);
     }
-    return makeColumn(t.utf8, out, x.valid);
+    return stringColumn(type, out, x.valid);
   };
 }
 

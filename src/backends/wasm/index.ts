@@ -234,6 +234,20 @@ function hasMixedStringTypes(plan: IrPlan): boolean {
   return false;
 }
 
+function hasStringResultCall(plan: IrPlan): boolean {
+  // Purpose: detect string-valued functions left in a derived plan; the engine cannot produce strings, so the JS reference runs them (D-067, T-219)
+  for (const node of plan.nodes) {
+    for (const expr of nodeExprs(node)) {
+      let found = false;
+      walkExpr(expr, function (e: IrExpr): void {
+        if (e.kind === 'call' && isString(e.type)) found = true;
+      });
+      if (found) return true;
+    }
+  }
+  return false;
+}
+
 async function runInEngine(
   host: EngineRunHost,
   plan: IrPlan,
@@ -254,6 +268,7 @@ async function runInEngine(
     last = now;
   };
   const derived = deriveLookups(foldConstants(plan, options.params));
+  if (hasStringResultCall(derived.plan)) return null;
   const planHandle = host.planLoad(encodePlan(derived.plan));
   if (planHandle === 0) throw new ExecutionError(`The engine refused a valid plan (error ${host.evalError()}); this is a bug in zamda`);
   let paramsHandle = 0;

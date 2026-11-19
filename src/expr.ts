@@ -426,14 +426,14 @@ export class NumExpr<D extends Num = Num> extends OrdExpr<D> {
 }
 
 export class StrExpr<D extends DataType<StringName> = DataType<StringName>> extends OrdExpr<D> {
-  lower(): StrExpr<DataType<'utf8'>> {
-    // Purpose: C-STR-CASE: locale-independent lower case
-    return new StrExpr(callNode('lower', [this.node]));
+  lower(): StrExpr<D> {
+    // Purpose: C-STR-CASE: locale-independent lower case, keeping the input storage type (T-219)
+    return new StrExpr(callNode('lower', [this.node])) as unknown as StrExpr<D>;
   }
 
-  upper(): StrExpr<DataType<'utf8'>> {
-    // Purpose: C-STR-CASE: locale-independent upper case
-    return new StrExpr(callNode('upper', [this.node]));
+  upper(): StrExpr<D> {
+    // Purpose: C-STR-CASE: locale-independent upper case, keeping the input storage type (T-219)
+    return new StrExpr(callNode('upper', [this.node])) as unknown as StrExpr<D>;
   }
 
   length(): NumExpr<DataType<'int32'>> {

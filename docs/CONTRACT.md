@@ -77,7 +77,7 @@ and column. `utf8` and `dictionary` behave identically; they differ only in stor
 | --- | --- |
 | C-STR-ORDER | Strings compare by Unicode code point. This is bytewise UTF-8 order and differs from JavaScript's default UTF-16 order above U+FFFF. |
 | C-STR-LENGTH | `length` counts code points, not UTF-16 units, and is `int32`. |
-| C-STR-CASE | `lower` and `upper` use locale-independent Unicode case mapping and return `utf8`. |
+| C-STR-CASE | `lower` and `upper` use locale-independent Unicode case mapping and keep the input storage type. A dictionary result is re-deduplicated, so different entries that map to the same string share one code. |
 | C-STR-MATCH | `startsWith`, `endsWith` and `contains` match literally; there are no patterns. The empty string matches everything. |
 | C-STR-MIX | `utf8` and `dictionary` expressions are interchangeable in one operation: comparisons, string functions, `coalesce`, `ifElse` and `isIn` treat both as strings. A string-producing result keeps the storage type of its first string operand. |
 

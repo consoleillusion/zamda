@@ -203,9 +203,9 @@ const defs: FunctionDef[] = [
   scalar('round', 'functions_rounding:round', 'propagate', unary('round', isFloat, 'a float operand')),
 
   // --- string ---
-  // lower and upper return utf8 even for dictionary input: mapping can merge entries.
-  scalar('lower', 'functions_string:lower', 'propagate', unary('lower', isString, 'a string operand', t.utf8)),
-  scalar('upper', 'functions_string:upper', 'propagate', unary('upper', isString, 'a string operand', t.utf8)),
+  // lower and upper keep the input storage type; a dictionary result is re-deduplicated (T-219).
+  scalar('lower', 'functions_string:lower', 'propagate', unary('lower', isString, 'a string operand')),
+  scalar('upper', 'functions_string:upper', 'propagate', unary('upper', isString, 'a string operand')),
   scalar('length', 'functions_string:char_length', 'propagate', unary('length', isString, 'a string operand', t.int32)),
   scalar('starts_with', 'functions_string:starts_with', 'propagate', stringPair('starts_with')),
   scalar('ends_with', 'functions_string:ends_with', 'propagate', stringPair('ends_with')),
