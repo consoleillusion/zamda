@@ -30,7 +30,7 @@ fn uint8_batch<'a>(values: &'a [u8], valid: Option<&'a [u8]>) -> Batch<'a> {
         Values::U8(std::borrow::Cow::Borrowed(values)),
         valid.map(std::borrow::Cow::Borrowed),
     );
-    Batch { rows: values.len(), columns: vec![Some(col)] }
+    Batch { rows: values.len(), columns: vec![Some(col)], memo: None }
 }
 
 fn constant_of(v: &Vector) -> Option<Scalar> {

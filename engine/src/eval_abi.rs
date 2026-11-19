@@ -44,10 +44,11 @@ pub(crate) struct Registry {
     pub(crate) params: Vec<Option<Rc<Params>>>,
     pub(crate) results: Vec<Option<EvalResult>>,
     pub(crate) runs: Vec<Option<crate::exec::Run>>,
+    pub(crate) sessions: Vec<Option<Rc<std::cell::RefCell<crate::session::Session>>>>,
 }
 
 thread_local! {
-    pub(crate) static REGISTRY: RefCell<Registry> = const { RefCell::new(Registry { plans: Vec::new(), params: Vec::new(), results: Vec::new(), runs: Vec::new() }) };
+    pub(crate) static REGISTRY: RefCell<Registry> = const { RefCell::new(Registry { plans: Vec::new(), params: Vec::new(), results: Vec::new(), runs: Vec::new(), sessions: Vec::new() }) };
     // (code, which operation, which type)
     static LAST: Cell<(u32, u32, u32)> = const { Cell::new((0, 0, 0)) };
 }
@@ -323,7 +324,9 @@ pub extern "C" fn zs_params_table(params: u32, index: u32, values: *const u8, by
         let Some(p) = Rc::get_mut(slot) else {
             return set_error(BAD_ARGUMENT, 0, 0);
         };
-        p.tables.insert(index as usize, crate::eval::LookupTable { entries, bytes: values, valid, decoded: std::cell::OnceCell::new() });
+        // The content hash lets a cached lookup from another run of the same table key equal (session.rs).
+        let salt = crate::session::table_salt(entries, &values, valid.as_deref());
+        p.tables.insert(index as usize, crate::eval::LookupTable { entries, bytes: values, valid, salt, decoded: std::cell::OnceCell::new() });
         0
     })
 }

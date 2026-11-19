@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   const module = await fetch('/engine.wasm');
   if (module.ok) {
     const { backend, table } = createWasmBackend(await loadEngine(await module.arrayBuffer()));
-    wasm = { table: a => table(Routes, columnInput(a)), stats: () => ({ ...backend.stats }) };
+    wasm = { table: a => table(Routes, columnInput(a)), stats: () => ({ ...backend.stats }), session: () => backend.session() };
     log('Loaded the WASM engine.');
   } else {
     log('No WASM engine on the server (run `bun run wasm:build`); measuring the JS backend only.');

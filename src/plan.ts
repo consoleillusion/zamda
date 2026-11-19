@@ -1,4 +1,4 @@
-import type { Table } from './backend';
+import type { RunSession, Table } from './backend';
 import { AbortError, PlanError, TypeCheckError } from './errors';
 import { literalValue } from './expr';
 import type { IrExpr, IrNode, IrPlan, LiteralValue } from './ir';
@@ -19,6 +19,8 @@ export interface ExecuteOptions<P extends ParamDecls = NoParams> {
   readonly chunkRows?: number;
   // How long to work before returning to the event loop, in milliseconds. Default 8.
   readonly sliceMs?: number;
+  // An opaque handle grouping runs that share work; only the backend that made it understands it.
+  readonly session?: RunSession;
 }
 
 // `options` is required exactly when the plan declares parameters.
@@ -124,6 +126,7 @@ export class Plan<In extends Fields, Out extends Fields, P extends ParamDecls = 
       chunkRows,
       sliceMs,
       onProgress: options.onProgress,
+      session: options.session,
     });
     return new Result<Out>(data);
   }

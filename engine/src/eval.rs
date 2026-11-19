@@ -30,6 +30,8 @@ pub struct LookupTable {
     pub bytes: Vec<u8>,
     // One byte per entry (1 = a value), None when no entry is null.
     pub valid: Option<Vec<u8>>,
+    // A hash of the table's content, for cache keys across runs (session.rs): a rebuilt identical table salts equal.
+    pub salt: u64,
     pub decoded: std::cell::OnceCell<Values<'static>>,
 }
 
@@ -44,6 +46,8 @@ pub struct Params {
 pub struct Batch<'a> {
     pub rows: usize,
     pub columns: Vec<Option<Vector<'a>>>,
+    // The rows this batch covers, and the session sharing their results; None once anything gathered or truncated the rows.
+    pub memo: Option<crate::session::Memo>,
 }
 
 impl<'a> Batch<'a> {
@@ -52,7 +56,7 @@ impl<'a> Batch<'a> {
         let columns = (0..types.len())
             .map(|c| Some(column_vector(view, c, types[c], start, rows)))
             .collect();
-        Batch { rows, columns }
+        Batch { rows, columns, memo: None }
     }
 }
 
@@ -219,6 +223,30 @@ pub fn supported(expr: &Expr) -> Result<(), &'static str> {
 }
 
 pub fn eval<'a>(expr: &Expr, batch: &Batch<'a>, params: &Params) -> Result<Vector<'a>, EvalError> {
+    // Purpose: evaluate one expression over a batch; boolean subexpressions may come from the session's cache
+    if expr.ty == Type::Bool
+        && !matches!(expr.kind, ExprKind::Field(_))
+        && crate::session::has_field(expr)
+        && batch.memo.is_some()
+    {
+        let memo = batch.memo.as_ref().expect("checked above");
+        let mut key = Vec::with_capacity(96);
+        crate::session::cache_key(&memo.key, expr, params, &mut key);
+        {
+            let mut session = memo.session.borrow_mut();
+            if let Some(v) = session.get(&key) {
+                return Ok(v);
+            }
+        }
+        // The borrow ends before evaluating: subexpressions borrow the session themselves.
+        let value = eval_uncached(expr, batch, params)?;
+        memo.session.borrow_mut().put(key, &value);
+        return Ok(value);
+    }
+    eval_uncached(expr, batch, params)
+}
+
+fn eval_uncached<'a>(expr: &Expr, batch: &Batch<'a>, params: &Params) -> Result<Vector<'a>, EvalError> {
     // Purpose: evaluate one expression over a batch
     let n = batch.rows;
     match &expr.kind {
@@ -396,18 +424,18 @@ fn lookup<'a>(arg: &Expr, table: usize, ty: Type, batch: &Batch<'a>, params: &Pa
     }
     let null_entry = (t.entries - 1) as u32;
     let mut at = Vec::with_capacity(n);
+    let mut past_end = false;
     for i in 0..n {
         if valid.as_ref().is_some_and(|v| v[i] == 0) {
             at.push(null_entry);
         } else {
             let id = ids[i] as u32;
-            if id >= null_entry {
-                return Err(EvalError::NeedsMap("a string id is past the end of a lookup table"));
-            }
+            if id >= null_entry { past_end = true; break; }
             at.push(id);
         }
     }
     let out = decoded.gather(&at);
     let out_valid = t.valid.as_ref().map(|v| Cow::Owned(at.iter().map(|&i| v[i as usize]).collect::<Vec<u8>>()));
+    if past_end { return Err(EvalError::NeedsMap("a string id is past the end of a lookup table")); }
     Ok(Vector::column(ty, out, out_valid))
 }

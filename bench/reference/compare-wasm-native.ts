@@ -25,6 +25,7 @@ const { arrays } = decodeRoutes(new Uint8Array(readFileSync(get('data', 'data/ro
 const result = await runComparison(arrays, Number(get('rows', '1000000')), Number(get('runs', '7')), wasmPath === null ? `Bun ${Bun.version} with the engine as a native library` : `Bun ${Bun.version} (JavaScriptCore) with the engine as WebAssembly`, console.log, {
   table: a => table(Routes, columnInput(a)),
   stats: () => ({ ...backend.stats }),
+  session: () => backend.session(),
 });
 mkdirSync('bench/results', { recursive: true });
 writeFileSync(wasmPath === null ? 'bench/results/compare-native.json' : 'bench/results/compare-wasm-bun.json', `${JSON.stringify(result, null, 2)}\n`);

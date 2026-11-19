@@ -154,6 +154,11 @@ impl View {
         unsafe { c.values.ptr.as_ptr().add(self.offset as usize * width(c.ty)) as *const u8 }
     }
 
+    // Purpose: how many rows the retain window has dropped from the front of the segment this view sees (two views of one segment with different offsets cover different rows, so a cache key needs it)
+    pub fn offset(&self) -> u64 {
+        self.offset as u64
+    }
+
     pub fn has_nulls(&self, col: usize) -> bool {
         // Purpose: whether any row of the whole segment is null in this column (an upper bound for a trimmed view)
         self.data.columns[col].nulls > 0

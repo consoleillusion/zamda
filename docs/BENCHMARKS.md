@@ -354,3 +354,36 @@ No WASM is involved. The gains are data layout and specialised loops:
   rank differently; the reference dashboard must be measured in browsers.
 - The plain JS loops are written for exactly these queries. They are a ceiling
   for hand-tuned code, not what typical application code looks like.
+
+## The dashboard on WASM with a shared filter pass (T-416)
+
+Sandbox Xeon, 2026-11-19, synthetic millions of routes from the reference file, `bun run
+bench:wasm` (engine as WebAssembly) and `bun run bench:native` (native library), same harness
+before and after (the session runs of the four WASM charts are wrapped in one
+`backend.session()` per interaction, T-416, D-070; nothing-selected rows are unchanged because
+the filter folds away):
+
+| Four charts together / one by one, with /22-/24, ARIN and "cloud" | native library, session | WASM module, no session | WASM module, session |
+| --- | ---: | ---: | ---: |
+| nothing selected | 27 / 27 | 35 / 33 | 34 / 33 |
+| prefix /22-/24, region ARIN, name "cloud" | 22 / 18 | 37 / 38 | 28 / 27 |
+
+(The WASM "no session" column was measured by commenting the `session` option out of the
+benchmark target and re-running the same harness; the "session" column is the default. Native
+without a session was not measured. Numbers move by 10 to 30% between runs.)
+
+The charts whose filter is identical (networks and pathLen) evaluate nothing but their own
+aggregate; the prefixLen and regions charts share the region and name lookups and re-evaluate
+only the subtrees whose parameters differ. The benchmark page now logs
+`WASM session cache over these runs: <hits> hits, <misses> misses`. With nothing selected the
+cache is idle (0 hits). Errors, rows and ordering are checked against the JS backend on every
+run, and 331 tests pass including the golden suite and the new `tests/wasm-session.test.ts`.
+Firefox on the owner's machine is the acceptance run: `bun run bench:browser`, in particular
+`prefix /22-/24, region ARIN, name "cloud"` in the last two columns of the dashboard
+interaction. The engine steps for that case were 46.2 ms there (D-069 addendum); the same
+sharing should land it well inside the 50 ms target. In headless Chrome (sandbox) at 1,000,000
+rows the WASM pair is 38 and 37 ms with nothing selected and 36 and 33 ms with the selection
+(JS is at 87 to 91 in the same run); in headless Chrome at 200,000 rows it is 11 ms with nothing
+selected and 6.8 ms with the selection. The cross-checks against the JS backend and JS executor
+pass there and inside the page (`window.__benchResult` set, `WASM backend runs: 287 in the
+engine`).

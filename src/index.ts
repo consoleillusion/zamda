@@ -38,7 +38,7 @@ export type { ColumnValues } from './column';
 export { table } from './backends/js';
 export type { ColumnInput, DictionaryInput, JsTable, RowInput, TableInput, TableOptions } from './backends/js';
 
-export type { Backend, BackendOptions, ResultData, Table } from './backend';
+export type { Backend, BackendOptions, ResultData, RunSession, Table } from './backend';
 export type { IrAggregate, IrExpr, IrNode, IrParam, IrPlan, IrSortKey } from './ir';
 export { IR_VERSION } from './ir';
 
