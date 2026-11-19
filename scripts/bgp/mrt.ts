@@ -30,11 +30,29 @@ export interface RibEntry {
   readonly originAs: number | null;
 }
 
+// One peer's path, kept whole for the graph. Only AS_SEQUENCE segments carry
+// adjacency: a set or a confederation segment breaks the path rather than
+// inventing a hop across it.
+export interface RibPath {
+  readonly peerIndex: number;
+  readonly pathLength: number;
+  readonly originAs: number | null;
+  readonly sequences: readonly (readonly number[])[];
+}
+
 export interface RibRecord {
   // IPv4 network address as an unsigned 32-bit number.
   readonly prefix: number;
   readonly prefixLength: number;
   readonly entries: readonly RibEntry[];
+}
+
+// The graph view of one RIB record. Separate from RibRecord so a reader with
+// no graph handler keeps decoding only the route dataset's fields.
+export interface RibGraphRecord {
+  readonly prefix: number;
+  readonly prefixLength: number;
+  readonly paths: readonly RibPath[];
 }
 
 // One RIB entry whose path attributes could not be decoded. The entry's own
@@ -52,6 +70,7 @@ export interface MalformedEntry {
 export interface MrtHandlers {
   onPeers?(peers: readonly Peer[]): void;
   onRib?(record: RibRecord): void;
+  onRibPaths?(record: RibGraphRecord): void;
   onMalformedEntry?(entry: MalformedEntry): void;
 }
 
@@ -66,13 +85,15 @@ export class MrtFormatError extends Error {
 export interface PathInfo {
   readonly pathLength: number;
   readonly originAs: number | null;
+  readonly sequences: readonly (readonly number[])[];
 }
 
-export function decodeAsPath(view: DataView, start: number, end: number): PathInfo {
-  // Purpose: path length and origin AS from an AS_PATH attribute value; ASNs are 4 bytes in TABLE_DUMP_V2
+export function decodeAsPath(view: DataView, start: number, end: number, includeSequences = false): PathInfo {
+  // Purpose: path length and origin AS from an AS_PATH attribute value, plus its sequence segments when the graph needs them
   let at = start;
   let pathLength = 0;
   let originAs: number | null = null;
+  const sequences: number[][] = [];
   while (at < end) {
     if (at + 2 > end) throw new MrtFormatError('AS_PATH segment header runs past the attribute');
     const type = view.getUint8(at);
@@ -81,6 +102,11 @@ export function decodeAsPath(view: DataView, start: number, end: number): PathIn
     if (at + count * 4 > end) throw new MrtFormatError('AS_PATH segment runs past the attribute');
     if (type === SEGMENT_AS_SEQUENCE) {
       pathLength += count;
+      if (includeSequences && count > 0) {
+        const sequence: number[] = [];
+        for (let i = 0; i < count; i++) sequence.push(view.getUint32(at + i * 4));
+        sequences.push(sequence);
+      }
       originAs = count > 0 ? view.getUint32(at + (count - 1) * 4) : originAs;
     } else if (type === SEGMENT_AS_SET) {
       pathLength += 1;
@@ -90,10 +116,10 @@ export function decodeAsPath(view: DataView, start: number, end: number): PathIn
     // Confederation segments (3 and 4) count for nothing and do not change the origin.
     at += count * 4;
   }
-  return { pathLength, originAs };
+  return { pathLength, originAs, sequences };
 }
 
-function findAsPath(view: DataView, start: number, end: number): PathInfo {
+function findAsPath(view: DataView, start: number, end: number, includeSequences: boolean): PathInfo {
   // Purpose: scan BGP path attributes for AS_PATH; an entry without one has an empty path
   let at = start;
   while (at < end) {
@@ -105,10 +131,10 @@ function findAsPath(view: DataView, start: number, end: number): PathInfo {
     const valueStart = at + (extended ? 4 : 3);
     const valueEnd = valueStart + length;
     if (valueEnd > end) throw new MrtFormatError('Path attribute runs past the entry');
-    if (type === ATTR_AS_PATH) return decodeAsPath(view, valueStart, valueEnd);
+    if (type === ATTR_AS_PATH) return decodeAsPath(view, valueStart, valueEnd, includeSequences);
     at = valueEnd;
   }
-  return { pathLength: 0, originAs: null };
+  return { pathLength: 0, originAs: null, sequences: [] };
 }
 
 function decodePeers(view: DataView, start: number, end: number): Peer[] {
@@ -150,12 +176,17 @@ function hex(view: DataView, start: number, end: number): string {
   return parts.join(' ') + (end - start > 256 ? ' ...' : '');
 }
 
+interface DecodedRib extends RibRecord {
+  readonly paths: readonly RibPath[];
+}
+
 function decodeRibIpv4(
   view: DataView,
   start: number,
   end: number,
   onMalformed: (entry: Omit<MalformedEntry, 'recordOffset'>) => void,
-): RibRecord {
+  includePaths: boolean,
+): DecodedRib {
   // Purpose: decode a RIB_IPV4_UNICAST record body: the prefix and every peer's entry for it.
   // An entry whose attributes cannot be decoded is reported and left out; the record's
   // structure (entry boundaries) must still be sound, or the whole record is an error.
@@ -170,6 +201,7 @@ function decodeRibIpv4(
   const count = view.getUint16(at);
   at += 2;
   const entries: RibEntry[] = [];
+  const paths: RibPath[] = [];
   for (let i = 0; i < count; i++) {
     if (at + 8 > end) throw new MrtFormatError('RIB entry runs past its record');
     const peerIndex = view.getUint16(at);
@@ -178,8 +210,16 @@ function decodeRibIpv4(
     const attributesEnd = attributesStart + attributesLength;
     if (attributesEnd > end) throw new MrtFormatError('RIB entry attributes run past its record');
     try {
-      const path = findAsPath(view, attributesStart, attributesEnd);
+      const path = findAsPath(view, attributesStart, attributesEnd, includePaths);
       entries.push({ peerIndex, pathLength: path.pathLength, originAs: path.originAs });
+      if (includePaths) {
+        paths.push({
+          peerIndex,
+          pathLength: path.pathLength,
+          originAs: path.originAs,
+          sequences: path.sequences,
+        });
+      }
     } catch (error) {
       if (!(error instanceof MrtFormatError)) throw error;
       const a = prefix;
@@ -192,7 +232,7 @@ function decodeRibIpv4(
     }
     at = attributesEnd;
   }
-  return { prefix, prefixLength, entries };
+  return { prefix, prefixLength, entries, paths };
 }
 
 export class MrtReader {
@@ -203,9 +243,11 @@ export class MrtReader {
   private malformed = 0;
   // Offset in the whole decompressed input of buffer[0].
   private consumed = 0;
+  private readonly includePaths: boolean;
 
   constructor(private readonly handlers: MrtHandlers) {
-    // Purpose: decode records from bytes pushed in pieces of any size
+    // Purpose: decode records from bytes pushed in pieces of any size, collecting sequences only for a graph handler
+    this.includePaths = typeof handlers.onRibPaths === 'function';
   }
 
   get recordCount(): number {
@@ -242,8 +284,11 @@ export class MrtReader {
           const record = decodeRibIpv4(view, bodyStart, bodyEnd, (entry) => {
             this.malformed++;
             this.handlers.onMalformedEntry?.({ ...entry, recordOffset });
-          });
+          }, this.includePaths);
           this.handlers.onRib?.(record);
+          if (this.includePaths) {
+            this.handlers.onRibPaths?.({ prefix: record.prefix, prefixLength: record.prefixLength, paths: record.paths });
+          }
         }
       }
       this.records++;

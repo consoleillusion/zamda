@@ -8,9 +8,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { count, pipe } from '../src';
 import { Routes, encodeRoutes, formatPrefix, loadRoutes } from '../scripts/bgp/file';
-import type { RibRecord } from '../scripts/bgp/mrt';
+import type { RibGraphRecord, RibRecord } from '../scripts/bgp/mrt';
 import { MrtFormatError, MrtReader } from '../scripts/bgp/mrt';
 import { parseAsNames, parseRirRanges, rirLookup } from '../scripts/bgp/registry';
+import { GraphBuilder } from '../scripts/bgp/graph';
+import { GraphEdges, decodeGraph, encodeGraph, loadGraph } from '../scripts/bgp/graph-file';
 import { RouteBuilder } from '../scripts/bgp/routes';
 import { cachePath, dumpUrl, parseArgs, prepare } from '../scripts/prep-bgp';
 
@@ -148,14 +150,23 @@ const DUMP = concat([
   rib(6, [203, 0, 113, 0], 24, [{ peer: 1, attributes: asPath([[SEQ, [4200000000, 4200000001]]]) }]),
 ]);
 
-function readAll(bytes: Uint8Array, pieceSize: number): { records: RibRecord[]; peers: number; reader: MrtReader } {
-  // Purpose: run the reader over bytes pushed in pieces of a given size
+function readAll(bytes: Uint8Array, pieceSize: number): {
+  records: (RibRecord & { paths: RibGraphRecord['paths'] })[];
+  peers: number;
+  reader: MrtReader;
+} {
+  // Purpose: run the reader over bytes pushed in pieces of a given size, keeping both views of each record
   const records: RibRecord[] = [];
+  const pathsByPrefix = new Map<number, RibGraphRecord['paths']>();
   let peers = 0;
-  const reader = new MrtReader({ onRib: r => records.push(r), onPeers: p => (peers = p.length) });
+  const reader = new MrtReader({
+    onRib: r => records.push(r),
+    onPeers: p => (peers = p.length),
+    onRibPaths: r => pathsByPrefix.set(r.prefix, r.paths),
+  });
   for (let at = 0; at < bytes.length; at += pieceSize) reader.push(bytes.subarray(at, at + pieceSize));
   reader.finish();
-  return { records, peers, reader };
+  return { records: records.map(r => ({ ...r, paths: pathsByPrefix.get(r.prefix) ?? [] })), peers, reader };
 }
 
 describe('MRT reader', () => {
@@ -244,6 +255,138 @@ describe('route builder', () => {
       ['203.0.113.0/24', 4200000001, 2],
     ]);
     expect(builder.stats).toEqual({ prefixesSeen: 6, skippedNoOrigin: 2, pathsClamped: 0 });
+  });
+});
+
+describe('AS adjacency graph', () => {
+  test('the MRT reader keeps sequence ASNs only when a graph handler is present', () => {
+    const records = readAll(DUMP, DUMP.length).records;
+    expect(records[0]!.entries).toEqual([{ peerIndex: 1, pathLength: 3, originAs: 13335 }, { peerIndex: 0, pathLength: 2, originAs: 13335 }]);
+
+    const paths: { peerIndex: number; pathLength: number; originAs: number | null; sequences: readonly (readonly number[])[] }[] = [];
+    const reader = new MrtReader({ onRibPaths(record) { for (const path of record.paths) paths.push(path); } });
+    for (let at = 0; at < DUMP.length; at += 7) reader.push(DUMP.subarray(at, at + 7));
+    reader.finish();
+    expect(paths.map(p => [p.peerIndex, p.pathLength, p.originAs, p.sequences])).toEqual([
+      [1, 3, 13335, [[65002, 65003, 13335]]],
+      [0, 2, 13335, [[65001, 13335]]],
+      [1, 2, 15169, [[100, 15169]]],
+      [0, 2, 64512, [[200, 64512]]],
+      [0, 2, null, [[174]]],
+      [2, 3, 3356, [[3356, 3356, 3356]]],
+      [0, 0, null, []],
+      [1, 2, 4200000001, [[4200000000, 4200000001]]],
+    ]);
+  });
+
+  test('builds weighted directed edges from the chosen route per prefix', () => {
+    const builder = new GraphBuilder();
+    for (const r of readAll(DUMP, DUMP.length).records) {
+      builder.add({ prefix: r.prefix, prefixLength: r.prefixLength, paths: r.paths });
+    }
+    const graph = builder.finish();
+    const edges = Array.from({ length: graph.edges.rowCount }, (_, i) => [
+      graph.edges.from_as[i],
+      graph.edges.to_as[i],
+      graph.edges.prefixes[i],
+    ]);
+    expect(edges).toEqual([
+      [65001, 13335, 1],
+      [200, 64512, 1],
+      [4200000000, 4200000001, 1],
+    ]);
+    const nodes = new Map(
+      Array.from({ length: graph.nodes.rowCount }, (_, i) => [graph.nodes.asn[i], graph.nodes.paths[i]]),
+    );
+    expect([...nodes]).toEqual([
+      [65001, 1],
+      [13335, 1],
+      [200, 1],
+      [64512, 1],
+      [3356, 1],
+      [4200000000, 1],
+      [4200000001, 1],
+    ]);
+    expect(builder.stats).toEqual({
+      prefixesSeen: 6,
+      skippedNoOrigin: 2,
+      routesWithoutEdges: 1,
+      duplicatePrefixedPairs: 0,
+    });
+  });
+
+  test('AS_SETs break a path, and prepends or repeated hops count once per prefix', () => {
+    const builder = new GraphBuilder();
+    builder.add({
+      prefix: 1,
+      prefixLength: 24,
+      paths: [
+        {
+          peerIndex: 0,
+          pathLength: 7,
+          originAs: 5,
+          sequences: [[1, 2], [3, 4], [2, 2, 5, 5], [2, 2, 5, 5]],
+        },
+        { peerIndex: 1, pathLength: 1, originAs: 9, sequences: [[9]] },
+      ],
+    });
+    // The shortest path, a single AS, wins and produces no edge.
+    expect(builder.finish().edges.rowCount).toBe(0);
+
+    const second = new GraphBuilder();
+    second.add({
+      prefix: 1,
+      prefixLength: 24,
+      paths: [{ peerIndex: 0, pathLength: 7, originAs: 5, sequences: [[1, 2], [3, 4], [2, 2, 5, 5], [2, 2, 5, 5]] }],
+    });
+    const graph = second.finish();
+    expect(Array.from({ length: graph.edges.rowCount }, (_, i) => [
+      graph.edges.from_as[i],
+      graph.edges.to_as[i],
+      graph.edges.prefixes[i],
+    ])).toEqual([
+      [1, 2, 1],
+      [3, 4, 1],
+      [2, 5, 1],
+    ]);
+    expect(second.stats.duplicatePrefixedPairs).toBe(1);
+  });
+
+  test('graph.bin round-trips labels and frozen coordinates, and loads an edges table', async () => {
+    const builder = new GraphBuilder();
+    for (const r of readAll(DUMP, DUMP.length).records) {
+      builder.add({ prefix: r.prefix, prefixLength: r.prefixLength, paths: r.paths });
+    }
+    const names = parseAsNames(ASN_TXT);
+    const rir = rirLookup(parseRirRanges(NRO_STATS));
+    const labels = {
+      asName: (asn: number) => names.get(asn) ?? null,
+      rir,
+    };
+    const encoded = encodeGraph(builder.finish(), labels, { collector: 'fixture' });
+    const { arrays, header } = decodeGraph(encoded);
+    expect(header.nodeCount).toBe(7);
+    expect(header.edgeCount).toBe(3);
+    expect(header.source).toEqual({ collector: 'fixture' });
+    const byAsn = new Map(Array.from(arrays.asn, (asn, i) => [asn, i] as const));
+    expect(arrays.name[byAsn.get(13335)!]).toBe('CLOUDFLARENET');
+    expect(arrays.rir[byAsn.get(3356)!]).toBe('ARIN');
+    expect(arrays.rir[byAsn.get(64512)!]).toBeNull();
+    expect(arrays.x.every(Number.isFinite) && arrays.y.every(Number.isFinite)).toBe(true);
+    expect(arrays.x.every(v => Math.abs(v) <= 1) && arrays.y.every(v => Math.abs(v) <= 1)).toBe(true);
+    expect(decodeGraph(encodeGraph(builder.finish(), labels, { collector: 'fixture' })).arrays.x).toEqual(arrays.x);
+
+    const loaded = loadGraph(encoded);
+    expect(loaded.edges.rowCount).toBe(3);
+    const rows = await pipe(GraphEdges)
+      .select(c => ({ from: c.from_as, to: c.to_as, weight: c.prefixes }))
+      .compile()
+      .execute(loaded.edges);
+    expect(rows.toArray()).toEqual([
+      { from: 65001, to: 13335, weight: 1 },
+      { from: 200, to: 64512, weight: 1 },
+      { from: 4200000000, to: 4200000001, weight: 1 },
+    ]);
   });
 });
 
@@ -347,16 +490,28 @@ describe('prep-bgp', () => {
     await writeFile(join(dir, 'asn.txt'), ASN_TXT);
     await writeFile(join(dir, 'stats'), NRO_STATS);
     const out = join(dir, 'out', 'routes.bin');
+    const graphOut = join(dir, 'out', 'graph.bin');
     const log = console.log;
     console.log = () => {};
     try {
-      await prepare(parseArgs(['--mrt', mrt, '--names', join(dir, 'asn.txt'), '--stats', join(dir, 'stats'), '--out', out]));
+      await prepare(
+        parseArgs([
+          '--mrt', mrt,
+          '--names', join(dir, 'asn.txt'),
+          '--stats', join(dir, 'stats'),
+          '--out', out,
+          '--graph-out', graphOut,
+        ]),
+      );
     } finally {
       console.log = log;
     }
     const { table, header } = loadRoutes(new Uint8Array(await Bun.file(out).arrayBuffer()));
     expect(table.rowCount).toBe(4);
     expect(header.source.peers).toBe(3);
+    const graph = decodeGraph(new Uint8Array(await Bun.file(graphOut).arrayBuffer()));
+    expect(graph.header.edgeCount).toBe(3);
+    expect(graph.header.nodeCount).toBe(7);
   });
 
   test('options and URLs', () => {
@@ -365,6 +520,7 @@ describe('prep-bgp', () => {
     expect(() => parseArgs(['--time', '1200'])).toThrow('0000, 0800 or 1600');
     expect(() => parseArgs(['--bogus', 'x'])).toThrow('Unknown option');
     expect(parseArgs([]).out).toBe('data/routes.bin');
+    expect(parseArgs([]).graphOut).toBe('data/graph.bin');
   });
 });
 

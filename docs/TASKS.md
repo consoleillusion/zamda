@@ -108,3 +108,7 @@ hard-coded mask pass, so T-413 is the real test of the 50 ms target.
 | T-501 (done; `src/substrait.ts`, pinned Substrait 0.108.0, 14 tests) | Substrait export and import; verify the registry's Substrait names against a pinned spec version |
 | T-502 (done, C-LIVE-KEY, D-075) | Keyed live tables |
 | T-503 (done, C-JOIN, C-WINDOW, D-076, D-077; 456 tests pass, core 29.7 KB gzipped; WASM rejects both nodes with PlanError until the engine supports them. Follow-up D-078: the WASM fallback check now inspects the derived plan, so the dashboard stays in the engine: Chrome selected interaction 37.7 ms, 0 fallbacks) | Joins, then window functions |
+| T-504 (done, D-079; 461 tests pass, core 29.7 KB gzipped; real rrc00 dump gives 80,226 ASes and 122,862 directed edges in a 6.4 MB `data/graph.bin`) | AS-adjacency graph data: keep AS_PATH sequences from the MRT dump, build weighted directed edges and node labels, write `data/graph.bin` from `prep-bgp` (D-079) |
+| T-505 (pending) | Static graph view in the dashboard: sigma.js + graphology WebGL renderer, simplified default, click-to-expand neighbourhood (D-080) |
+| T-506 (pending) | All-data graph mode and browser measurements, recorded in `docs/BENCHMARKS.md` (D-081) |
+| T-507 (pending) | RIS Live overlay: hot edges and nodes from the stream on the frozen layout, with the simulator as fallback (D-082) |

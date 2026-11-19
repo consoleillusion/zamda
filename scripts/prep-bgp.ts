@@ -1,12 +1,14 @@
 // Builds the reference dataset (docs/ROADMAP.md, "Reference dashboard"): one
 // IPv4 route per prefix from a RIPE RIS routing table dump, labelled with each
-// origin network's name and regional registry, written to data/routes.bin.
+// origin network's name and regional registry, written to data/routes.bin, plus
+// the AS-adjacency graph derived from the same dump in data/graph.bin.
 //
 //   bun run prep-bgp                         latest full day: yesterday 00:00 UTC, collector rrc00
 //   bun run prep-bgp --date 20261101         a given day
 //   bun run prep-bgp --rrc rrc01 --time 0800 another collector and dump time (0000, 0800, 1600)
 //   bun run prep-bgp --mrt dump.gz --names asn.txt --stats nro-delegated-stats
 //                                            local files instead of downloads
+//   bun run prep-bgp --graph-out data/x.bin  write the graph somewhere else
 //
 // A downloaded dump is kept as data/<rrc>-bview.<date>.<time>.gz and reused on the next run.
 //
@@ -18,6 +20,8 @@ import { dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { encodeRoutes } from './bgp/file';
+import { GraphBuilder } from './bgp/graph';
+import { encodeGraph } from './bgp/graph-file';
 import { MrtReader } from './bgp/mrt';
 import { parseAsNames, parseRirRanges, rirLookup } from './bgp/registry';
 import { RouteBuilder } from './bgp/routes';
@@ -33,6 +37,7 @@ export interface Options {
   names: string | null;
   stats: string | null;
   out: string;
+  graphOut: string;
 }
 
 function yesterday(): string {
@@ -43,7 +48,16 @@ function yesterday(): string {
 
 export function parseArgs(argv: readonly string[]): Options {
   // Purpose: read the command-line options, rejecting anything unknown
-  const options: Options = { rrc: 'rrc00', date: yesterday(), time: '0000', mrt: null, names: null, stats: null, out: 'data/routes.bin' };
+  const options: Options = {
+    rrc: 'rrc00',
+    date: yesterday(),
+    time: '0000',
+    mrt: null,
+    names: null,
+    stats: null,
+    out: 'data/routes.bin',
+    graphOut: 'data/graph.bin',
+  };
   for (let i = 0; i < argv.length; i += 2) {
     const flag = argv[i]!;
     const value = argv[i + 1];
@@ -55,6 +69,7 @@ export function parseArgs(argv: readonly string[]): Options {
     else if (flag === '--names') options.names = value;
     else if (flag === '--stats') options.stats = value;
     else if (flag === '--out') options.out = value;
+    else if (flag === '--graph-out') options.graphOut = value;
     else throw new Error(`Unknown option ${flag}`);
   }
   if (!/^\d{8}$/.test(options.date)) throw new Error(`--date must be YYYYMMDD, got ${options.date}`);
@@ -127,13 +142,21 @@ async function* dumpBytes(options: Options): AsyncGenerator<Uint8Array> {
 }
 
 export async function prepare(options: Options): Promise<void> {
-  // Purpose: read the dump and registry files, build one route per prefix, and write the routes file
+  // Purpose: read the dump and registry files, build one route and one graph per prefix, and write both files
   const started = performance.now();
   const [namesText, statsText] = await Promise.all([text(options.names, ASN_NAMES_URL), text(options.stats, NRO_STATS_URL)]);
   const names = parseAsNames(namesText);
   const rir = rirLookup(parseRirRanges(statsText));
+  const labels = {
+    asName: function (asn: number): string | null {
+      // Purpose: the network's name, if asn.txt has it
+      return names.get(asn) ?? null;
+    },
+    rir,
+  };
 
   const builder = new RouteBuilder();
+  const graphBuilder = new GraphBuilder();
   let peers = 0;
   const malformedSamples: string[] = [];
   const reader = new MrtReader({
@@ -154,6 +177,10 @@ export async function prepare(options: Options): Promise<void> {
       // Purpose: add each IPv4 prefix's chosen route
       builder.add(record);
     },
+    onRibPaths(record) {
+      // Purpose: add the same prefix's chosen path to the AS graph
+      graphBuilder.add(record);
+    },
   });
   let bytes = 0;
   let nextReport = 256 << 20;
@@ -168,30 +195,32 @@ export async function prepare(options: Options): Promise<void> {
   reader.finish();
 
   const routes = builder.finish();
+  const graph = graphBuilder.finish();
   const source = {
     collector: options.mrt ? 'local file' : options.rrc,
     dump: options.mrt ?? dumpUrl(options.rrc, options.date, options.time),
     peers,
     generated: new Date().toISOString(),
   };
-  const file = encodeRoutes(
-    routes,
-    {
-      asName: function (asn) {
-        // Purpose: the network's name, if asn.txt has it
-        return names.get(asn) ?? null;
-      },
-      rir,
-    },
-    source,
-  );
-  await mkdir(dirname(options.out), { recursive: true });
+  const file = encodeRoutes(routes, labels, source);
+  const graphFile = encodeGraph(graph, labels, source);
+  const directory = dirname(options.out);
+  await mkdir(directory, { recursive: true });
   await writeFile(options.out, file);
+  const graphDirectory = dirname(options.graphOut);
+  if (graphDirectory !== directory) await mkdir(graphDirectory, { recursive: true });
+  await writeFile(options.graphOut, graphFile);
 
   const s = builder.stats;
+  const g = graphBuilder.stats;
   console.log(`wrote ${options.out}: ${routes.rowCount.toLocaleString()} routes, ${(file.length / 2 ** 20).toFixed(1)} MB`);
+  console.log(
+    `wrote ${options.graphOut}: ${graph.nodes.rowCount.toLocaleString()} ASes, ` +
+      `${graph.edges.rowCount.toLocaleString()} directed edges, ${(graphFile.length / 2 ** 20).toFixed(1)} MB`,
+  );
   console.log(`  ${s.prefixesSeen.toLocaleString()} IPv4 prefixes from ${peers} peers`);
   console.log(`  ${s.skippedNoOrigin.toLocaleString()} skipped: no single origin AS (empty path or AS_SET)`);
+  console.log(`  ${g.routesWithoutEdges.toLocaleString()} chosen routes with no AS adjacency after prepends were collapsed`);
   if (reader.malformedEntryCount > 0) {
     console.log(`  ${reader.malformedEntryCount.toLocaleString()} peer entries skipped: path attributes could not be decoded. First ones:`);
     for (const sample of malformedSamples) console.log(sample);

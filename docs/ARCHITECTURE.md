@@ -203,12 +203,14 @@ bench/reference/compare-bun.ts and browser/   run compare.ts under Bun, or in a 
 
 ```
 scripts/size.ts           size gate for `bun run size`
-scripts/prep-bgp.ts       builds data/routes.bin from a RIPE RIS dump
+scripts/prep-bgp.ts       builds data/routes.bin and data/graph.bin from a RIPE RIS dump
 scripts/inspect-routes.ts runs the dashboard queries on data/routes.bin
 scripts/fake-routes.ts    writes a synthetic data/routes.bin for offline use
 scripts/check-dump.ts     re-reads a dump with random splits; all passes must agree
-scripts/bgp/mrt.ts        streaming MRT (RFC 6396) reader: TABLE_DUMP_V2 IPv4 RIBs
+scripts/bgp/mrt.ts        streaming MRT (RFC 6396) reader: TABLE_DUMP_V2 IPv4 RIBs and AS_PATH
 scripts/bgp/routes.ts     one route per prefix (shortest path, lowest peer)
+scripts/bgp/graph.ts      one weighted AS-adjacency graph from the same chosen routes
+scripts/bgp/graph-file.ts the graph file format and its loader into a zamda table
 scripts/bgp/registry.ts   asn.txt names and NRO delegation stats
 scripts/bgp/file.ts       the routes file format and its loader into a zamda table
 ```

@@ -55,6 +55,10 @@ The acceptance test for Milestone 2 and the benchmark for the spike.
   and writes `data/routes.bin`; no data is redistributed with zamda.
 - **Columns:** `prefix_addr` uint32, `prefix_len` uint8, `origin_as` uint32,
   `as_name` dictionary, `path_len` uint8, `rir` dictionary.
+- **Graph data:** `bun run prep-bgp` also writes `data/graph.bin`: one row per
+  AS and one weighted directed edge per consecutive pair in the chosen route's
+  `AS_PATH`, with labels and frozen positions (D-079). The same dump produced
+  80,226 nodes and 122,862 edges on 18 November 2026.
 - **Charts:** top 20 networks by route count; prefix-length histogram;
   path-length histogram; routes and distinct networks by region.
 - **Controls:** range brushes (`between`), region multi-select (`isIn`), name

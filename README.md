@@ -107,7 +107,7 @@ bun run check     # typecheck + tests + size budget
 | `bun run gen:engine` | Regenerate `engine/src/signatures.rs` and the plan corpus the Rust tests read; `cd engine && cargo test --release` runs them |
 | `bun run engine:test` | Build the engine natively, run the JS tests that load tables, evaluate expressions and run plans in it through bun:ffi, then the Rust tests |
 | `bun run bench:ref` | Reference benchmark: seven queries at 10k, 100k and 1M routes, zamda vs Arquero, answers checked first; writes `bench/results/` |
-| `bun run prep-bgp` | Download a RIPE RIS routing table dump and build `data/routes.bin` for the demo |
+| `bun run prep-bgp` | Download a RIPE RIS routing table dump and build `data/routes.bin` and `data/graph.bin` for the demo |
 | `bun run fake-routes` | Write a synthetic `data/routes.bin` (a million routes) for trying the demo offline |
 | `bun run demo` | The reference dashboard on http://localhost:3000; add `?live=sim` for a simulated live feed, `?live=off` for none |
 | `bun run scripts/inspect-routes.ts` | Run the dashboard's queries on `data/routes.bin` and time them |
