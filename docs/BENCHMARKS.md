@@ -455,3 +455,21 @@ the 10,000 strongest edges because 6,119 of those edges touch an AS outside the 
 budget; the panel says so instead of implying all 10,000 are visible. Wheel and pointer events
 move the camera in both browsers, and the full graph stays at a 60 fps frame cadence while
 panning in this headless run. These are development-machine numbers, not the owner's machine.
+
+## RIS Live overlay and animated zoom (T-507)
+
+Measured on 2026-11-20 with the same `data/graph.bin` and `?live=sim` on port 3101. Both
+browsers loaded the file in about 99 ms, the simulator filled the 60-second hot-edge query to
+its 200-pair cap, and the graph panel reported roughly 200 hot ASes without a console error.
+The camera samples are from a click on AS13335, followed by Overview:
+
+| Browser | Ratio at 40 / 160 / 320 / 540 ms into zoom-in | Ratio at 40 / 160 / 320 / 540 ms back out | Errors |
+| --- | --- | --- | --- |
+| Chrome 156 | 1.036, 1.211, 1.707, 1.800 | 1.800, 1.682, 1.234, 1.036 | 0 |
+| Firefox 158 | 1.043, 1.153, 1.530, 1.799 | 1.799, 1.708, 1.344, 1.041 | 0 |
+
+The camera also moves from `(0.493, 0.489)` to `(0.646, 0.798)` in both browsers, so the zoom
+keeps the clicked node centred rather than switching canvases. Raw samples are
+`bench/results/t507-graph-live-chrome.json` and `bench/results/t507-graph-live-firefox.json`.
+These are development-machine numbers from the simulated feed, not the owner's machine or the
+real RIS Live socket.

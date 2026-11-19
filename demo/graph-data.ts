@@ -39,6 +39,12 @@ export interface GraphEdgeView {
   readonly weight: number;
 }
 
+export interface ActivityRow {
+  readonly from_as: number | null;
+  readonly to_as: number | null;
+  readonly updates: number | null;
+}
+
 export interface GraphViewData {
   readonly nodes: readonly GraphNodeView[];
   readonly edges: readonly GraphEdgeView[];
@@ -86,6 +92,25 @@ export function compileGraphPlans() {
 }
 
 export type GraphPlans = ReturnType<typeof compileGraphPlans>;
+
+export function edgeKey(from: number, to: number): string {
+  // Purpose: one stable key for a directed AS pair, shared by the view and the live overlay
+  return `${from}:${to}`;
+}
+
+export function hotKeys(rows: readonly ActivityRow[]): Map<string, number> {
+  // Purpose: mark hot edges and both endpoints, keeping the strongest recent count for each
+  const hot = new Map<string, number>();
+  for (const row of rows) {
+    if (row.from_as === null || row.to_as === null) continue;
+    const updates = row.updates ?? 0;
+    if (updates === 0) continue;
+    for (const key of [edgeKey(row.from_as, row.to_as), String(row.from_as), String(row.to_as)]) {
+      hot.set(key, Math.max(hot.get(key) ?? 0, updates));
+    }
+  }
+  return hot;
+}
 
 export async function overviewEdges(
   edges: EdgeTable,
@@ -162,7 +187,7 @@ export function buildViewData(
   const edges: GraphEdgeView[] = [];
   for (const row of rows) {
     if (!kept.has(row.from_as) || !kept.has(row.to_as)) continue;
-    edges.push({ key: `${row.from_as}:${row.to_as}`, from: row.from_as, to: row.to_as, weight: row.prefixes });
+    edges.push({ key: edgeKey(row.from_as, row.to_as), from: row.from_as, to: row.to_as, weight: row.prefixes });
   }
   return { nodes, edges, truncated: rows.length - edges.length };
 }

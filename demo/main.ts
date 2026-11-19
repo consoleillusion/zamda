@@ -6,18 +6,22 @@ import { formatPrefix, loadRoutes } from '../scripts/bgp/file';
 import { createHistogram, drawActivity, drawRegions, drawTopNetworks, formatCount } from './charts';
 import type { ActivityBucket } from './charts';
 import { startGraph } from './graph-panel';
+import type { GraphPanel } from './graph-panel';
+import { hotKeys } from './graph-data';
 import { EMPTY_SELECTION, affectedBy, compilePlans, nameIndex, paramsFor, parseAddressRange, summariseNetworks } from './dashboard';
 import type { ChartId, RoutesTable, Selection } from './dashboard';
 import type { WasmSession } from '../src/backends/wasm';
 import {
   ACTIVITY_BUCKET,
   ACTIVITY_SECONDS,
+  HOT_EDGE_SECONDS,
   compileLivePlans,
   connectRisLive,
+  createEdgeUpdatesTable,
   createUpdatesTable,
   simulateFeed,
 } from './live';
-import type { UpdateRow } from './live';
+import type { LiveEdgeRow, UpdateRow } from './live';
 
 // Path lengths above this are drawn in the last column, labelled "N+".
 const PATH_BINS = 16;
@@ -62,12 +66,19 @@ async function start(): Promise<void> {
   const names = new Map<number, string>();
   const dashboard = createDashboard(routes, names);
   dashboard.runAll();
-  void startGraph().catch(function (error: unknown) {
+  let graph: GraphPanel | null = null;
+  void startGraph().then(function (panel: GraphPanel): void {
+    // Purpose: hand the loaded graph to the live panel for the overlay and simulator
+    graph = panel;
+  }, function (error: unknown): void {
     // Purpose: a graph failure must not take the route charts down with it
     byId<HTMLElement>('graph-status').textContent = `Graph failed: ${String(error)}`;
     console.error('graph failed', error);
   });
-  startLive(names);
+  startLive(names, function (): GraphPanel | null {
+    // Purpose: read the graph panel after its file has loaded
+    return graph;
+  });
 }
 
 function createDashboard(routes: RoutesTable, names: Map<number, string>) {
@@ -247,16 +258,27 @@ function createDashboard(routes: RoutesTable, names: Map<number, string>) {
   return { runAll };
 }
 
-function startLive(names: ReadonlyMap<number, string>): void {
-  // Purpose: stream updates into a live table and redraw the live panel every second
+function startLive(names: ReadonlyMap<number, string>, graphNow: () => GraphPanel | null): void {
+  // Purpose: stream updates into live tables, redraw the panel and overlay the graph every second
   const live = createUpdatesTable();
+  const edges = createEdgeUpdatesTable();
   const plans = compileLivePlans();
-  const runs = { activity: latest(plans.activity), active: latest(plans.active), totals: latest(plans.totals) };
+  const runs = {
+    activity: latest(plans.activity),
+    active: latest(plans.active),
+    totals: latest(plans.totals),
+    hotEdges: latest(plans.hotEdges),
+  };
   let pending: UpdateRow[] = [];
+  let pendingEdges: LiveEdgeRow[] = [];
   const handlers = {
     onRows(rows: UpdateRow[]) {
       // Purpose: buffer rows until the next append, so the table grows in batches
       pending = pending.concat(rows);
+    },
+    onEdges(next: LiveEdgeRow[]) {
+      // Purpose: buffer the AS pairs that the graph overlay will count
+      pendingEdges = pendingEdges.concat(next);
     },
     onStatus(status: string) {
       // Purpose: show the feed's state
@@ -278,31 +300,41 @@ function startLive(names: ReadonlyMap<number, string>): void {
       },
       400,
       handlers,
+      function pairsNow() {
+        // Purpose: the simulator borrows pairs the graph is actually drawing
+        return graphNow()?.visiblePairs() ?? [];
+      },
     );
   } else {
     connectRisLive(new URLSearchParams(location.search).get('host') ?? 'rrc00', handlers);
   }
 
   setInterval(function tick() {
-    // Purpose: append the buffered rows and re-run the live queries
+    // Purpose: append the buffered rows and re-run the live queries and graph overlay
     if (pending.length > 0) {
       live.append(pending);
       pending = [];
+    }
+    if (pendingEdges.length > 0) {
+      edges.append(pendingEdges);
+      pendingEdges = [];
     }
     const began = performance.now();
     const now = Math.floor(Date.now() / 1000);
     const from = now - ACTIVITY_SECONDS;
     const options = { params: { since: from } };
+    const hotOptions = { params: { since: now - HOT_EDGE_SECONDS } };
     const failed = function (error: unknown): void {
       // Purpose: ignore replaced runs
       if (!isAbort(error)) console.error('live query failed', error);
     };
-    Promise.all([runs.activity(live, options), runs.active(live, options), runs.totals(live, options)]).then(function ([
-      activity,
-      active,
-      totals,
-    ]) {
-      // Purpose: draw the live panel from the three results
+    Promise.all([
+      runs.activity(live, options),
+      runs.active(live, options),
+      runs.totals(live, options),
+      runs.hotEdges(edges, hotOptions),
+    ]).then(function ([activity, active, totals, hot]) {
+      // Purpose: draw the live panel and colour the graph's hot edges and nodes
       const buckets = new Map<number, ActivityBucket>();
       for (const r of activity.toArray()) {
         const key = r.bucket ?? 0;
@@ -334,6 +366,7 @@ function startLive(names: ReadonlyMap<number, string>): void {
           return li;
         }),
       );
+      graphNow()?.setLive(hotKeys(hot.toArray()));
       showMs('live', performance.now() - began);
     }, failed);
   }, 1000);

@@ -15,7 +15,14 @@ import {
   summariseNetworks,
 } from '../demo/dashboard';
 import type { Selection } from '../demo/dashboard';
-import { compileLivePlans, createUpdatesTable, parseRisMessage, subscribeMessage } from '../demo/live';
+import {
+  compileLivePlans,
+  createEdgeUpdatesTable,
+  createUpdatesTable,
+  parseRisEdges,
+  parseRisMessage,
+  subscribeMessage,
+} from '../demo/live';
 
 const routes = table(Routes, [
   { prefix_addr: 0x01000000, prefix_len: 24, origin_as: 13335, as_name: 'CLOUDFLARENET', path_len: 2, rir: 'APNIC' },
@@ -152,6 +159,38 @@ describe('RIS Live messages', () => {
     expect(JSON.parse(subscribeMessage('rrc00'))).toEqual({ type: 'ris_subscribe', data: { host: 'rrc00', type: 'UPDATE' } });
   });
 
+  test('live edges follow the graph path rules: sequences only, prepends collapsed, sets break, one pair per prefix', () => {
+    const msg = JSON.parse(ANNOUNCE);
+    msg.data.path = [64496, 3356, 3356, [1, 2], 13335, 13335];
+    expect(parseRisEdges(JSON.stringify(msg))).toEqual([
+      { second: 1763337600, from_as: 64496, to_as: 3356 },
+      { second: 1763337600, from_as: 64496, to_as: 3356 },
+    ]);
+    msg.data.path = [64496, 3356, 3356, 13335];
+    msg.data.announcements = [{ prefixes: ['1.1.1.0/24'] }];
+    expect(parseRisEdges(JSON.stringify(msg))).toEqual([
+      { second: 1763337600, from_as: 64496, to_as: 3356 },
+      { second: 1763337600, from_as: 3356, to_as: 13335 },
+    ]);
+    msg.data.path = [1, 2, 1, 2, 2];
+    expect(parseRisEdges(JSON.stringify(msg))).toEqual([
+      { second: 1763337600, from_as: 1, to_as: 2 },
+      { second: 1763337600, from_as: 2, to_as: 1 },
+    ]);
+    msg.data.path = [3356];
+    expect(parseRisEdges(JSON.stringify(msg))).toEqual([]);
+  });
+
+  test('withdrawals and bad messages contribute no live edges', () => {
+    expect(parseRisEdges(ANNOUNCE)).toEqual([
+      { second: 1763337600, from_as: 64496, to_as: 3356 },
+      { second: 1763337600, from_as: 3356, to_as: 13335 },
+      { second: 1763337600, from_as: 64496, to_as: 3356 },
+      { second: 1763337600, from_as: 3356, to_as: 13335 },
+    ]);
+    expect(parseRisEdges('not json')).toEqual([]);
+  });
+
   test('live queries over appended updates', async () => {
     const live = createUpdatesTable();
     live.append(parseRisMessage(ANNOUNCE));
@@ -173,6 +212,21 @@ describe('RIS Live messages', () => {
     ]);
     expect((await plans.totals.execute(live, { params: { since: 1763337601 } })).toArray()).toEqual([
       { kind: 'announce', updates: 1 },
+    ]);
+  });
+
+  test('the hot-edge query counts only recent activity, strongest first', async () => {
+    const edges = createEdgeUpdatesTable();
+    edges.append([
+      { second: 100, from_as: 1, to_as: 2 },
+      { second: 100, from_as: 1, to_as: 2 },
+      { second: 100, from_as: 2, to_as: 3 },
+      { second: 10, from_as: 3, to_as: 4 },
+    ]);
+    const rows = (await compileLivePlans().hotEdges.execute(edges, { params: { since: 50 } })).toArray();
+    expect(rows).toEqual([
+      { from_as: 1, to_as: 2, updates: 2 },
+      { from_as: 2, to_as: 3, updates: 1 },
     ]);
   });
 });

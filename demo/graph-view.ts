@@ -1,6 +1,8 @@
 // The graph panel's WebGL renderer. Graphology holds the simplified graph;
 // sigma.js draws it. Positions come from graph.bin, so there is no layout pass
-// in the browser and live updates never move a node.
+// in the browser and live updates never move a node. One renderer stays alive
+// across views: a click eases the camera onto the chosen AS before the data is
+// replaced, and Overview or All data eases back out first.
 
 import Graph from 'graphology';
 import Sigma from 'sigma';
@@ -8,6 +10,9 @@ import type { GraphEdgeView, GraphViewData } from './graph-data';
 
 export interface GraphView {
   show(data: GraphViewData): void;
+  jump(data: GraphViewData): void;
+  frame(data: GraphViewData): Promise<void>;
+  focus(asn: number): Promise<void>;
   setLive(hot: ReadonlyMap<string, number>): void;
   camera(): { x: number; y: number; ratio: number };
   destroy(): void;
@@ -25,6 +30,16 @@ const LIVE_COLOR = '#e83e3e';
 const EDGE_COLOR = 'rgba(113, 128, 150, 0.28)';
 const LIVE_EDGE_COLOR = 'rgba(232, 62, 62, 0.95)';
 const LABEL_LIMIT = 8;
+const ZOOM_DURATION = 550;
+const FOCUS_RATIO = 1.8;
+
+interface CameraView {
+  x: number;
+  y: number;
+  ratio: number;
+}
+
+type Camera = ReturnType<Sigma['getCamera']>;
 
 function nodeColor(rir: string | null): string {
   // Purpose: one stable colour per regional registry
@@ -36,9 +51,9 @@ function edgeWidth(weight: number, density: number): number {
   return (0.18 + Math.min(1.4, Math.log2(weight + 1) / 3)) * density;
 }
 
-function buildGraph(data: GraphViewData): Graph {
-  // Purpose: a directed graphology graph with the renderer's attributes on each node and edge
-  const graph = new Graph({ type: 'directed', multi: false });
+function populateGraph(graph: Graph, data: GraphViewData): void {
+  // Purpose: replace the displayed nodes and edges while keeping the renderer and its camera
+  graph.clear();
   let maxPaths = 1;
   for (const node of data.nodes) maxPaths = Math.max(maxPaths, node.paths);
   const density = Math.min(1, Math.sqrt(1500 / Math.max(1, data.nodes.length)));
@@ -70,16 +85,82 @@ function buildGraph(data: GraphViewData): Graph {
       key: edge.key,
     });
   }
-  return graph;
+}
+
+function targetCamera(data: GraphViewData): CameraView {
+  // Purpose: frame the nodes of a view without moving their frozen positions
+  if (data.nodes.length === 0) return { x: 0.5, y: 0.5, ratio: 1 };
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const node of data.nodes) {
+    minX = Math.min(minX, node.x);
+    maxX = Math.max(maxX, node.x);
+    minY = Math.min(minY, node.y);
+    maxY = Math.max(maxY, node.y);
+  }
+  const x = (minX + maxX + 2) / 4;
+  const y = (minY + maxY + 2) / 4;
+  const span = Math.max(maxX - minX, maxY - minY, 0.05);
+  return { x, y, ratio: Math.min(4, Math.max(0.8, 2 / span)) };
+}
+
+function focusTarget(graph: Graph, asn: number): CameraView | null {
+  // Purpose: centre the camera on a clicked AS so the zoom keeps that node in view
+  if (!graph.hasNode(String(asn))) return null;
+  const attributes = graph.getNodeAttributes(String(asn));
+  return { x: (Number(attributes.x) + 1) / 2, y: (Number(attributes.y) + 1) / 2, ratio: FOCUS_RATIO };
+}
+
+function reduceMotion(): boolean {
+  // Purpose: respect the browser's reduced-motion setting for camera transitions
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function animateTo(camera: Camera, target: CameraView): Promise<void> {
+  // Purpose: ease the shared camera to a view, or jump there when motion is reduced
+  if (reduceMotion()) {
+    camera.setState(target);
+    return Promise.resolve();
+  }
+  return camera.animate(target, { duration: ZOOM_DURATION });
 }
 
 export function createGraphView(container: HTMLElement, onSelect: (asn: number) => void): GraphView {
-  // Purpose: own one sigma renderer over the graph panel, replacing its graph when the view changes
+  // Purpose: own one sigma renderer over the graph panel, animating without replacing the canvas
   let renderer: Sigma | null = null;
   let graph: Graph | null = null;
 
+  const ensureRenderer = function (): void {
+    // Purpose: create the renderer once, on the first draw
+    if (renderer && graph) return;
+    graph = new Graph({ type: 'directed', multi: false });
+    container.replaceChildren();
+    renderer = new Sigma(graph, container, {
+      settings: {
+        itemSizesReference: 'screen',
+        renderEdgeLabels: false,
+        labelRenderedSizeThreshold: 2.4,
+        labelDensity: 0.02,
+        labelGridCellSize: 90,
+        minCameraRatio: 0.2,
+        maxCameraRatio: 12,
+        stagePadding: 24,
+        zoomDuration: ZOOM_DURATION,
+        zoomingRatio: 1.12,
+        inertiaDuration: 350,
+        inertiaRatio: 0.8,
+      },
+    });
+    renderer.on('clickNode', function (event) {
+      // Purpose: drill into the network the user clicked
+      onSelect(Number(event.node));
+    });
+  };
+
   const destroy = function (): void {
-    // Purpose: release WebGL resources before a new graph is shown
+    // Purpose: release WebGL resources only when the panel itself is torn down
     renderer?.kill();
     renderer = null;
     graph = null;
@@ -87,26 +168,29 @@ export function createGraphView(container: HTMLElement, onSelect: (asn: number) 
 
   return {
     show(data) {
-      // Purpose: draw one snapshot of nodes and edges on fixed positions
-      destroy();
-      container.replaceChildren();
-      graph = buildGraph(data);
-      renderer = new Sigma(graph, container, {
-        settings: {
-          itemSizesReference: 'screen',
-          renderEdgeLabels: false,
-          labelRenderedSizeThreshold: 2.4,
-          labelDensity: 0.02,
-          labelGridCellSize: 90,
-          minCameraRatio: 0.2,
-          maxCameraRatio: 12,
-          stagePadding: 24,
-        },
-      });
-      renderer.on('clickNode', function (event) {
-        // Purpose: drill into the network the user clicked
-        onSelect(Number(event.node));
-      });
+      // Purpose: draw one snapshot on fixed positions, leaving the camera where it is
+      ensureRenderer();
+      populateGraph(graph!, data);
+      renderer!.refresh();
+    },
+    jump(data) {
+      // Purpose: draw the first snapshot and frame it without animating
+      ensureRenderer();
+      renderer!.getCamera().cancelAnimation();
+      renderer!.getCamera().setState(targetCamera(data));
+      populateGraph(graph!, data);
+      renderer!.refresh();
+    },
+    frame(data) {
+      // Purpose: ease the camera out to a view before its nodes are shown
+      ensureRenderer();
+      return animateTo(renderer!.getCamera(), targetCamera(data));
+    },
+    focus(asn) {
+      // Purpose: ease the camera onto a clicked AS before its neighbourhood is shown
+      ensureRenderer();
+      const target = focusTarget(graph!, asn);
+      return target ? animateTo(renderer!.getCamera(), target) : Promise.resolve();
     },
     camera() {
       // Purpose: the current camera state, for checking that a browser interaction really moved it
@@ -127,11 +211,11 @@ export function createGraphView(container: HTMLElement, onSelect: (asn: number) 
           changed = true;
         }
       });
-      graph.forEachEdge(function (_, attributes) {
+      graph.forEachEdge(function (edge, attributes) {
         // Purpose: restore an edge's colour, or mark it hot
         const color = hot.has(String(attributes.key)) ? LIVE_EDGE_COLOR : EDGE_COLOR;
         if (attributes.color !== color) {
-          graph!.setEdgeAttribute(String(attributes.source), String(attributes.target), 'color', color);
+          graph!.setEdgeAttribute(edge, 'color', color);
           changed = true;
         }
       });
@@ -139,11 +223,6 @@ export function createGraphView(container: HTMLElement, onSelect: (asn: number) 
     },
     destroy,
   };
-}
-
-export function edgeKey(from: number, to: number): string {
-  // Purpose: the key the live overlay uses for one directed edge
-  return `${from}:${to}`;
 }
 
 export type { GraphEdgeView };

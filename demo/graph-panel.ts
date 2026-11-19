@@ -1,6 +1,6 @@
 // Wires the AS graph card: loads graph.bin, runs a compiled plan to choose the
-// simplified overview, and draws it on fixed positions. A click replaces the
-// view with the clicked AS's neighbourhood.
+// simplified overview, and draws it on fixed positions. A click eases the camera
+// onto the clicked AS before replacing the view with its neighbourhood.
 
 import { loadGraph } from '../scripts/bgp/graph-file';
 import type { GraphArrays, GraphHeader } from '../scripts/bgp/graph-file';
@@ -13,12 +13,13 @@ import {
   neighbourhoodEdges,
   overviewEdges,
 } from './graph-data';
-import type { EdgeTable, GraphPlans } from './graph-data';
+import type { EdgeTable, GraphEdgeRow, GraphPlans, GraphViewData } from './graph-data';
 import { createGraphView } from './graph-view';
 import type { GraphView } from './graph-view';
 
 export interface GraphPanel {
   setLive(hot: ReadonlyMap<string, number>): void;
+  visiblePairs(): readonly (readonly [number, number])[];
 }
 
 export interface GraphProbe {
@@ -26,6 +27,8 @@ export interface GraphProbe {
   nodes: number;
   edges: number;
   lastMs: number;
+  hotNodes: number;
+  hotEdges: number;
   camera(): { x: number; y: number; ratio: number };
   select(asn: number): Promise<void>;
   overview(): Promise<void>;
@@ -38,9 +41,15 @@ declare global {
   }
 }
 
+type CameraMode = 'jump' | 'frame' | 'keep';
+
 const NOOP_PANEL: GraphPanel = {
   setLive() {
     // Purpose: keep the live feed simple when no graph file is available
+  },
+  visiblePairs() {
+    // Purpose: no graph means no pairs for the live simulator to borrow
+    return [];
   },
 };
 
@@ -56,6 +65,26 @@ interface GraphDraw {
   readonly nodes: number;
   readonly edges: number;
   readonly ms: number;
+  readonly edgeRows: readonly GraphEdgeRow[];
+}
+
+async function drawWithCamera(
+  view: GraphView,
+  data: GraphViewData,
+  camera: CameraMode,
+  current: () => boolean,
+): Promise<boolean> {
+  // Purpose: move the camera before replacing nodes, so a view change keeps its spatial context
+  if (camera === 'jump') {
+    view.jump(data);
+    return true;
+  }
+  if (camera === 'frame') {
+    await view.frame(data);
+    if (!current()) return false;
+  }
+  view.show(data);
+  return true;
 }
 
 function sourceText(header: GraphHeader): string {
@@ -71,20 +100,21 @@ async function showOverview(
   view: GraphView,
   hot: ReadonlyMap<string, number>,
   current: () => boolean,
+  camera: CameraMode,
 ): Promise<GraphDraw | null> {
   // Purpose: draw the strongest edges, with a bounded node count for a readable first view
   const began = performance.now();
   const rows = await overviewEdges(edges, OVERVIEW_EDGES, plans.overview);
   if (!current()) return null;
   const data = buildViewData(arrays, rows, { nodeLimit: OVERVIEW_NODES });
-  view.show(data);
+  if (!(await drawWithCamera(view, data, camera, current))) return null;
   view.setLive(hot);
   byId<HTMLElement>('graph-detail').textContent =
     `${data.edges.length.toLocaleString()} edges drawn from the ${rows.length.toLocaleString()} strongest · ` +
     `${data.nodes.length.toLocaleString()} ASes · click a node to expand`;
   const ms = Math.round(performance.now() - began);
   byId<HTMLElement>('ms-graph').textContent = `${ms} ms`;
-  return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms };
+  return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms, edgeRows: rows };
 }
 
 async function showAll(
@@ -94,19 +124,20 @@ async function showAll(
   view: GraphView,
   hot: ReadonlyMap<string, number>,
   current: () => boolean,
+  camera: CameraMode,
 ): Promise<GraphDraw | null> {
   // Purpose: draw every node and edge, with no LOD budget, for explicit inspection
   const began = performance.now();
   const rows = await allEdges(edges, plans.all);
   if (!current()) return null;
   const data = buildViewData(arrays, rows, { nodeLimit: arrays.rowCount });
-  view.show(data);
+  if (!(await drawWithCamera(view, data, camera, current))) return null;
   view.setLive(hot);
   byId<HTMLElement>('graph-detail').textContent =
     `All ${data.edges.length.toLocaleString()} directed edges · ${data.nodes.length.toLocaleString()} ASes · pan and zoom to inspect`;
   const ms = Math.round(performance.now() - began);
   byId<HTMLElement>('ms-graph').textContent = `${ms} ms`;
-  return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms };
+  return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms, edgeRows: rows };
 }
 
 async function showNeighbourhood(
@@ -117,19 +148,20 @@ async function showNeighbourhood(
   hot: ReadonlyMap<string, number>,
   asn: number,
   current: () => boolean,
+  camera: CameraMode,
 ): Promise<GraphDraw | null> {
   // Purpose: draw the strongest edges within two hops of a clicked AS
   const began = performance.now();
   const rows = await neighbourhoodEdges(edges, plans, asn);
   if (!current()) return null;
   const data = buildViewData(arrays, rows);
-  view.show(data);
+  if (!(await drawWithCamera(view, data, camera, current))) return null;
   view.setLive(hot);
   byId<HTMLElement>('graph-detail').textContent =
     `Neighbourhood of AS${asn}: ${data.nodes.length.toLocaleString()} ASes, ${data.edges.length.toLocaleString()} edges · click Overview to return`;
   const ms = Math.round(performance.now() - began);
   byId<HTMLElement>('ms-graph').textContent = `${ms} ms`;
-  return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms };
+  return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms, edgeRows: rows };
 }
 
 export async function startGraph(): Promise<GraphPanel> {
@@ -150,11 +182,14 @@ export async function startGraph(): Promise<GraphPanel> {
   const plans = compileGraphPlans();
   const hot = new Map<string, number>();
   let generation = 0;
+  let visibleRows: readonly GraphEdgeRow[] = [];
   const probe: GraphProbe = {
     mode: 'overview',
     nodes: 0,
     edges: 0,
     lastMs: 0,
+    hotNodes: 0,
+    hotEdges: 0,
     camera: function () {
       // Purpose: expose the renderer's camera state to the browser harness
       return view.camera();
@@ -165,42 +200,49 @@ export async function startGraph(): Promise<GraphPanel> {
   };
   window.__zamdaGraph = probe;
 
-  async function runOverview(): Promise<void> {
+  async function runOverview(camera: CameraMode = 'frame'): Promise<void> {
     // Purpose: show the bounded overview and publish its counts and timing for the browser harness
     const mine = ++generation;
     const draw = await showOverview(edges, arrays, plans, view, hot, function () {
       // Purpose: suppress an overview that a later action has replaced
       return mine === generation;
-    });
+    }, camera);
     if (!draw) return;
+    visibleRows = draw.edgeRows;
     probe.mode = 'overview';
     probe.nodes = draw.nodes;
     probe.edges = draw.edges;
     probe.lastMs = draw.ms;
   }
 
-  async function runAll(): Promise<void> {
+  async function runAll(camera: CameraMode = 'frame'): Promise<void> {
     // Purpose: show every edge and publish its counts and timing
     const mine = ++generation;
     const draw = await showAll(edges, arrays, plans, view, hot, function () {
       // Purpose: suppress an all-data view that a later action has replaced
       return mine === generation;
-    });
+    }, camera);
     if (!draw) return;
+    visibleRows = draw.edgeRows;
     probe.mode = 'all';
     probe.nodes = draw.nodes;
     probe.edges = draw.edges;
     probe.lastMs = draw.ms;
   }
 
-  async function runNeighbourhood(asn: number): Promise<void> {
+  async function runNeighbourhood(asn: number, animate = true): Promise<void> {
     // Purpose: show one AS's neighbourhood and publish its counts and timing
     const mine = ++generation;
+    if (animate) {
+      await view.focus(asn);
+      if (mine !== generation) return;
+    }
     const draw = await showNeighbourhood(edges, arrays, plans, view, hot, asn, function () {
       // Purpose: suppress a neighbourhood that a later action has replaced
       return mine === generation;
-    });
+    }, 'keep');
     if (!draw) return;
+    visibleRows = draw.edgeRows;
     probe.mode = 'neighbourhood';
     probe.nodes = draw.nodes;
     probe.edges = draw.edges;
@@ -228,13 +270,28 @@ export async function startGraph(): Promise<GraphPanel> {
     void runAll().catch(fail('all-data view'));
   });
 
-  await runOverview();
+  await runOverview('jump');
   return {
     setLive(next) {
       // Purpose: pass the current live hot set to the renderer without reloading the graph
       hot.clear();
       for (const [key, count] of next) hot.set(key, count);
+      let hotEdges = 0;
+      let hotNodes = 0;
+      for (const key of hot.keys()) {
+        if (key.includes(':')) hotEdges++;
+        else hotNodes++;
+      }
+      probe.hotEdges = hotEdges;
+      probe.hotNodes = hotNodes;
+      byId<HTMLElement>('graph-live').textContent = hotEdges
+        ? `${hotEdges} hot edges · ${hotNodes} hot ASes in the last 60 s`
+        : 'No live edges in the last 60 s';
       view.setLive(hot);
+    },
+    visiblePairs() {
+      // Purpose: let the live simulator borrow pairs that are actually on screen
+      return visibleRows.slice(0, 5000).map(row => [row.from_as, row.to_as] as const);
     },
   };
 }

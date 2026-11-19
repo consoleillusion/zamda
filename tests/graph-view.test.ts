@@ -10,6 +10,8 @@ import {
   allEdges,
   buildViewData,
   compileGraphPlans,
+  edgeKey,
+  hotKeys,
   neighbourhoodEdges,
   overviewEdges,
 } from '../demo/graph-data';
@@ -68,6 +70,20 @@ describe('graph data selection', () => {
       { from_as: 3, to_as: 4, prefixes: 8 },
       { from_as: 4, to_as: 5, prefixes: 7 },
     ]);
+  });
+
+  test('live activity keys mark the edge and both endpoints without moving positions', () => {
+    const hot = hotKeys([
+      { from_as: 1, to_as: 2, updates: 4 },
+      { from_as: 2, to_as: 3, updates: 2 },
+      { from_as: 1, to_as: 2, updates: 3 },
+    ]);
+    expect(hot.get(edgeKey(1, 2))).toBe(4);
+    expect(hot.get(edgeKey(2, 3))).toBe(2);
+    expect(hot.get('1')).toBe(4);
+    expect(hot.get('2')).toBe(4);
+    expect(hot.get('3')).toBe(2);
+    expect(hot.size).toBe(5);
   });
 
   test('view data keeps only nodes that can draw the chosen edges', async () => {

@@ -109,7 +109,7 @@ bun run check     # typecheck + tests + size budget
 | `bun run bench:ref` | Reference benchmark: seven queries at 10k, 100k and 1M routes, zamda vs Arquero, answers checked first; writes `bench/results/` |
 | `bun run prep-bgp` | Download a RIPE RIS routing table dump and build `data/routes.bin` and `data/graph.bin` for the demo |
 | `bun run fake-routes` | Write a synthetic `data/routes.bin` (a million routes) for trying the demo offline |
-| `bun run demo` | The reference dashboard on http://localhost:3000, with an AS graph from `data/graph.bin` (Overview, click-to-expand and All data); add `?live=sim` for a simulated live feed, `?live=off` for none |
+| `bun run demo` | The reference dashboard on http://localhost:3000, with an AS graph from `data/graph.bin` (Overview, smoothly zooming click-to-expand and All data) and RIS Live hot edges/nodes overlaid; add `?live=sim` for a simulated feed, `?live=off` for none |
 | `bun run scripts/inspect-routes.ts` | Run the dashboard's queries on `data/routes.bin` and time them |
 | `bun run scripts/check-dump.ts <dump.gz>` | Check the MRT reader gives the same answer however a dump is split |
 
