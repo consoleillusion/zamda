@@ -26,6 +26,10 @@ export interface BackendOptions {
   readonly onProgress?: (progress: { rowsScanned: number; rowsTotal: number }) => void;
   // An opaque handle grouping runs that share work; only the backend that made it understands it, the rest ignore it.
   readonly session?: RunSession;
+  // Extra tables bound by the plan, ordered by the extra scan nodes in the IR.
+  // D-076: a join binds its right table at compile time; the plan executes on
+  // the snapshot each table had when the run started (C-JOIN, C-LIVE).
+  readonly sources?: readonly Table[];
 }
 
 export interface ResultData {

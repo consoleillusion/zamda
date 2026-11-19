@@ -3,7 +3,8 @@
 // (D-060, D-063, D-066): the engine sees canonical string ids and lookup tables.
 // A plan the engine cannot run (an operation or function it does not have yet)
 // runs on the JS executor over the same snapshot, and gives the same result
-// (D-067).
+// (D-067). Joins and windows are the exception (D-077): the engine refuses them
+// and this backend raises PlanError rather than substituting a different run.
 
 import type { Backend, BackendOptions, ResultData, RunSession, Table } from '../../backend';
 import { AbortError, ExecutionError, MemoryError, PlanError } from '../../errors';
@@ -199,6 +200,11 @@ export function createWasmBackend(host: EngineRunHost): WasmFactory {
     session,
     async execute(plan: IrPlan, table: Table, options: BackendOptions): Promise<ResultData> {
       // Purpose: run a plan on a table owned by this backend, as the table stood when the run started
+      for (const node of plan.nodes) {
+        if (node.op === 'join' || node.op === 'window') {
+          throw new PlanError(`The WASM backend cannot run a ${node.op} node yet (D-077)`);
+        }
+      }
       if (!(table instanceof WasmTable) || table.backend !== backend) {
         throw new PlanError('The WASM backend can only run plans on tables it created');
       }

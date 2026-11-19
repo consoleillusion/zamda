@@ -106,6 +106,13 @@ pub fn validate(plan: &Plan) -> Result<(), Error> {
     if !matches!(plan.nodes[0].op, Op::Scan) {
         return fail(Code::FirstNodeNotScan, 0);
     }
+    // D-077: the engine parses these nodes so a bad encoding is still diagnosed
+    // precisely, then refuses to run them with the same structured plan error.
+    for (i, node) in plan.nodes.iter().enumerate() {
+        if matches!(node.op, Op::Join { .. } | Op::Window { .. }) {
+            return fail(Code::UnsupportedOp, i);
+        }
+    }
     for (i, p) in plan.params.iter().enumerate() {
         if plan.params[..i].iter().any(|q| q.name == p.name) {
             return fail(Code::DuplicateParam, 0);
@@ -116,6 +123,7 @@ pub fn validate(plan: &Plan) -> Result<(), Error> {
         let input_index = match &node.op {
             Op::Scan => return fail(Code::LaterScan, i),
             Op::Filter { input, .. } | Op::Project { input, .. } | Op::Aggregate { input, .. } | Op::Sort { input, .. } | Op::Limit { input, .. } => *input,
+            Op::Join { input, .. } | Op::Window { input, .. } => *input,
         };
         if input_index >= i {
             return fail(Code::BadInput, i);
@@ -123,6 +131,7 @@ pub fn validate(plan: &Plan) -> Result<(), Error> {
         let input = &plan.nodes[input_index].schema;
         match &node.op {
             Op::Scan | Op::Limit { .. } => {}
+            Op::Join { .. } | Op::Window { .. } => return fail(Code::UnsupportedOp, i),
             Op::Filter { predicate, .. } => {
                 check_exprs(&[predicate], input, &plan.params, i)?;
                 if predicate.ty != Type::Bool {

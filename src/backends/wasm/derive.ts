@@ -79,6 +79,14 @@ function mapExprs(plan: IrPlan, f: (expr: IrExpr, node: IrNode) => IrExpr): IrPl
         return { ...node, keys: node.keys.map(k => ({ ...k, expr: r(k.expr) })) };
       case 'aggregate':
         return { ...node, keys: node.keys.map(r), aggs: node.aggs.map(a => ({ ...a, arg: a.arg === null ? null : r(a.arg) })) };
+      case 'join':
+        return node;
+      case 'window':
+        return {
+          ...node,
+          partitions: node.partitions.map(r),
+          sorts: node.sorts.map(k => ({ ...k, expr: r(k.expr) })),
+        };
     }
   });
   return { ...plan, nodes };

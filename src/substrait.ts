@@ -10,7 +10,9 @@
 // the flat node table. See docs/SUBSTRAIT.md.
 
 import { PlanError } from './errors';
-import type { IrAggregate, IrExpr, IrNode, IrParam, IrPlan, IrSortKey, LiteralValue } from './ir';
+import type {
+  IrAggregate, IrExpr, IrNode, IrParam, IrPlan, IrSortKey, IrWindowFunction, JoinKind, LiteralValue, WindowFnName,
+} from './ir';
 import { IR_VERSION } from './ir';
 import { REGISTRY } from './registry';
 import type { FunctionDef } from './registry';
@@ -30,6 +32,22 @@ const MINOR = VERSION_PARTS[1]!;
 const PATCH = VERSION_PARTS[2]!;
 const PRODUCER = 'zamda';
 const MAX_EXPR_DEPTH = 256;
+
+type IrJoinNode = Extract<IrNode, { op: 'join' }>;
+type IrWindowNode = Extract<IrNode, { op: 'window' }>;
+
+const JOIN_TO_SUBSTRAIT: Readonly<Record<JoinKind, 'INNER' | 'LEFT' | 'RIGHT' | 'OUTER'>> = {
+  inner: 'INNER',
+  left: 'LEFT',
+  right: 'RIGHT',
+  full: 'OUTER',
+};
+const SUBSTRAIT_TO_JOIN: Readonly<Record<string, JoinKind | undefined>> = {
+  INNER: 'inner',
+  LEFT: 'left',
+  RIGHT: 'right',
+  OUTER: 'full',
+};
 
 // Substrait's u8/u16/u32/u64 are unsigned variations of i8/i16/i32/i64 and
 // `dictionary` is a string variation. The `zamda` name keeps that distinction.
@@ -121,6 +139,17 @@ export interface SubstraitAggregateJson {
   readonly distinct: boolean;
 }
 
+export interface SubstraitWindowFunctionJson {
+  readonly fn: string;
+  readonly substrait: string;
+  readonly type: SubstraitTypeJson;
+  readonly phase: 'initial_to_result';
+  readonly bounds_type: 'rows';
+  readonly lower_bound: { readonly kind: 'unbounded' };
+  readonly upper_bound: { readonly kind: 'current_row' };
+  readonly invocation: 'all';
+}
+
 export type SubstraitRelationJson =
   | { readonly rel: 'read'; readonly schema: readonly SubstraitFieldJson[] }
   | {
@@ -153,6 +182,22 @@ export type SubstraitRelationJson =
       readonly input: number;
       readonly schema: readonly SubstraitFieldJson[];
       readonly count: number;
+    }
+  | {
+      readonly rel: 'join';
+      readonly left: number;
+      readonly right: number;
+      readonly schema: readonly SubstraitFieldJson[];
+      readonly type: 'INNER' | 'LEFT' | 'RIGHT' | 'OUTER';
+      readonly condition: SubstraitExprJson;
+    }
+  | {
+      readonly rel: 'window';
+      readonly input: number;
+      readonly schema: readonly SubstraitFieldJson[];
+      readonly partitions: readonly SubstraitExprJson[];
+      readonly sorts: readonly SubstraitSortJson[];
+      readonly functions: readonly SubstraitWindowFunctionJson[];
     };
 
 export interface SubstraitParamJson {
@@ -360,7 +405,73 @@ function writeAgg(agg: IrAggregate, where: string): SubstraitAggregateJson {
   };
 }
 
-function writeNode(node: IrNode, where: string): SubstraitRelationJson {
+function isJoinRightNode(nodes: readonly IrNode[], index: number): boolean {
+  // Purpose: allow a scan node past node 0 only when an IR join names it as its right input
+  return nodes.some(function (node) {
+    // Purpose: look for a join node pointing at this index
+    return node.op === 'join' && node.right === index;
+  });
+}
+
+function writeJoinCondition(node: IrJoinNode, where: string, nodes: readonly IrNode[]): SubstraitExprJson {
+  // Purpose: build the canonical conjunction of eq(left field, offset right field) for a join
+  const left = countOf(node.input, `${where}.input`);
+  const right = countOf(node.right, `${where}.right`);
+  const leftNode = nodes[left];
+  const rightNode = nodes[right];
+  if (!leftNode || rightNode?.op !== 'scan') bad(`${where}.right`, 'an earlier scan node', rightNode);
+  const leftWidth = leftNode.schema.length;
+  const keys = arrayOf(node.leftKeys, `${where}.leftKeys`);
+  const rightKeys = arrayOf(node.rightKeys, `${where}.rightKeys`);
+  if (keys.length === 0) bad(`${where}.leftKeys`, 'at least one join key', keys);
+  if (keys.length !== rightKeys.length) bad(`${where}.rightKeys`, `${keys.length} key(s)`, `${rightKeys.length} key(s)`);
+  const boolType = writeType(t.bool, `${where}.type`);
+  const terms = keys.map(function (key, i): SubstraitExprJson {
+    // Purpose: write one canonical equality term for a pair of key indexes
+    const at = `${where}.keys[${i}]`;
+    const leftKey = countOf(key, `${at}.left`);
+    const rightKey = countOf(rightKeys[i], `${at}.right`);
+    const leftField = leftNode.schema[leftKey];
+    const rightField = rightNode.schema[rightKey];
+    if (!leftField) bad(`${at}.left`, `a left field index below ${leftWidth}`, leftKey);
+    if (!rightField) bad(`${at}.right`, `a right field index below ${rightNode.schema.length}`, rightKey);
+    const lhs: IrExpr = { kind: 'field', index: leftKey, type: leftField.type };
+    const rhs: IrExpr = { kind: 'field', index: leftWidth + rightKey, type: rightField.type };
+    return {
+      expr: 'call',
+      fn: 'eq',
+      substrait: 'functions_comparison:equal',
+      args: [writeExpr(lhs, `${at}.left`, 0), writeExpr(rhs, `${at}.right`, 0)],
+      type: boolType,
+    };
+  });
+  let condition = terms[0]!;
+  for (let i = 1; i < terms.length; i++) {
+    condition = { expr: 'call', fn: 'and', substrait: 'functions_boolean:and', args: [condition, terms[i]!], type: boolType };
+  }
+  return condition;
+}
+
+function writeWindowFunctions(functions: readonly IrWindowNode['functions'][number][], where: string): SubstraitWindowFunctionJson[] {
+  // Purpose: write window functions with the fixed frame this release maps (D-077)
+  return arrayOf(functions, where).map(function (fn, i) {
+    // Purpose: write one window function with its registry name and fixed frame
+    const at = `${where}[${i}]`;
+    const def = registered(fn.fn, 'window', `${at}.fn`);
+    return {
+      fn: def.name,
+      substrait: def.substrait,
+      type: writeType(fn.type, `${at}.type`),
+      phase: 'initial_to_result',
+      bounds_type: 'rows',
+      lower_bound: { kind: 'unbounded' },
+      upper_bound: { kind: 'current_row' },
+      invocation: 'all',
+    };
+  });
+}
+
+function writeNode(node: IrNode, where: string, nodes: readonly IrNode[]): SubstraitRelationJson {
   // Purpose: write one IR node as its Substrait relation
   const schema = writeFields(node.schema, `${where}.schema`);
   switch (node.op) {
@@ -409,6 +520,30 @@ function writeNode(node: IrNode, where: string): SubstraitRelationJson {
       };
     case 'limit':
       return { rel: 'fetch', input: countOf(node.input, `${where}.input`), schema, count: countOf(node.count, `${where}.count`) };
+    case 'join':
+      return {
+        rel: 'join',
+        left: countOf(node.input, `${where}.input`),
+        right: countOf(node.right, `${where}.right`),
+        schema,
+        type: JOIN_TO_SUBSTRAIT[node.how],
+        condition: writeJoinCondition(node, where, nodes),
+      };
+    case 'window':
+      return {
+        rel: 'window',
+        input: countOf(node.input, `${where}.input`),
+        schema,
+        partitions: arrayOf(node.partitions, `${where}.partitions`).map(function (expr, i) {
+          // Purpose: write one partition expression
+          return writeExpr(expr, `${where}.partitions[${i}]`, 0);
+        }),
+        sorts: arrayOf(node.sorts, `${where}.sorts`).map(function (key, i) {
+          // Purpose: write one window sort key
+          return writeSortKey(key, `${where}.sorts[${i}]`);
+        }),
+        functions: writeWindowFunctions(node.functions, `${where}.functions`),
+      };
     default:
       return bad(where, 'a supported node op', node);
   }
@@ -433,9 +568,17 @@ export function exportPlan(plan: IrPlan): SubstraitPlanJson {
   if (root >= nodes.length) bad('plan.root', `a node index below ${nodes.length}`, plan.root);
   for (let i = 1; i < nodes.length; i++) {
     const node = nodes[i] as IrNode;
+    if (node.op === 'scan' && isJoinRightNode(nodes, i)) continue;
     const input = 'input' in node ? node.input : undefined;
     if (input === undefined || !Number.isSafeInteger(input) || input < 0 || input >= i) {
       bad(`plan.nodes[${i}].input`, `an earlier node index below ${i}`, input);
+    }
+    if (node.op === 'join') {
+      const right = countOf(node.right, `plan.nodes[${i}].right`);
+      if (right >= i) bad(`plan.nodes[${i}].right`, `an earlier node index below ${i}`, right);
+      if ((nodes[right] as IrNode | undefined)?.op !== 'scan') {
+        bad(`plan.nodes[${i}].right`, 'an earlier scan node', nodes[right]);
+      }
     }
   }
   return {
@@ -444,7 +587,7 @@ export function exportPlan(plan: IrPlan): SubstraitPlanJson {
     input: writeFields(plan.input, 'plan.input'),
     relations: nodes.map(function (node, i) {
       // Purpose: write one relation
-      return writeNode(node as IrNode, `plan.relations[${i}]`);
+      return writeNode(node as IrNode, `plan.relations[${i}]`, nodes);
     }),
     root,
     output: writeFields(plan.output, 'plan.output'),
@@ -618,21 +761,109 @@ function readAgg(value: unknown, where: string): IrAggregate {
   };
 }
 
-function readNode(value: unknown, where: string, index: number): IrNode {
+function readIndex(value: unknown, field: string, where: string, index: number): number {
+  // Purpose: read a relation input index and require an earlier node
+  const n = countOf(value, `${where}.${field}`);
+  if (index === 0 || n >= index) bad(`${where}.${field}`, `an earlier node index below ${index}`, n);
+  return n;
+}
+
+function isJoinRight(relations: readonly unknown[], index: number): boolean {
+  // Purpose: allow a second read relation only when a join names it as its right input
+  return relations.some(function (relation) {
+    // Purpose: look for a join relation pointing at this index
+    if (typeof relation !== 'object' || relation === null || Array.isArray(relation)) return false;
+    const o = relation as Record<string, unknown>;
+    return o.rel === 'join' && o.right === index;
+  });
+}
+
+function relationFields(value: unknown, where: string): Field[] {
+  // Purpose: read an earlier relation's output fields for join key index checks
+  const o = objectOf(value, where);
+  return readFields(o.schema, `${where}.schema`);
+}
+
+function readJoinEq(expr: IrExpr, leftFields: readonly Field[], rightFields: readonly Field[], where: string): { readonly leftKeys: number[]; readonly rightKeys: number[] } {
+  // Purpose: require one canonical eq(left field, right field) term and return its key pair
+  if (expr.kind !== 'call' || expr.fn !== 'eq') {
+    bad(where, 'an eq call', expr.kind === 'call' ? `call ${expr.fn}` : expr.kind);
+  }
+  if (expr.type.name !== 'bool') bad(`${where}.type`, 'bool', expr.type.name);
+  if (expr.args.length !== 2) bad(`${where}.args`, 'two arguments', `${expr.args.length} arguments`);
+  const lhs = expr.args[0]!;
+  const rhs = expr.args[1]!;
+  if (lhs.kind !== 'field' || rhs.kind !== 'field') bad(where, 'two field expressions', `${lhs.kind} and ${rhs.kind}`);
+  if (lhs.index >= leftFields.length) bad(`${where}.args[0].index`, `a left field index below ${leftFields.length}`, lhs.index);
+  const rightIndex = rhs.index - leftFields.length;
+  if (rightIndex < 0 || rightIndex >= rightFields.length) {
+    bad(`${where}.args[1].index`, `a right field index from ${leftFields.length} below ${leftFields.length + rightFields.length}`, rhs.index);
+  }
+  const leftField = leftFields[lhs.index]!;
+  const rightField = rightFields[rightIndex]!;
+  if (lhs.type.name !== leftField.type.name) bad(`${where}.args[0].type`, leftField.type.name, lhs.type.name);
+  if (rhs.type.name !== rightField.type.name) bad(`${where}.args[1].type`, rightField.type.name, rhs.type.name);
+  return { leftKeys: [lhs.index], rightKeys: [rightIndex] };
+}
+
+function readJoinKeys(expr: IrExpr, leftFields: readonly Field[], rightFields: readonly Field[], where: string): { readonly leftKeys: number[]; readonly rightKeys: number[] } {
+  // Purpose: decompose the canonical, left-associated conjunction of equality terms
+  if (expr.kind !== 'call') bad(where, 'an eq or and call', expr.kind);
+  if (expr.type.name !== 'bool') bad(`${where}.type`, 'bool', expr.type.name);
+  if (expr.fn !== 'and') return readJoinEq(expr, leftFields, rightFields, where);
+  if (expr.args.length !== 2) bad(`${where}.args`, 'two arguments', `${expr.args.length} arguments`);
+  const head = readJoinKeys(expr.args[0]!, leftFields, rightFields, `${where}.args[0]`);
+  const tail = readJoinEq(expr.args[1]!, leftFields, rightFields, `${where}.args[1]`);
+  return { leftKeys: [...head.leftKeys, ...tail.leftKeys], rightKeys: [...head.rightKeys, ...tail.rightKeys] };
+}
+
+function readWindowBound(value: unknown, kind: 'unbounded' | 'current_row', where: string): void {
+  // Purpose: require the one canonical bound object of a mapped window function
+  const o = objectOf(value, where);
+  exactKeys(o, ['kind'], where);
+  if (o.kind !== kind) bad(`${where}.kind`, kind, o.kind);
+}
+
+function readWindowFunction(value: unknown, where: string): IrWindowFunction {
+  // Purpose: read a window function, refusing any frame, phase or invocation other than the mapped one
+  const o = objectOf(value, where);
+  exactKeys(o, ['fn', 'substrait', 'type', 'phase', 'bounds_type', 'lower_bound', 'upper_bound', 'invocation'], where);
+  const fn = stringOf(o.fn, `${where}.fn`);
+  const def = registered(fn, 'window', `${where}.fn`);
+  if (fn !== 'row_number' && fn !== 'rank' && fn !== 'dense_rank') {
+    bad(`${where}.fn`, 'row_number, rank or dense_rank', fn);
+  }
+  const substrait = stringOf(o.substrait, `${where}.substrait`);
+  if (substrait !== def.substrait) bad(`${where}.substrait`, def.substrait, substrait);
+  const type = readType(o.type, `${where}.type`);
+  const expected = def.returns([]).name;
+  if (type.name !== expected) bad(`${where}.type`, expected, type.name);
+  const phase = stringOf(o.phase, `${where}.phase`);
+  if (phase !== 'initial_to_result') bad(`${where}.phase`, 'initial_to_result', phase);
+  const boundsType = stringOf(o.bounds_type, `${where}.bounds_type`);
+  if (boundsType !== 'rows') bad(`${where}.bounds_type`, 'rows', boundsType);
+  readWindowBound(o.lower_bound, 'unbounded', `${where}.lower_bound`);
+  readWindowBound(o.upper_bound, 'current_row', `${where}.upper_bound`);
+  const invocation = stringOf(o.invocation, `${where}.invocation`);
+  if (invocation !== 'all') bad(`${where}.invocation`, 'all', invocation);
+  return { fn, type };
+}
+
+function readNode(value: unknown, where: string, index: number, relations: readonly unknown[]): IrNode {
   // Purpose: read one relation and check its position in the flat node table
   const o = objectOf(value, where);
   const rel = stringOf(o.rel, `${where}.rel`);
   if (index === 0 && rel !== 'read') bad(where, 'a read relation at node 0', rel);
   const input = function (): number {
     // Purpose: read and check a relation's input index
-    const n = countOf(o.input, `${where}.input`);
-    if (index === 0 || n >= index) bad(`${where}.input`, `an earlier node index below ${index}`, n);
-    return n;
+    return readIndex(o.input, 'input', where, index);
   };
   switch (rel) {
     case 'read': {
       exactKeys(o, ['rel', 'schema'], where);
-      if (index !== 0) bad(where, 'a read relation only at node 0', `node ${index}`);
+      if (index !== 0 && !isJoinRight(relations, index)) {
+        bad(where, 'a read relation at node 0 or as a join right', `node ${index}`);
+      }
       return { op: 'scan', schema: readFields(o.schema, `${where}.schema`) };
     }
     case 'filter': {
@@ -683,6 +914,42 @@ function readNode(value: unknown, where: string, index: number): IrNode {
       exactKeys(o, ['rel', 'input', 'schema', 'count'], where);
       return { op: 'limit', input: input(), schema: readFields(o.schema, `${where}.schema`), count: countOf(o.count, `${where}.count`) };
     }
+    case 'join': {
+      exactKeys(o, ['rel', 'left', 'right', 'schema', 'type', 'condition'], where);
+      const left = readIndex(o.left, 'left', where, index);
+      const right = readIndex(o.right, 'right', where, index);
+      const rightRel = objectOf(relations[right], `${where}.right`);
+      if (rightRel.rel !== 'read') bad(`${where}.right`, 'an earlier scan relation', rightRel.rel);
+      const leftFields = relationFields(relations[left], `${where}.left`);
+      const rightFields = relationFields(rightRel, `${where}.right`);
+      const type = stringOf(o.type, `${where}.type`);
+      const how = SUBSTRAIT_TO_JOIN[type];
+      if (how === undefined) bad(`${where}.type`, 'INNER, LEFT, RIGHT or OUTER', type);
+      const keys = readJoinKeys(readExpr(o.condition, `${where}.condition`, 0), leftFields, rightFields, `${where}.condition`);
+      return {
+        op: 'join', input: left, right,
+        leftKeys: keys.leftKeys, rightKeys: keys.rightKeys, how,
+        schema: readFields(o.schema, `${where}.schema`),
+      };
+    }
+    case 'window': {
+      exactKeys(o, ['rel', 'input', 'schema', 'partitions', 'sorts', 'functions'], where);
+      return {
+        op: 'window', input: input(), schema: readFields(o.schema, `${where}.schema`),
+        partitions: arrayOf(o.partitions, `${where}.partitions`).map(function (expr, i) {
+          // Purpose: read one partition expression
+          return readExpr(expr, `${where}.partitions[${i}]`, 0);
+        }),
+        sorts: arrayOf(o.sorts, `${where}.sorts`).map(function (key, i) {
+          // Purpose: read one window sort key
+          return readSortKey(key, `${where}.sorts[${i}]`);
+        }),
+        functions: arrayOf(o.functions, `${where}.functions`).map(function (fn, i) {
+          // Purpose: read one window function
+          return readWindowFunction(fn, `${where}.functions[${i}]`);
+        }),
+      };
+    }
     default:
       return bad(`${where}.rel`, 'a supported relation', rel);
   }
@@ -722,7 +989,7 @@ export function importPlan(value: unknown): IrPlan {
   if (relations.length === 0) bad('plan.relations', 'at least one relation', relations);
   const nodes = relations.map(function (relation, i) {
     // Purpose: read one relation
-    return readNode(relation, `plan.relations[${i}]`, i);
+    return readNode(relation, `plan.relations[${i}]`, i, relations);
   });
   const root = countOf(o.root, 'plan.root');
   if (root >= nodes.length) bad('plan.root', `a node index below ${nodes.length}`, o.root);

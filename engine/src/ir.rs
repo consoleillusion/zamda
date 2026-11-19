@@ -51,6 +51,64 @@ pub struct SortKey {
     pub expr: Expr,
 }
 
+// The spellings are part of the binary format: never reorder, only append.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JoinKind {
+    Inner,
+    Left,
+    Right,
+    Full,
+}
+
+impl JoinKind {
+    pub fn from_id(id: u8) -> Option<JoinKind> {
+        // Purpose: the join kind with this id in the binary format, if there is one
+        match id {
+            0 => Some(JoinKind::Inner),
+            1 => Some(JoinKind::Left),
+            2 => Some(JoinKind::Right),
+            3 => Some(JoinKind::Full),
+            _ => None,
+        }
+    }
+
+    pub fn id(self) -> u8 {
+        // Purpose: this join kind's id in the binary format
+        self as u8
+    }
+}
+
+// The spellings are part of the binary format: never reorder, only append.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowFn {
+    RowNumber,
+    Rank,
+    DenseRank,
+}
+
+impl WindowFn {
+    pub fn from_id(id: u8) -> Option<WindowFn> {
+        // Purpose: the window function with this id in the binary format, if there is one
+        match id {
+            0 => Some(WindowFn::RowNumber),
+            1 => Some(WindowFn::Rank),
+            2 => Some(WindowFn::DenseRank),
+            _ => None,
+        }
+    }
+
+    pub fn id(self) -> u8 {
+        // Purpose: this window function's id in the binary format
+        self as u8
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct WindowFunction {
+    pub func: WindowFn,
+    pub ty: Type,
+}
+
 #[derive(Clone, Debug)]
 pub enum Op {
     Scan,
@@ -59,6 +117,9 @@ pub enum Op {
     Aggregate { input: usize, keys: Vec<Expr>, aggs: Vec<Aggregate> },
     Sort { input: usize, keys: Vec<SortKey> },
     Limit { input: usize, count: u64 },
+    // D-076/D-077: parsed so the engine can reject them with a structured error; never executed here.
+    Join { input: usize, right: usize, left_keys: Vec<usize>, right_keys: Vec<usize>, how: JoinKind },
+    Window { input: usize, partitions: Vec<Expr>, sorts: Vec<SortKey>, functions: Vec<WindowFunction> },
 }
 
 #[derive(Clone, Debug)]

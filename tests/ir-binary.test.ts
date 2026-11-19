@@ -50,6 +50,52 @@ describe('round trip', () => {
     for (const plan of plans) roundTrip(plan.ir);
   });
 
+  test('a join binds its second scan and round-trips', () => {
+    const id = { name: 'id', type: t.int32 };
+    const leftValue = { name: 'left', type: t.utf8 };
+    const rightValue = { name: 'right', type: t.dictionary };
+    const plan: IrPlan = {
+      version: IR_VERSION,
+      input: [id, leftValue],
+      nodes: [
+        { op: 'scan', schema: [id, leftValue] },
+        { op: 'scan', schema: [{ name: 'rid', type: t.int32 }, rightValue] },
+        { op: 'join', input: 0, right: 1, leftKeys: [0], rightKeys: [0], how: 'left', schema: [id, leftValue, rightValue] },
+      ],
+      root: 2,
+      output: [id, leftValue, rightValue],
+      params: [],
+    };
+    roundTrip(plan);
+  });
+
+  test('a window round-trips its partitions, sorts and functions', () => {
+    const group = { name: 'g', type: t.int32 };
+    const score = { name: 'score', type: t.float64 };
+    const name = { name: 'name', type: t.utf8 };
+    const rank = { name: 'rank', type: t.int64 };
+    const row = { name: 'row', type: t.int64 };
+    const plan: IrPlan = {
+      version: IR_VERSION,
+      input: [group, score, name],
+      nodes: [
+        { op: 'scan', schema: [group, score, name] },
+        {
+          op: 'window',
+          input: 0,
+          partitions: [{ kind: 'field', index: 0, type: t.int32 }],
+          sorts: [{ expr: { kind: 'field', index: 1, type: t.float64 }, descending: true, nullsFirst: false }],
+          functions: [{ fn: 'rank', type: t.int64 }, { fn: 'row_number', type: t.int64 }],
+          schema: [group, score, name, rank, row],
+        },
+      ],
+      root: 1,
+      output: [group, score, name, rank, row],
+      params: [],
+    };
+    roundTrip(plan);
+  });
+
   test('a decoded plan still validates', () => {
     for (const plan of Object.values(compilePlans())) validate(decodePlan(encodePlan(plan.ir)));
   });

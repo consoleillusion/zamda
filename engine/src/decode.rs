@@ -225,6 +225,31 @@ fn read_exprs(r: &mut Reader) -> Result<Vec<Expr>, Error> {
     Ok(out)
 }
 
+fn read_indexes(r: &mut Reader) -> Result<Vec<usize>, Error> {
+    // Purpose: the next list of column indexes
+    let n = r.count()?;
+    let mut out = Vec::with_capacity(n.min(64));
+    for _ in 0..n {
+        out.push(r.size()?);
+    }
+    Ok(out)
+}
+
+fn read_sort_keys(r: &mut Reader) -> Result<Vec<SortKey>, Error> {
+    // Purpose: the next list of sort keys
+    let n = r.count()?;
+    let mut out = Vec::with_capacity(n.min(64));
+    for _ in 0..n {
+        let flag_at = r.at;
+        let flags = r.byte()?;
+        if flags > 3 {
+            return fail(Code::BadFlag, flag_at);
+        }
+        out.push(SortKey { descending: flags & 1 != 0, nulls_first: flags & 2 != 0, expr: read_expr(r, 0)? });
+    }
+    Ok(out)
+}
+
 fn read_node(r: &mut Reader) -> Result<Node, Error> {
     // Purpose: the next node
     let at = r.at;
@@ -260,21 +285,39 @@ fn read_node(r: &mut Reader) -> Result<Node, Error> {
         }
         4 => {
             let input = r.size()?;
-            let n = r.count()?;
-            let mut keys = Vec::with_capacity(n.min(64));
-            for _ in 0..n {
-                let flag_at = r.at;
-                let flags = r.byte()?;
-                if flags > 3 {
-                    return fail(Code::BadFlag, flag_at);
-                }
-                keys.push(SortKey { descending: flags & 1 != 0, nulls_first: flags & 2 != 0, expr: read_expr(r, 0)? });
-            }
-            Op::Sort { input, keys }
+            Op::Sort { input, keys: read_sort_keys(r)? }
         }
         5 => {
             let input = r.size()?;
             Op::Limit { input, count: r.varint()? }
+        }
+        6 => {
+            let input = r.size()?;
+            let right = r.size()?;
+            let left_keys = read_indexes(r)?;
+            let right_keys = read_indexes(r)?;
+            let how_at = r.at;
+            let how = match JoinKind::from_id(r.byte()?) {
+                Some(kind) => kind,
+                None => return fail(Code::BadFlag, how_at),
+            };
+            Op::Join { input, right, left_keys, right_keys, how }
+        }
+        7 => {
+            let input = r.size()?;
+            let partitions = read_exprs(r)?;
+            let sorts = read_sort_keys(r)?;
+            let n = r.count()?;
+            let mut functions = Vec::with_capacity(n.min(64));
+            for _ in 0..n {
+                let fn_at = r.at;
+                let func = match WindowFn::from_id(r.byte()?) {
+                    Some(func) => func,
+                    None => return fail(Code::BadFlag, fn_at),
+                };
+                functions.push(WindowFunction { func, ty: read_type(r)? });
+            }
+            Op::Window { input, partitions, sorts, functions }
         }
         _ => return fail(Code::UnknownOp, at),
     };

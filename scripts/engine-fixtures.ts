@@ -2,8 +2,10 @@
 //
 //   bun run gen:engine     writes engine/src/signatures.rs and engine/tests/data/plan-corpus.txt
 //
-// signatures.rs is the function registry's type rules as a table, so the registry
-// stays the one place a function is defined. The corpus is a list of plans, valid
+// signatures.rs is the function registry's type rules as a table for the scalar
+// and aggregate functions the engine evaluates in expressions; window functions
+// live in a window node and have no signature there (D-077). The registry stays
+// the one place a function is defined. The corpus is a list of plans, valid
 // and deliberately broken, each with the verdict of the JS decoder and validator;
 // the Rust tests must reach the same verdict on every one. tests/engine-fixtures.test.ts
 // fails when either file is out of date.
@@ -48,6 +50,9 @@ export function signaturesRs(): string {
   ];
   const entries: string[] = [];
   for (const def of REGISTRY.values()) {
+    // Window functions belong to a window node, never to an expression, so the
+    // engine's expression signature table has no entry for them (D-077).
+    if (def.kind === 'window') continue;
     const sigs: string[] = [];
     const tuples: TypeName[][] = [[]];
     for (let arity = 0; arity <= 3; arity++) {

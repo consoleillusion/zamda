@@ -12,6 +12,7 @@ import { slice } from '../../column';
 import { PlanError, SchemaError } from '../../errors';
 import type { IrPlan } from '../../ir';
 import type { Fields, RowOf, Schema } from '../../schema';
+import { checkCompatible } from '../../schema';
 import { KeyedTable } from '../../keyed';
 import type { KeyFields } from '../../keyed';
 import type { Segment } from './exec';
@@ -38,14 +39,37 @@ export interface TableOptions {
   readonly retain?: { readonly rows: number };
 }
 
+function extraScans(plan: IrPlan): number[] {
+  // Purpose: indexes of the plan's scan nodes after the primary one, in IR order
+  const out: number[] = [];
+  for (let i = 1; i < plan.nodes.length; i++) {
+    if (plan.nodes[i]!.op === 'scan') out.push(i);
+  }
+  return out;
+}
+
 export const jsBackend: Backend = {
   name: 'js',
   async execute(plan: IrPlan, table: Table, options: BackendOptions): Promise<ResultData> {
-    // Purpose: run a plan on a table owned by the JS backend, as the table stood when the run started
+    // Purpose: run a plan on JS tables, each exactly as it stood when the run started (C-LIVE, C-JOIN)
     if (!(table instanceof JsTable)) {
       throw new PlanError('The JS backend can only run plans on tables created with table()');
     }
-    return executeJs(plan, table.snapshot(), options);
+    const scans = extraScans(plan);
+    const sources = options.sources ?? [];
+    if (sources.length !== scans.length) {
+      throw new PlanError(`JS backend: plan binds ${scans.length} extra sources but found ${sources.length}`);
+    }
+    const sourceSegments: (readonly Segment[])[] = [];
+    for (let i = 0; i < sources.length; i++) {
+      const source = sources[i]!;
+      if (!(source instanceof JsTable) || source.backend !== jsBackend) {
+        throw new PlanError(`JS backend: source ${i} (extra scan ${scans[i]}) must be a table created with table()`);
+      }
+      checkCompatible(plan.nodes[scans[i]!]!.schema, source.schema.list);
+      sourceSegments.push(source.snapshot());
+    }
+    return await executeJs(plan, table.snapshot(), options, sourceSegments);
   },
   unwrap(table: Table): Table {
     // Purpose: hand back the JS table behind a keyed wrapper (C-LIVE-KEY)

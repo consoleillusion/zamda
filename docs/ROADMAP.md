@@ -66,13 +66,15 @@ The acceptance test for Milestone 2 and the benchmark for the spike.
 
 ## Non-goals for v1
 
-JS callbacks during execution, SQL parsing, persistence, joins, window
-functions, incremental query maintenance, threads, decimals, distributed or GPU
-execution.
+JS callbacks during execution, SQL parsing, persistence, incremental query
+maintenance, threads, decimals, distributed or GPU execution.
 
 ## After the MVP, in order
 
-1. **Keyed live tables:** insert, replace and delete rows by key, so the
-   snapshot charts can track a live routing table.
-2. **Substrait export:** built when there is a specific engine to send plans to.
-3. **Joins and window functions,** one at a time.
+1. **Keyed live tables (T-502, done):** insert, replace and delete rows by key,
+   so the snapshot charts can track a live routing table.
+2. **Substrait export (T-501, done):** built when there is a specific engine to
+   send plans to.
+3. **Joins and window functions (T-503, done):** joins first, then windows,
+   with contract rules C-JOIN and C-WINDOW. The JS backend runs both; the WASM
+   engine rejects them with `PlanError` until it supports them (D-077).

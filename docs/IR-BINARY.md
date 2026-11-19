@@ -62,7 +62,17 @@ node    = byte op, list of field (output schema), then by op:
                list of agg: string fn, type, byte has-argument (0 or 1), expr if 1
   4 sort       varint input, list of sortkey: byte flags (1 descending, 2 nulls first), expr
   5 limit      varint input, varint count
+  6 join       varint input, varint right, list of varint leftKeys,
+               list of varint rightKeys, byte how (0 inner, 1 left, 2 right, 3 full)
+  7 window     varint input, list of expr (partitions), list of sortkey,
+               list of function: byte fn (0 row_number, 1 rank, 2 dense_rank), type
 ```
+
+Ops 6 and 7 append to the table; the format byte stays `0x01` and old readers
+reject plans that use them. `join`'s `right` is the index of an earlier scan
+node and its key lists are column indexes into the left and right schemas.
+`window`'s function ids decode only to `row_number`, `rank` and `dense_rank`,
+each with an `int64` result type.
 
 ## Expressions
 

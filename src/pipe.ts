@@ -1,16 +1,18 @@
 // The pipeline builder. A Pipeline is immutable: every method returns a new one
 // with one more IR node. compile() turns it into a validated Plan.
 
+import type { Table } from './backend';
 import { ExpressionError, PlanError } from './errors';
 import { AggExpr, BoolExpr, Expr, ListParam, SortKey, paramExpr, wrap } from './expr';
 import type { ExprFor } from './expr';
-import type { IrAggregate, IrExpr, IrNode, IrParam, IrPlan } from './ir';
+import type { IrAggregate, IrExpr, IrNode, IrParam, IrPlan, IrWindowFunction, JoinKind, WindowFnName } from './ir';
 import { IR_VERSION, walkExpr } from './ir';
 import { optimize } from './optimize';
 import { Plan } from './plan';
 import type { Field, Fields, Schema } from './schema';
 import { schemaFromList } from './schema';
 import type { DataType, JsOf } from './types';
+import { compatibleTypes, sameType, t } from './types';
 import { validate } from './validate';
 
 // The accessor object a callback receives: one typed expression per column.
@@ -135,19 +137,59 @@ interface Aggregates {
   readonly aggs: IrAggregate[];
 }
 
+function checkSources(nodes: readonly IrNode[], sources: readonly Table[]): void {
+  // Purpose: verify every bound right table still matches the scan node compiled against it
+  const scans: { readonly index: number; readonly schema: readonly Field[] }[] = [];
+  nodes.forEach(function (node, index) {
+    if (index > 0 && node.op === 'scan') scans.push({ index, schema: node.schema });
+  });
+  if (scans.length !== sources.length) {
+    throw new PlanError(
+      `join: expected ${scans.length} bound table(s) but got ${sources.length}`,
+    );
+  }
+  scans.forEach(function (scan, i) {
+    const source = sources[i]!;
+    const actual = source.schema.list;
+    if (actual.length !== scan.schema.length) {
+      throw new PlanError(
+        `join: bound table for node ${scan.index} has ${actual.length} columns, expected ${scan.schema.length}`,
+      );
+    }
+    for (let column = 0; column < actual.length; column++) {
+      const want = scan.schema[column]!;
+      const got = actual[column]!;
+      if (want.name !== got.name || !sameType(want.type, got.type)) {
+        throw new PlanError(
+          `join: bound table for node ${scan.index}, column ${column}: expected "${want.name}" (${want.type.name}) ` +
+            `but found "${got.name}" (${got.type.name})`,
+        );
+      }
+    }
+  });
+}
+
 export class Pipeline<In extends Fields, Cur extends Fields, P extends ParamDecls = NoParams> {
   /** @internal */ readonly _input: Schema<In>;
   /** @internal */ readonly _current: Schema<Cur>;
   /** @internal */ readonly _nodes: readonly IrNode[];
   /** @internal */ readonly _decls: P;
   /** @internal */ readonly _params: ParamExprs<P>;
+  /** @internal */ readonly _sources: readonly Table[];
 
-  constructor(input: Schema<In>, current: Schema<Cur>, nodes: readonly IrNode[], decls: P) {
-    // Purpose: hold the input schema, the schema at this stage, the nodes so far and the parameters
+  constructor(
+    input: Schema<In>,
+    current: Schema<Cur>,
+    nodes: readonly IrNode[],
+    decls: P,
+    sources: readonly Table[] = [],
+  ) {
+    // Purpose: hold the input schema, the schema at this stage, the nodes, the parameters and bound right tables
     this._input = input;
     this._current = current;
     this._nodes = nodes;
     this._decls = decls;
+    this._sources = sources;
     const params: Record<string, unknown> = {};
     for (const [name, decl] of Object.entries(decls)) {
       params[name] = isListDecl(decl) ? new ListParam(name, decl.list) : paramExpr(name, decl);
@@ -156,9 +198,13 @@ export class Pipeline<In extends Fields, Cur extends Fields, P extends ParamDecl
   }
 
   /** @internal */
-  _push<N extends Fields>(node: IrNode, schema: Schema<N>): Pipeline<In, N, P> {
-    // Purpose: return a new pipeline with one more node
-    return new Pipeline(this._input, schema, [...this._nodes, node], this._decls);
+  _push<N extends Fields>(
+    node: IrNode,
+    schema: Schema<N>,
+    sources: readonly Table[] = this._sources,
+  ): Pipeline<In, N, P> {
+    // Purpose: return a new pipeline with one more node, carrying the tables bound by earlier joins
+    return new Pipeline(this._input, schema, [...this._nodes, node], this._decls, sources);
   }
 
   /** @internal */
@@ -349,6 +395,146 @@ export class Pipeline<In extends Fields, Cur extends Fields, P extends ParamDecl
     );
   }
 
+  join<R extends Fields, K extends string>(
+    right: Table<R>,
+    keys: {
+      readonly left: readonly (keyof Cur & string)[];
+      readonly right: readonly (keyof R & string)[];
+    },
+    how: JoinKind = 'inner',
+  ): Pipeline<In, Merge<Cur, R>, P> {
+    // Purpose: C-JOIN: bind a right table, scan it and append an equi-join over named key columns
+    if (right === null || typeof right !== 'object' || !right.schema || !Array.isArray(right.schema.list)) {
+      throw new ExpressionError('join: the right argument must be a table created with table()');
+    }
+    const leftKeys = [...keys.left];
+    const rightKeys = [...keys.right];
+    if (leftKeys.length === 0 || rightKeys.length === 0) {
+      throw new ExpressionError('join: at least one key is required');
+    }
+    if (leftKeys.length !== rightKeys.length) {
+      throw new ExpressionError(
+        `join: expected the same number of left and right keys, got ${leftKeys.length} and ${rightKeys.length}`,
+      );
+    }
+    if (new Set(leftKeys).size !== leftKeys.length) throw new ExpressionError('join: duplicate left key column');
+    if (new Set(rightKeys).size !== rightKeys.length) throw new ExpressionError('join: duplicate right key column');
+    if (how !== 'inner' && how !== 'left' && how !== 'right' && how !== 'full') {
+      throw new ExpressionError(`join: unknown join kind "${how}"; expected inner, left, right or full`);
+    }
+    const leftFields = this._current.list;
+    const rightFields = right.schema.list;
+    const outputNames = new Set<string>();
+    for (const field of [...leftFields, ...rightFields]) {
+      if (outputNames.has(field.name)) {
+        throw new ExpressionError(`join: duplicate output column name "${field.name}"`);
+      }
+      outputNames.add(field.name);
+    }
+    const leftNames = leftFields.map(function (f) {
+      return f.name;
+    });
+    const rightNames = rightFields.map(function (f) {
+      return f.name;
+    });
+    const leftIndexes: number[] = [];
+    const rightIndexes: number[] = [];
+    for (let i = 0; i < leftKeys.length; i++) {
+      const leftName = leftKeys[i]!;
+      const rightName = rightKeys[i]!;
+      const leftAt = leftNames.indexOf(leftName);
+      if (leftAt < 0) {
+        throw new ExpressionError(`join: unknown left key column "${leftName}"; available: ${leftNames.join(', ')}`);
+      }
+      const rightAt = rightNames.indexOf(rightName);
+      if (rightAt < 0) {
+        throw new ExpressionError(`join: unknown right key column "${rightName}"; available: ${rightNames.join(', ')}`);
+      }
+      const leftType = leftFields[leftAt]!.type;
+      const rightType = rightFields[rightAt]!.type;
+      if (!compatibleTypes(leftType, rightType)) {
+        throw new ExpressionError(
+          `join: key ${i + 1} has incompatible types: left "${leftName}" is ${leftType.name}, ` +
+            `right "${rightName}" is ${rightType.name}`,
+        );
+      }
+      leftIndexes.push(leftAt);
+      rightIndexes.push(rightAt);
+    }
+    const merged = schemaFromList([...leftFields, ...rightFields]) as Schema<Merge<Cur, R>>;
+    const leftInput = this._last();
+    const rightNode = this._nodes.length;
+    const withScan = this._push(
+      { op: 'scan', schema: rightFields },
+      right.schema,
+      [...this._sources, right],
+    );
+    return withScan._push(
+      {
+        op: 'join',
+        input: leftInput,
+        right: rightNode,
+        leftKeys: leftIndexes,
+        rightKeys: rightIndexes,
+        how,
+        schema: merged.list,
+      },
+      merged,
+    );
+  }
+
+  window<const K extends string>(options: {
+    readonly partitionBy: readonly (keyof Cur & string)[];
+    readonly orderBy: (c: Cols<Cur>) => SortKey | readonly SortKey[];
+    readonly functions: Readonly<Record<K, WindowFnName>>;
+  }): Pipeline<In, Merge<Cur, { readonly [P in K]: typeof t.int64 }>, P> {
+    // Purpose: C-WINDOW: keep rows and columns in order and add one int64 ranking column per function
+    const partitions: IrExpr[] = [];
+    for (const name of options.partitionBy) {
+      const at = this._current.list.findIndex(function (field) {
+        return field.name === name;
+      });
+      if (at < 0) throw new ExpressionError(`window: unknown partition column "${name}"`);
+      partitions.push({ kind: 'field', index: at, type: this._current.list[at]!.type });
+    }
+    const access = accessor(this._current);
+    const result = options.orderBy(access.cols);
+    const keys = result instanceof SortKey ? [result] : [...result];
+    if (keys.length === 0) throw new ExpressionError('window: at least one order key is required');
+    for (const key of keys) {
+      if (!(key instanceof SortKey)) {
+        throw new ExpressionError('window: order keys must be built with .asc() or .desc()');
+      }
+    }
+    const sorts = keys.map(function (k) {
+      return k.key;
+    });
+    checkUsed(this._current, access.touched, sorts.map(function (k) {
+      return k.expr;
+    }), 'window');
+    const entries = Object.entries(options.functions) as [string, unknown][];
+    if (entries.length === 0) throw new ExpressionError('window: at least one function is required');
+    const names = new Set(this._current.list.map(function (field) {
+      return field.name;
+    }));
+    const functions: IrWindowFunction[] = [];
+    const fields: Field[] = [...this._current.list];
+    for (const [name, fn] of entries) {
+      if (fn !== 'row_number' && fn !== 'rank' && fn !== 'dense_rank') {
+        throw new ExpressionError(`window: unknown function "${String(fn)}" for column "${name}"`);
+      }
+      if (names.has(name)) throw new ExpressionError(`window: duplicate output column name "${name}"`);
+      names.add(name);
+      functions.push({ fn, type: t.int64 });
+      fields.push({ name, type: t.int64 });
+    }
+    const schema = schemaFromList(fields) as Schema<Merge<Cur, { readonly [P in K]: typeof t.int64 }>>;
+    return this._push(
+      { op: 'window', input: this._last(), partitions, sorts, functions, schema: schema.list },
+      schema,
+    );
+  }
+
   /** @internal */
   _compile(optimized: boolean): Plan<In, Cur, P> {
     // Purpose: assemble and validate the IR, optionally skipping optimizer passes (test hook)
@@ -363,7 +549,9 @@ export class Pipeline<In extends Fields, Cur extends Fields, P extends ParamDecl
       output: this._current.list,
       params,
     };
-    return new Plan(validate(optimized ? optimize(plan) : plan));
+    const checked = validate(optimized ? optimize(plan) : plan);
+    checkSources(checked.nodes, this._sources);
+    return new Plan(checked, this._sources);
   }
 
   compile(): Plan<In, Cur, P> {

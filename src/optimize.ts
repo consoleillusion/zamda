@@ -214,7 +214,16 @@ function foldNode(node: IrNode): IrNode {
   switch (node.op) {
     case 'scan':
     case 'limit':
+    case 'join':
       return node;
+    case 'window':
+      return {
+        ...node,
+        partitions: node.partitions.map(foldExpr),
+        sorts: node.sorts.map(function (k) {
+          return { ...k, expr: foldExpr(k.expr) };
+        }),
+      };
     case 'filter':
       return { ...node, predicate: foldExpr(node.predicate) };
     case 'project':
@@ -261,7 +270,8 @@ function link(chain: readonly IrNode[]): IrNode[] {
 function rewrite(plan: IrPlan, transform: (chain: readonly IrNode[]) => IrNode[]): IrPlan {
   // Purpose: apply a structural pass to a chain, leaving plans with stray nodes alone
   const chain = chainOf(plan);
-  if (chain.length !== plan.nodes.length || chain[0]?.op !== 'scan') return plan;
+  // A window is a blocking boundary: the chain passes must not move work across it.
+  if (chain.length !== plan.nodes.length || chain[0]?.op !== 'scan' || chain.some(n => n.op === 'window')) return plan;
   const nodes = transform(chain);
   if (nodes.length === 0 || nodes.length > MAX_NODES || nodes[0]?.op !== 'scan') return plan;
   const linked = link(nodes);

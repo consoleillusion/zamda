@@ -47,6 +47,18 @@ export interface IrSortKey {
   readonly nullsFirst: boolean;
 }
 
+// Substrait JoinRel.JoinType, restricted to the four kinds with a contract rule.
+export type JoinKind = 'inner' | 'left' | 'right' | 'full';
+
+// Substrait ConsistentPartitionWindowRel functions, restricted to those whose
+// value depends only on the partition and its peer groups.
+export type WindowFnName = 'row_number' | 'rank' | 'dense_rank';
+
+export interface IrWindowFunction {
+  readonly fn: WindowFnName;
+  readonly type: DataType;
+}
+
 export interface IrParam {
   readonly name: string;
   readonly type: DataType;
@@ -72,7 +84,26 @@ export type IrNode =
       readonly aggs: readonly IrAggregate[];
     })
   | (NodeBase & { readonly op: 'sort'; readonly input: number; readonly keys: readonly IrSortKey[] })
-  | (NodeBase & { readonly op: 'limit'; readonly input: number; readonly count: number });
+  | (NodeBase & { readonly op: 'limit'; readonly input: number; readonly count: number })
+  // Substrait: JoinRel. `right` is the index of the second table's scan node;
+  // both key lists are column indexes into the left and right inputs.
+  | (NodeBase & {
+      readonly op: 'join';
+      readonly input: number;
+      readonly right: number;
+      readonly leftKeys: readonly number[];
+      readonly rightKeys: readonly number[];
+      readonly how: JoinKind;
+    })
+  // Substrait: ConsistentPartitionWindowRel. Output is the input columns plus
+  // one int64 column per function, named by the trailing entries of schema.
+  | (NodeBase & {
+      readonly op: 'window';
+      readonly input: number;
+      readonly partitions: readonly IrExpr[];
+      readonly sorts: readonly IrSortKey[];
+      readonly functions: readonly IrWindowFunction[];
+    });
 
 export interface IrPlan {
   readonly version: number;
@@ -113,5 +144,11 @@ export function nodeExprs(node: IrNode): IrExpr[] {
       return node.keys.map(function (k) {
         return k.expr;
       });
+    case 'join':
+      return [];
+    case 'window':
+      return [...node.partitions, ...node.sorts.map(function (k) {
+        return k.expr;
+      })];
   }
 }

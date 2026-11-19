@@ -27,7 +27,7 @@ export type NullBehaviour =
 
 export interface FunctionDef {
   readonly name: string;
-  readonly kind: 'scalar' | 'aggregate';
+  readonly kind: 'scalar' | 'aggregate' | 'window';
   readonly substrait: string;
   readonly nulls: NullBehaviour;
   readonly deterministic: boolean;
@@ -149,6 +149,14 @@ function agg(name: string, substrait: string, nulls: NullBehaviour, returns: Rul
   return { name, kind: 'aggregate', substrait, nulls, deterministic: true, returns };
 }
 
+function window(name: string, substrait: string): FunctionDef {
+  // Purpose: build a window function definition over SUBSTRAIT_VERSION's extension names
+  return { name, kind: 'window', substrait, nulls: 'never-null', deterministic: true, returns: function () {
+    // Purpose: window functions here all produce a row number of int64
+    return t.int64;
+  } };
+}
+
 const defs: FunctionDef[] = [
   // --- comparison ---
   scalar('eq', 'functions_comparison:equal', 'propagate', equality('eq')),
@@ -245,6 +253,12 @@ const defs: FunctionDef[] = [
     if (args[0]!.name === 'bool') fail('max', 'an ordered column', args);
     return args[0]!;
   }),
+
+  // --- window (T-503, D-077): frame and invocation are fixed by the Substrait mapping ---
+  // Row numbers and ranks are never null, and are computed over the whole partition.
+  window('row_number', 'functions_arithmetic:row_number'),
+  window('rank', 'functions_arithmetic:rank'),
+  window('dense_rank', 'functions_arithmetic:dense_rank'),
 ];
 
 export const REGISTRY: ReadonlyMap<string, FunctionDef> = new Map(

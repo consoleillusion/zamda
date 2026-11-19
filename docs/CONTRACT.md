@@ -96,6 +96,10 @@ and column. `utf8` and `dictionary` behave identically; they differ only in stor
 | C-CHUNK | A result never depends on how execution is chunked or sliced. An aborted run rejects with `AbortError` and leaves the table unchanged. A run that raises does so whatever the chunk size. |
 | C-BETWEEN | `between(low, high)` is inclusive at both ends and equals `gte(low).and(lte(high))`. |
 | C-DETERMINISM | Every registry function is deterministic. Non-deterministic functions are excluded from the MVP. |
+### Joins and windows
+
+| C-JOIN | `join(right, keys, how)` matches a left row with a right row when every key component is non-null and equal. Strings compare by value whether stored as `utf8` or `dictionary`; other components compare by their typed value. Duplicate keys produce every matching pair. The output columns are the left columns followed by the right columns; duplicate names are rejected. `inner` emits matched pairs in left order, then right order within each left row. `left` and `full` append unmatched left rows in left order; `right` and `full` append unmatched right rows in right order, with the other side's columns null. The right table is bound when the plan is compiled and a run sees both tables as they stood when it started. A backend that cannot run a join raises `PlanError`; it never substitutes another semantics. |
+| C-WINDOW | `window({ partitionBy, orderBy, functions })` keeps the input rows and columns in order and adds one `int64` column per function: `row_number`, `rank` or `dense_rank`. Null partition keys group together; order keys place nulls as their sort key says, and rows equal on every order key (nulls equal) form one peer group. Within a partition, `row_number` counts 1..n in order with input order breaking ties, `rank` is one plus the number of rows before the first row of the peer group, and `dense_rank` is one plus the number of earlier peer groups. An empty input gives no rows. A backend that cannot run a window raises `PlanError`; it never substitutes another semantics. |
 
 ## Permitted divergence
 

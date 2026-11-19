@@ -210,3 +210,79 @@ keyed.get('nobody');
 keyed.delete([1]);
 // @ts-expect-error rows must match the schema
 keyed.upsert([{ nope: 1 }]);
+
+// T-503 / C-JOIN: a second table is bound and its columns appended after the current ones.
+const Orders = schema({ orderId: t.int32, customer: t.int32, total: t.float64 });
+const Customers = schema({ cid: t.int32, name: t.utf8 });
+const joined = pipe(Orders)
+  .join(table(Customers, []), { left: ['customer'], right: ['cid'] }, 'left')
+  .compile();
+assertType<
+  Same<
+    RowsOf<typeof joined>,
+    { orderId: number | null; customer: number | null; total: number | null; cid: number | null; name: string | null }
+  >
+>();
+void joined;
+
+// @ts-expect-error left keys must be columns of the current schema
+pipe(Orders).join(table(Customers, []), { left: ['nope'], right: ['cid'] });
+// @ts-expect-error right keys must be columns of the bound table
+pipe(Orders).join(table(Customers, []), { left: ['customer'], right: ['nope'] });
+// @ts-expect-error join needs a table, not a schema
+pipe(Orders).join(Customers, { left: ['customer'], right: ['cid'] });
+const Wrong = schema({ nope: t.int32 });
+// @ts-expect-error the right key must exist in the bound table's schema
+pipe(Orders).join(table(Wrong, []), { left: ['customer'], right: ['cid'] });
+// @ts-expect-error only the four contract join kinds are allowed
+pipe(Orders).join(table(Customers, []), { left: ['customer'], right: ['cid'] }, 'cross');
+
+// T-503 / C-WINDOW: one int64 column per named function, after the input columns.
+const windowed = pipe(Orders)
+  .window({
+    partitionBy: ['customer'],
+    orderBy: c => [c.total.desc(), c.orderId.asc()],
+    functions: { rn: 'row_number', rk: 'rank', drk: 'dense_rank' },
+  })
+  .compile();
+assertType<
+  Same<
+    RowsOf<typeof windowed>,
+    {
+      orderId: number | null;
+      customer: number | null;
+      total: number | null;
+      rn: bigint | null;
+      rk: bigint | null;
+      drk: bigint | null;
+    }
+  >
+>();
+void windowed;
+
+// @ts-expect-error ntile is not a supported window function
+pipe(Orders).window({ partitionBy: ['customer'], orderBy: c => c.total.asc(), functions: { n: 'ntile' } });
+// @ts-expect-error partitionBy must name current columns
+pipe(Orders).window({ partitionBy: ['nope'], orderBy: c => c.total.asc(), functions: { rn: 'row_number' } });
+// @ts-expect-error order keys must reference current columns
+pipe(Orders).window({ partitionBy: ['customer'], orderBy: c => c.nope.asc(), functions: { rn: 'row_number' } });
+
+// A join followed by a window keeps both sets of added columns.
+const joinedWindowed = pipe(Orders)
+  .join(table(Customers, []), { left: ['customer'], right: ['cid'] })
+  .window({ partitionBy: ['name'], orderBy: c => c.total.desc(), functions: { rn: 'row_number' } })
+  .compile();
+assertType<
+  Same<
+    RowsOf<typeof joinedWindowed>,
+    {
+      orderId: number | null;
+      customer: number | null;
+      total: number | null;
+      cid: number | null;
+      name: string | null;
+      rn: bigint | null;
+    }
+  >
+>();
+void joinedWindowed;

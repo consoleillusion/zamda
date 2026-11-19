@@ -25,6 +25,15 @@ use crate::store::{Snapshot, View};
 use crate::types::Type;
 use crate::vector::{Data, Scalar, Values, Vector};
 
+pub(crate) fn unsupported_op(op: &Op) -> EvalError {
+    // Purpose: the structured error for an operator this engine refuses to run (D-077)
+    match op {
+        Op::Join { .. } => EvalError::Unsupported("join"),
+        Op::Window { .. } => EvalError::Unsupported("window"),
+        _ => EvalError::Unsupported("operator"),
+    }
+}
+
 // Rows of the result in one column, owned.
 pub struct OutColumn {
     pub ty: Type,
@@ -97,7 +106,7 @@ pub struct Run {
     session: Option<Rc<RefCell<Session>>>,
 }
 
-fn chain_of(plan: &Plan) -> Vec<usize> {
+fn chain_of(plan: &Plan) -> Result<Vec<usize>, EvalError> {
     // Purpose: the nodes from the one after the scan up to the root, in execution order
     let mut chain = Vec::new();
     let mut at = plan.root;
@@ -105,12 +114,13 @@ fn chain_of(plan: &Plan) -> Vec<usize> {
         let input = match &plan.nodes[at].op {
             Op::Scan => break,
             Op::Filter { input, .. } | Op::Project { input, .. } | Op::Limit { input, .. } | Op::Aggregate { input, .. } | Op::Sort { input, .. } => *input,
+            Op::Join { .. } | Op::Window { .. } => return Err(unsupported_op(&plan.nodes[at].op)),
         };
         chain.push(at);
         at = input;
     }
     chain.reverse();
-    chain
+    Ok(chain)
 }
 
 pub fn reads(expr: &Expr, into: &mut [bool]) {
@@ -129,7 +139,7 @@ pub fn reads(expr: &Expr, into: &mut [bool]) {
     }
 }
 
-fn needed_columns(plan: &Plan, chain: &[usize]) -> Vec<Vec<bool>> {
+fn needed_columns(plan: &Plan, chain: &[usize]) -> Result<Vec<Vec<bool>>, EvalError> {
     // Purpose: for every node, which output columns later nodes (or the result) read
     let mut needed: Vec<Vec<bool>> = plan.nodes.iter().map(|n| vec![false; n.schema.len()]).collect();
     needed[plan.root] = vec![true; plan.nodes[plan.root].schema.len()];
@@ -161,9 +171,10 @@ fn needed_columns(plan: &Plan, chain: &[usize]) -> Vec<Vec<bool>> {
                 needed[*input] = r;
             }
             Op::Scan => {}
+            Op::Join { .. } | Op::Window { .. } => return Err(unsupported_op(&plan.nodes[at].op)),
         }
     }
-    needed
+    Ok(needed)
 }
 
 pub fn check_supported(plan: &Plan) -> Result<(), EvalError> {
@@ -187,6 +198,7 @@ pub fn check_supported(plan: &Plan) -> Result<(), EvalError> {
                     supported(&k.expr).map_err(EvalError::Unsupported)?;
                 }
             }
+            Op::Join { .. } | Op::Window { .. } => return Err(unsupported_op(&node.op)),
         }
     }
     Ok(())
@@ -342,45 +354,44 @@ fn out_columns(table: Table, types: &[Type]) -> Vec<OutColumn> {
         .collect()
 }
 
-fn simplified(plan: &Plan, params: &Params) -> Plan {
+fn simplified(plan: &Plan, params: &Params) -> Result<Plan, EvalError> {
     // Purpose: the plan with constant booleans folded out of every expression (see eval::simplify)
-    let nodes = plan
-        .nodes
-        .iter()
-        .map(|node| {
-            let simple = |e: &Expr| crate::eval::simplify(e, params);
-            let op = match &node.op {
-                Op::Scan => Op::Scan,
-                Op::Filter { input, predicate } => Op::Filter { input: *input, predicate: simple(predicate) },
-                Op::Project { input, exprs } => Op::Project { input: *input, exprs: exprs.iter().map(simple).collect() },
-                Op::Aggregate { input, keys, aggs } => Op::Aggregate {
-                    input: *input,
-                    keys: keys.iter().map(simple).collect(),
-                    aggs: aggs.iter().map(|a| Aggregate { func: a.func.clone(), ty: a.ty, arg: a.arg.as_ref().map(simple) }).collect(),
-                },
-                Op::Sort { input, keys } => Op::Sort { input: *input, keys: keys.iter().map(|k| SortKey { descending: k.descending, nulls_first: k.nulls_first, expr: simple(&k.expr) }).collect() },
-                Op::Limit { input, count } => Op::Limit { input: *input, count: *count },
-            };
-            Node { schema: node.schema.clone(), op }
-        })
-        .collect();
-    Plan { version: plan.version, input: plan.input.clone(), nodes, root: plan.root, output: plan.output.clone(), params: plan.params.clone() }
+    let mut nodes = Vec::with_capacity(plan.nodes.len());
+    for node in &plan.nodes {
+        let simple = |e: &Expr| crate::eval::simplify(e, params);
+        let op = match &node.op {
+            Op::Scan => Op::Scan,
+            Op::Filter { input, predicate } => Op::Filter { input: *input, predicate: simple(predicate) },
+            Op::Project { input, exprs } => Op::Project { input: *input, exprs: exprs.iter().map(simple).collect() },
+            Op::Aggregate { input, keys, aggs } => Op::Aggregate {
+                input: *input,
+                keys: keys.iter().map(simple).collect(),
+                aggs: aggs.iter().map(|a| Aggregate { func: a.func.clone(), ty: a.ty, arg: a.arg.as_ref().map(simple) }).collect(),
+            },
+            Op::Sort { input, keys } => Op::Sort { input: *input, keys: keys.iter().map(|k| SortKey { descending: k.descending, nulls_first: k.nulls_first, expr: simple(&k.expr) }).collect() },
+            Op::Limit { input, count } => Op::Limit { input: *input, count: *count },
+            Op::Join { .. } | Op::Window { .. } => return Err(unsupported_op(&node.op)),
+        };
+        nodes.push(Node { schema: node.schema.clone(), op });
+    }
+    Ok(Plan { version: plan.version, input: plan.input.clone(), nodes, root: plan.root, output: plan.output.clone(), params: plan.params.clone() })
 }
 
 impl Run {
     pub fn new(plan: Rc<Plan>, params: Rc<Params>, snapshot: Snapshot, chunk_rows: usize, session: Option<Rc<RefCell<Session>>>) -> Result<Run, EvalError> {
         // Purpose: prepare a run; refuses a plan the engine cannot execute
-        let plan = Rc::new(simplified(&plan, &params));
+        let plan = Rc::new(simplified(&plan, &params)?);
         check_supported(&plan)?;
-        let chain = chain_of(&plan);
-        let needed = needed_columns(&plan, &chain);
+        let chain = chain_of(&plan)?;
+        let needed = needed_columns(&plan, &chain)?;
         let remaining = chain
             .iter()
             .map(|&i| match &plan.nodes[i].op {
-                Op::Limit { count, .. } => *count,
-                _ => 0,
+                Op::Limit { count, .. } => Ok(*count),
+                Op::Join { .. } | Op::Window { .. } => Err(unsupported_op(&plan.nodes[i].op)),
+                _ => Ok(0),
             })
-            .collect();
+            .collect::<Result<Vec<_>, EvalError>>()?;
         let mut phases = Vec::new();
         let mut streaming = Vec::new();
         for (k, &at) in chain.iter().enumerate() {
@@ -451,6 +462,7 @@ impl Run {
                     let types = self.plan.nodes[at].schema.iter().map(|f| f.ty).collect();
                     Ok(Sink::Sort(Collector::new(types, self.needed[at].clone()), Sorter::new(keys, limit), at))
                 }
+                Op::Join { .. } | Op::Window { .. } => Err(unsupported_op(&self.plan.nodes[at].op)),
                 _ => unreachable!("phases end at aggregates and sorts"),
             },
             None => {
@@ -632,6 +644,7 @@ impl Run {
                         self.phase_done = true;
                     }
                 }
+                Op::Join { .. } | Op::Window { .. } => return Err(unsupported_op(&plan.nodes[at].op)),
                 _ => return Err(EvalError::Internal("operator is not streaming")),
             }
             if stage.rows == 0 {

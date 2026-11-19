@@ -42,7 +42,17 @@ export { KeyedTable } from './keyed';
 export type { Key, KeyComponent, KeyedTableFactory, KeyFields } from './keyed';
 
 export type { Backend, BackendOptions, ResultData, RunSession, Table } from './backend';
-export type { IrAggregate, IrExpr, IrNode, IrParam, IrPlan, IrSortKey } from './ir';
+export type {
+  IrAggregate,
+  IrExpr,
+  IrNode,
+  IrParam,
+  IrPlan,
+  IrSortKey,
+  IrWindowFunction,
+  JoinKind,
+  WindowFnName,
+} from './ir';
 export { IR_VERSION } from './ir';
 
 export {

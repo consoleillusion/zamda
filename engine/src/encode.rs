@@ -112,6 +112,23 @@ impl Writer {
             self.expr(e);
         }
     }
+
+    fn indexes(&mut self, list: &[usize]) {
+        // Purpose: append a list of column indexes
+        self.varint(list.len() as u64);
+        for i in list {
+            self.varint(*i as u64);
+        }
+    }
+
+    fn sort_keys(&mut self, keys: &[SortKey]) {
+        // Purpose: append a list of sort keys
+        self.varint(keys.len() as u64);
+        for k in keys {
+            self.0.push(k.descending as u8 | ((k.nulls_first as u8) << 1));
+            self.expr(&k.expr);
+        }
+    }
 }
 
 pub fn encode(plan: &Plan) -> Vec<u8> {
@@ -128,6 +145,8 @@ pub fn encode(plan: &Plan) -> Vec<u8> {
             Op::Aggregate { .. } => 3,
             Op::Sort { .. } => 4,
             Op::Limit { .. } => 5,
+            Op::Join { .. } => 6,
+            Op::Window { .. } => 7,
         };
         w.0.push(op);
         w.fields(&node.schema);
@@ -159,15 +178,28 @@ pub fn encode(plan: &Plan) -> Vec<u8> {
             }
             Op::Sort { input, keys } => {
                 w.varint(*input as u64);
-                w.varint(keys.len() as u64);
-                for k in keys {
-                    w.0.push(k.descending as u8 | ((k.nulls_first as u8) << 1));
-                    w.expr(&k.expr);
-                }
+                w.sort_keys(keys);
             }
             Op::Limit { input, count } => {
                 w.varint(*input as u64);
                 w.varint(*count);
+            }
+            Op::Join { input, right, left_keys, right_keys, how } => {
+                w.varint(*input as u64);
+                w.varint(*right as u64);
+                w.indexes(left_keys);
+                w.indexes(right_keys);
+                w.0.push(how.id());
+            }
+            Op::Window { input, partitions, sorts, functions } => {
+                w.varint(*input as u64);
+                w.exprs(partitions);
+                w.sort_keys(sorts);
+                w.varint(functions.len() as u64);
+                for f in functions {
+                    w.0.push(f.func.id());
+                    w.0.push(f.ty.id());
+                }
             }
         }
     }

@@ -12,6 +12,7 @@ use std::rc::Rc;
 use crate::decode::decode_params;
 use crate::error::Error;
 use crate::eval::{eval, supported, Batch, Params, BATCH_ROWS};
+use crate::exec::unsupported_op;
 use crate::ir::{Expr, Op, Plan};
 use crate::kernels::EvalError;
 use crate::store_abi::with_snapshot;
@@ -100,28 +101,30 @@ pub(crate) fn release<T>(slots: &mut [Option<T>], handle: u32) -> u32 {
     }
 }
 
-fn expressions(node: &crate::ir::Node) -> Vec<&Expr> {
+fn expressions(node: &crate::ir::Node) -> Result<Vec<&Expr>, EvalError> {
     // Purpose: the expressions of a node, in a fixed order: a filter's predicate, a project's columns, a sort's keys, an aggregate's keys then its arguments
     match &node.op {
-        Op::Filter { predicate, .. } => vec![predicate],
-        Op::Project { exprs, .. } => exprs.iter().collect(),
-        Op::Sort { keys, .. } => keys.iter().map(|k| &k.expr).collect(),
-        Op::Aggregate { keys, aggs, .. } => keys.iter().chain(aggs.iter().filter_map(|a| a.arg.as_ref())).collect(),
-        Op::Scan | Op::Limit { .. } => Vec::new(),
+        Op::Filter { predicate, .. } => Ok(vec![predicate]),
+        Op::Project { exprs, .. } => Ok(exprs.iter().collect()),
+        Op::Sort { keys, .. } => Ok(keys.iter().map(|k| &k.expr).collect()),
+        Op::Aggregate { keys, aggs, .. } => Ok(keys.iter().chain(aggs.iter().filter_map(|a| a.arg.as_ref())).collect()),
+        Op::Scan | Op::Limit { .. } => Ok(Vec::new()),
+        Op::Join { .. } | Op::Window { .. } => Err(unsupported_op(&node.op)),
     }
 }
 
-fn input_of(op: &Op) -> Option<usize> {
+fn input_of(op: &Op) -> Result<Option<usize>, EvalError> {
     // Purpose: the node a node reads from
     match op {
-        Op::Filter { input, .. } | Op::Project { input, .. } | Op::Aggregate { input, .. } | Op::Sort { input, .. } | Op::Limit { input, .. } => Some(*input),
-        Op::Scan => None,
+        Op::Filter { input, .. } | Op::Project { input, .. } | Op::Aggregate { input, .. } | Op::Sort { input, .. } | Op::Limit { input, .. } => Ok(Some(*input)),
+        Op::Scan => Ok(None),
+        Op::Join { .. } | Op::Window { .. } => Err(unsupported_op(op)),
     }
 }
 
 #[no_mangle]
 pub extern "C" fn zs_eval_error() -> u32 {
-    // Purpose: the code of the last failed call in this interface (plan errors 1-123, store errors 201-211, evaluation errors 301-310)
+    // Purpose: the code of the last failed call in this interface (plan errors 1-124, store errors 201-211, evaluation errors 301-310)
     LAST.with(|c| c.get().0)
 }
 
@@ -192,7 +195,13 @@ pub extern "C" fn zs_expr_count(plan: u32, node: u32) -> i32 {
         let r = r.borrow();
         let plan = (plan as usize).checked_sub(1).and_then(|i| r.plans.get(i)).and_then(|p| p.as_ref());
         match plan.and_then(|p| p.nodes.get(node as usize)) {
-            Some(n) => expressions(n).len() as i32,
+            Some(n) => match expressions(n) {
+                Ok(found) => found.len() as i32,
+                Err(e) => {
+                    eval_error(&e);
+                    -1
+                }
+            },
             None => {
                 set_error(BAD_HANDLE, 0, 0);
                 -1
@@ -207,12 +216,19 @@ pub extern "C" fn zs_expr_supported(plan: u32, node: u32, expr: u32) -> u32 {
     REGISTRY.with(|r| {
         let r = r.borrow();
         let found = (plan as usize).checked_sub(1).and_then(|i| r.plans.get(i)).and_then(|p| p.as_ref())
-            .and_then(|p| p.nodes.get(node as usize))
-            .and_then(|n| expressions(n).get(expr as usize).copied().map(|e| supported(e)));
+            .and_then(|p| p.nodes.get(node as usize));
         match found {
-            Some(Ok(())) => 0,
-            Some(Err(_)) => set_error(UNSUPPORTED, 0, 0),
             None => set_error(BAD_HANDLE, 0, 0),
+            Some(n) => match expressions(n) {
+                Err(e) => eval_error(&e),
+                Ok(exprs) => match exprs.get(expr as usize).copied() {
+                    None => set_error(BAD_HANDLE, 0, 0),
+                    Some(e) => match supported(e) {
+                        Ok(()) => 0,
+                        Err(_) => set_error(UNSUPPORTED, 0, 0),
+                    },
+                },
+            },
         }
     })
 }
@@ -220,11 +236,11 @@ pub extern "C" fn zs_expr_supported(plan: u32, node: u32, expr: u32) -> u32 {
 fn run(plan: &Plan, params: &Params, node: u32, expr: u32, snapshot: u32, segment: u32, start: u32, rows: u32) -> Result<EvalResult, u32> {
     // Purpose: evaluate one expression of one node over rows [start, start + rows) of a segment
     let node = plan.nodes.get(node as usize).ok_or_else(|| set_error(BAD_ARGUMENT, 0, 0))?;
-    let input = input_of(&node.op).ok_or_else(|| set_error(BAD_ARGUMENT, 0, 0))?;
+    let input = input_of(&node.op).map_err(|e| eval_error(&e))?.ok_or_else(|| set_error(BAD_ARGUMENT, 0, 0))?;
     if !matches!(plan.nodes[input].op, Op::Scan) {
         return Err(set_error(BAD_ARGUMENT, 0, 0));
     }
-    let exprs = expressions(node);
+    let exprs = expressions(node).map_err(|e| eval_error(&e))?;
     let e = exprs.get(expr as usize).ok_or_else(|| set_error(BAD_ARGUMENT, 0, 0))?;
     if rows as usize > BATCH_ROWS {
         return Err(set_error(BAD_ARGUMENT, 0, 0));

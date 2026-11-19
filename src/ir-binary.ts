@@ -9,7 +9,7 @@
 // column and parameter references) is the validator's job.
 
 import { PlanError } from './errors';
-import type { IrAggregate, IrExpr, IrNode, IrParam, IrPlan, IrSortKey, LiteralValue } from './ir';
+import type { IrAggregate, IrExpr, IrNode, IrParam, IrPlan, IrSortKey, JoinKind, LiteralValue, WindowFnName } from './ir';
 import { IR_VERSION } from './ir';
 import type { Field } from './schema';
 import type { DataType, TypeName } from './types';
@@ -23,8 +23,11 @@ export const TYPE_NAMES: readonly TypeName[] = [
   'bool', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64',
   'float32', 'float64', 'utf8', 'dictionary', 'date32', 'timestamp',
 ];
-const OPS = ['scan', 'filter', 'project', 'aggregate', 'sort', 'limit'] as const;
+const OPS = ['scan', 'filter', 'project', 'aggregate', 'sort', 'limit', 'join', 'window'] as const;
 const EXPR_KINDS = ['field', 'literal', 'param', 'call', 'cast', 'in', 'lookup'] as const;
+// The spellings are part of the format: one encoding per plan, so no synonyms.
+const JOIN_KINDS = ['inner', 'left', 'right', 'full'] as const;
+const WINDOW_FNS = ['row_number', 'rank', 'dense_rank'] as const;
 
 // Engine only, never in a plan the JS side runs or validates: the result of a function of one string,
 // read by the string's canonical id from table `table` (docs/IR-BINARY.md). It sits in an IrExpr
@@ -217,9 +220,26 @@ function writeExpr(w: Writer, expr: IrExpr, depth: number): void {
   }
 }
 
+function writeIndexes(w: Writer, indexes: readonly number[]): void {
+  // Purpose: append a list of column indexes as varints
+  w.varint(indexes.length);
+  for (const index of indexes) w.varint(index);
+}
+
+function writeSortKeys(w: Writer, keys: readonly IrSortKey[]): void {
+  // Purpose: append a list of sort keys: flags, then the key expression
+  w.varint(keys.length);
+  for (const key of keys) {
+    w.byte((key.descending ? 1 : 0) | (key.nullsFirst ? 2 : 0));
+    writeExpr(w, key.expr, 0);
+  }
+}
+
 function writeNode(w: Writer, node: IrNode): void {
   // Purpose: append a node: op, output schema, then what the op needs
-  w.byte(OPS.indexOf(node.op));
+  const op = OPS.indexOf(node.op);
+  if (op === -1) bad(`unknown node op "${String(node.op)}"`);
+  w.byte(op);
   writeFields(w, node.schema);
   switch (node.op) {
     case 'scan':
@@ -233,6 +253,30 @@ function writeNode(w: Writer, node: IrNode): void {
       w.varint(node.exprs.length);
       for (const e of node.exprs) writeExpr(w, e, 0);
       return;
+    case 'join': {
+      const how = JOIN_KINDS.indexOf(node.how as (typeof JOIN_KINDS)[number]);
+      if (how === -1) bad(`unknown join kind "${String(node.how)}"`);
+      w.varint(node.input);
+      w.varint(node.right);
+      writeIndexes(w, node.leftKeys);
+      writeIndexes(w, node.rightKeys);
+      w.byte(how);
+      return;
+    }
+    case 'window': {
+      w.varint(node.input);
+      w.varint(node.partitions.length);
+      for (const expr of node.partitions) writeExpr(w, expr, 0);
+      writeSortKeys(w, node.sorts);
+      w.varint(node.functions.length);
+      for (const fn of node.functions) {
+        const id = WINDOW_FNS.indexOf(fn.fn as (typeof WINDOW_FNS)[number]);
+        if (id === -1) bad(`unknown window function "${String(fn.fn)}"`);
+        w.byte(id);
+        writeType(w, fn.type);
+      }
+      return;
+    }
     case 'aggregate':
       w.varint(node.input);
       w.varint(node.keys.length);
@@ -250,11 +294,7 @@ function writeNode(w: Writer, node: IrNode): void {
       return;
     case 'sort':
       w.varint(node.input);
-      w.varint(node.keys.length);
-      for (const key of node.keys) {
-        w.byte((key.descending ? 1 : 0) | (key.nullsFirst ? 2 : 0));
-        writeExpr(w, key.expr, 0);
-      }
+      writeSortKeys(w, node.keys);
       return;
     case 'limit':
       w.varint(node.input);
@@ -489,6 +529,26 @@ function readExprs(r: Reader): IrExpr[] {
   return out;
 }
 
+function readIndexes(r: Reader): number[] {
+  // Purpose: the next list of column indexes
+  const n = r.count();
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) out.push(r.varint());
+  return out;
+}
+
+function readSortKeys(r: Reader): IrSortKey[] {
+  // Purpose: the next list of sort keys
+  const n = r.count();
+  const out: IrSortKey[] = [];
+  for (let i = 0; i < n; i++) {
+    const flags = r.byte();
+    if (flags > 3) bad('bad sort flags');
+    out.push({ descending: (flags & 1) !== 0, nullsFirst: (flags & 2) !== 0, expr: readExpr(r, 0) });
+  }
+  return out;
+}
+
 function readNode(r: Reader): IrNode {
   // Purpose: the next node
   const op = OPS[r.byte()];
@@ -504,6 +564,28 @@ function readNode(r: Reader): IrNode {
     case 'project': {
       const input = r.varint();
       return { op, schema, input, exprs: readExprs(r) };
+    }
+    case 'join': {
+      const input = r.varint();
+      const right = r.varint();
+      const leftKeys = readIndexes(r);
+      const rightKeys = readIndexes(r);
+      const how = JOIN_KINDS[r.byte()];
+      if (how === undefined) bad('unknown join kind');
+      return { op, schema, input, right, leftKeys, rightKeys, how: how as JoinKind };
+    }
+    case 'window': {
+      const input = r.varint();
+      const partitions = readExprs(r);
+      const sorts = readSortKeys(r);
+      const n = r.count();
+      const functions: { fn: WindowFnName; type: DataType }[] = [];
+      for (let i = 0; i < n; i++) {
+        const fn = WINDOW_FNS[r.byte()];
+        if (fn === undefined) bad('unknown window function');
+        functions.push({ fn: fn as WindowFnName, type: readType(r) });
+      }
+      return { op, schema, input, partitions, sorts, functions };
     }
     case 'aggregate': {
       const input = r.varint();
@@ -521,14 +603,7 @@ function readNode(r: Reader): IrNode {
     }
     case 'sort': {
       const input = r.varint();
-      const n = r.count();
-      const keys: IrSortKey[] = [];
-      for (let i = 0; i < n; i++) {
-        const flags = r.byte();
-        if (flags > 3) bad('bad sort flags');
-        keys.push({ descending: (flags & 1) !== 0, nullsFirst: (flags & 2) !== 0, expr: readExpr(r, 0) });
-      }
-      return { op, schema, input, keys };
+      return { op, schema, input, keys: readSortKeys(r) };
     }
     case 'limit': {
       const input = r.varint();

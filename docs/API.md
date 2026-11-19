@@ -181,6 +181,8 @@ const plan = pipe(Users)
 - **`.limit(count)`** keeps the first `count` rows; when directly after a `sort`, exactly the first `k` rows of the full sort.
 - **`.groupBy(c => ({ ... }))`** starts a grouped pipeline; see [Groups and aggregates](#groups-and-aggregates).
 - **`.agg(() => ({ ... }))`** (on the ungrouped pipeline): one row for the whole input, even for zero rows (C-EMPTY-AGG).
+- **`.join(right, { left, right }, how?)`** binds a right table at compile time and matches rows on equal, non-null key columns. `how` is `inner` (default), `left`, `right` or `full`; the output has the left columns followed by the right ones, and duplicate names are rejected (C-JOIN). The plan keeps the bound table, so `execute(left)` needs no second argument; the right table must outlive the plan. The WASM backend raises `PlanError` for a join (D-077).
+- **`.window({ partitionBy, orderBy, functions })`** keeps the input rows in order and appends one `int64` column per function (`row_number`, `rank` or `dense_rank`) over each partition's peer groups (C-WINDOW). The WASM backend raises `PlanError` for a window (D-077).
 - **`.compile()`** builds a reusable `Plan` — validating the whole plan, optimising it, and producing the IR. A pipeline compiles without touching any table, so compilation is the right place to catch DSL mistakes.
 
 Expression callbacks receive `c` (the columns) and, when
@@ -405,7 +407,7 @@ Everything here is erased at run time; nothing in this section costs bytes in yo
 | `DictionaryInput` | a dictionary column already encoded: `{ codes, dictionary, nullCode? }` |
 | `JsTable` | the JS-backend table class returned by `table()`; implements `Table` |
 | `TableInput` | `readonly RowInput[] | ColumnInput<F>` |
-| `IrAggregate`, `IrExpr`, `IrParam`, `IrSortKey` | IR node types (engines and serialisation); unstable |
+| `IrAggregate`, `IrExpr`, `IrParam`, `IrSortKey`, `IrWindowFunction`, `JoinKind`, `WindowFnName` | IR node types (engines and serialisation); unstable |
 | `IR_VERSION` | the IR version this library reads and writes |
 
 ## Linting

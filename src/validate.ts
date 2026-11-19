@@ -100,6 +100,13 @@ export function validate(plan: IrPlan): IrPlan {
   }
   if (plan.nodes[0]!.op !== 'scan') throw new PlanError('Node 0 must be a scan');
 
+  // A join binds a second table through an extra scan node. Record those scans
+  // so the loop below can tell them from a stray scan.
+  const boundScans = new Set<number>();
+  for (const node of plan.nodes) {
+    if (node.op === 'join') boundScans.add(node.right);
+  }
+
   const params = new Map<string, IrParam>();
   for (const param of plan.params) {
     if (params.has(param.name)) throw new PlanError(`Parameter "${param.name}" is declared twice`);
@@ -109,7 +116,10 @@ export function validate(plan: IrPlan): IrPlan {
   for (let i = 1; i < plan.nodes.length; i++) {
     const node = plan.nodes[i]!;
     const where = `node ${i} (${node.op})`;
-    if (node.op === 'scan') throw new PlanError(`${where}: only node 0 may be a scan`);
+    if (node.op === 'scan') {
+      if (!boundScans.has(i)) throw new PlanError(`${where}: only node 0 and a join's right input may be a scan`);
+      continue;
+    }
     if (!Number.isInteger(node.input) || node.input < 0 || node.input >= i) {
       throw new PlanError(`${where}: input ${node.input} must refer to an earlier node`);
     }
@@ -137,6 +147,69 @@ export function validate(plan: IrPlan): IrPlan {
       for (const agg of node.aggs) {
         const def = lookup(agg.fn);
         if (def.kind !== 'aggregate') throw new PlanError(`${where}: ${agg.fn} is not an aggregate function`);
+      }
+    }
+    if (node.op === 'join') {
+      if (!Number.isInteger(node.right) || node.right < 1 || node.right >= i ||
+          plan.nodes[node.right]!.op !== 'scan') {
+        throw new PlanError(`${where}: right ${node.right} must refer to an earlier scan node`);
+      }
+      if (node.leftKeys.length === 0 || node.leftKeys.length !== node.rightKeys.length) {
+        throw new PlanError(`${where}: a join needs at least one key, with matching left and right counts`);
+      }
+      const right = plan.nodes[node.right]!.schema;
+      for (let k = 0; k < node.leftKeys.length; k++) {
+        const leftField = input[node.leftKeys[k]!];
+        const rightField = right[node.rightKeys[k]!];
+        if (!leftField || !rightField) throw new PlanError(`${where}: key ${k} points outside an input schema`);
+        if (!compatibleTypes(leftField.type, rightField.type)) {
+          throw new PlanError(`${where}: key ${k} types ${leftField.type.name} and ${rightField.type.name} are not compatible`);
+        }
+      }
+      if (node.schema.length !== input.length + right.length) {
+        throw new PlanError(`${where}: schema does not match the joined inputs`);
+      }
+      const names = new Set<string>();
+      for (let c = 0; c < node.schema.length; c++) {
+        const expected = c < input.length ? input[c]! : right[c - input.length]!;
+        const field = node.schema[c]!;
+        if (field.name !== expected.name || !sameType(field.type, expected.type)) {
+          throw new PlanError(`${where}: schema column ${c} does not match the joined inputs`);
+        }
+        if (names.has(field.name)) throw new PlanError(`${where}: duplicate output column "${field.name}"`);
+        names.add(field.name);
+      }
+    }
+    if (node.op === 'window') {
+      if (node.sorts.some(function (k) {
+        return k.expr.type.name === 'bool';
+      })) throw new PlanError(`${where}: bool is not a sortable type`);
+      if (node.functions.length === 0) throw new PlanError(`${where}: a window needs at least one function`);
+      if (node.schema.length !== input.length + node.functions.length) {
+        throw new PlanError(`${where}: schema does not match the input plus window functions`);
+      }
+      for (let c = 0; c < input.length; c++) {
+        const field = node.schema[c]!;
+        if (field.name !== input[c]!.name || !sameType(field.type, input[c]!.type)) {
+          throw new PlanError(`${where}: schema column ${c} does not match the input`);
+        }
+      }
+      const names = new Set(node.schema.map(function (f) {
+        return f.name;
+      }));
+      if (names.size !== node.schema.length) throw new PlanError(`${where}: duplicate output column name`);
+      for (let f = 0; f < node.functions.length; f++) {
+        const fn = node.functions[f]!;
+        if (fn.fn !== 'row_number' && fn.fn !== 'rank' && fn.fn !== 'dense_rank') {
+          throw new PlanError(`${where}: unknown window function "${fn.fn}"`);
+        }
+        if (fn.type.name !== 'int64') {
+          throw new PlanError(`${where}: window function ${fn.fn} must be int64, not ${fn.type.name}`);
+        }
+        const out = node.schema[input.length + f]!;
+        if (!sameType(out.type, fn.type)) {
+          throw new PlanError(`${where}: schema column ${input.length + f} does not match window function ${fn.fn}`);
+        }
       }
     }
   }

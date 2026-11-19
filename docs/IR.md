@@ -17,7 +17,9 @@ Current version: `IR_VERSION = 2`. Bump it on any incompatible change.
 ## Nodes
 
 Every node carries `schema`, its output schema. Every node except `scan` has
-`input`, the index of an earlier node.
+`input`, the index of an earlier node. A plan may hold more than one `scan`:
+`join` binds a second table through an extra scan node at `right`, and the
+pipeline carries that table alongside the plan (D-076).
 
 | `op` | Fields | Output schema | Substrait relation |
 | --- | --- | --- | --- |
@@ -27,6 +29,8 @@ Every node carries `schema`, its output schema. Every node except `scan` has
 | `aggregate` | `keys`, `aggs` | keys, then aggregates | Aggregate |
 | `sort` | `keys` (expr, descending, nullsFirst) | same as input | Sort |
 | `limit` | `count` | same as input | Fetch |
+| `join` | `right` (scan index), `leftKeys`, `rightKeys`, `how` | left columns then right columns | Join |
+| `window` | `partitions`, `sorts`, `functions` | input columns then one int64 per function | ConsistentPartitionWindow |
 
 How the DSL lowers to nodes:
 
@@ -37,6 +41,8 @@ How the DSL lowers to nodes:
 | `agg()` without `groupBy` | `aggregate` with no keys |
 | `distinct()` | `aggregate` with every column as a key and no aggregates |
 | `sort().limit(k)` | `sort` then `limit`; a backend may fuse them into a top-k |
+| `join(right, keys, how)` | extra `scan` for the right table, then `join` |
+| `window({ partitionBy, orderBy, functions })` | `window` |
 
 ## Expressions
 

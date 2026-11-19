@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import { compilePlans } from '../demo/dashboard';
 import { count, ifElse, list, pipe, schema, t } from '../src';
 import { PlanError } from '../src/errors';
-import type { IrExpr, IrPlan, LiteralValue } from '../src/ir';
+import type { IrExpr, IrNode, IrPlan, IrSortKey, JoinKind, LiteralValue, WindowFnName } from '../src/ir';
 import { IR_VERSION } from '../src/ir';
 import { REGISTRY } from '../src/registry';
 import { SUBSTRAIT_VERSION, exportPlan, importPlan } from '../src/substrait';
@@ -64,6 +64,9 @@ const ALLOWLIST: ReadonlySet<string> = new Set([
   'functions_arithmetic:avg',
   'functions_arithmetic:min',
   'functions_arithmetic:max',
+  'functions_arithmetic:row_number',
+  'functions_arithmetic:rank',
+  'functions_arithmetic:dense_rank',
 ]);
 
 function roundTrip(plan: IrPlan): IrPlan {
@@ -94,6 +97,66 @@ function literalPlan(values: readonly LiteralValue[], type: DataType): IrPlan {
     output: out,
     params: [],
   };
+}
+
+const leftFields = [{ name: 'id', type: t.int32 }, { name: 'name', type: t.utf8 }];
+const rightFields = [{ name: 'rid', type: t.int32 }, { name: 'city', type: t.dictionary }];
+const joinOutput = [...leftFields, ...rightFields];
+
+function joinPlan(how: JoinKind, leftKeys: readonly number[], rightKeys: readonly number[]): IrPlan {
+  // Purpose: a two-scan plan whose root joins the two tables on column indexes
+  const nodes: IrNode[] = [
+    { op: 'scan', schema: leftFields },
+    { op: 'scan', schema: rightFields },
+    { op: 'join', input: 0, right: 1, leftKeys, rightKeys, how, schema: joinOutput },
+  ];
+  return { version: IR_VERSION, input: leftFields, nodes, root: 2, output: joinOutput, params: [] };
+}
+
+function windowPlan(fns: readonly WindowFnName[]): IrPlan {
+  // Purpose: a one-scan plan with partition, sort and window functions
+  const fields = [{ name: 'id', type: t.int32 }, { name: 'grp', type: t.int32 }];
+  const partitions: IrExpr[] = [{ kind: 'field', index: 1, type: t.int32 }];
+  const sorts: IrSortKey[] = [{ expr: { kind: 'field', index: 0, type: t.int32 }, descending: false, nullsFirst: false }];
+  const functions = fns.map(function (fn) {
+    // Purpose: one window function call
+    return { fn, type: t.int64 };
+  });
+  const output = [...fields, ...functions.map(function (fn) {
+    // Purpose: one int64 output field per window function
+    return { name: fn.fn, type: fn.type };
+  })];
+  return {
+    version: IR_VERSION,
+    input: fields,
+    nodes: [
+      { op: 'scan', schema: fields },
+      { op: 'window', input: 0, partitions, sorts, functions, schema: output },
+    ],
+    root: 1,
+    output,
+    params: [],
+  };
+}
+
+function relationAt(doc: unknown, index: number): Record<string, unknown> {
+  // Purpose: read one relation from an exported plan for shape checks or mutation
+  const relations = (doc as { relations: Record<string, unknown>[] }).relations;
+  return relations[index]!;
+}
+
+function joinMutated(change: (rel: Record<string, unknown>) => void): unknown {
+  // Purpose: change one field of a detached exported join relation
+  const doc = clone(exportPlan(joinPlan('inner', [0], [0])));
+  change(relationAt(doc, 2));
+  return doc;
+}
+
+function windowMutated(change: (rel: Record<string, unknown>) => void): unknown {
+  // Purpose: change one field of a detached exported window relation
+  const doc = clone(exportPlan(windowPlan(['row_number'])));
+  change(relationAt(doc, 1));
+  return doc;
 }
 
 function find(root: unknown, predicate: (o: Record<string, unknown>) => boolean): Record<string, unknown> {
@@ -169,7 +232,7 @@ describe('pinned names', () => {
     expect(ALLOWLIST.size).toBe(new Set(found).size);
     for (const def of REGISTRY.values()) {
       expect(ALLOWLIST.has(def.substrait)).toBe(true);
-      expect(def.kind === 'scalar' || def.kind === 'aggregate').toBe(true);
+      expect(def.kind === 'scalar' || def.kind === 'aggregate' || def.kind === 'window').toBe(true);
     }
   });
 
@@ -205,6 +268,19 @@ describe('pinned names', () => {
         // Purpose: an aggregate with the right name
         return { fn: def.name, arg: null, type: t.bool };
       });
+    const windows = [...REGISTRY.values()]
+      .filter(function (def) {
+        // Purpose: only window definitions belong in a window relation
+        return def.kind === 'window';
+      })
+      .map(function (def) {
+        // Purpose: one window call using the registry name
+        return { fn: def.name as WindowFnName, type: def.returns([]) };
+      });
+    const windowFields = windows.map(function (fn) {
+      // Purpose: one output field per window function
+      return { name: fn.fn, type: fn.type };
+    });
     const field = { name: 'v', type: t.bool };
     const plan: IrPlan = {
       version: IR_VERSION,
@@ -216,9 +292,10 @@ describe('pinned names', () => {
           return field;
         }) },
         { op: 'aggregate', input: 1, keys: [], aggs, schema: [] },
+        { op: 'window', input: 2, partitions: [], sorts: [], functions: windows, schema: windowFields },
       ],
-      root: 2,
-      output: [],
+      root: 3,
+      output: windowFields,
       params: [],
     };
     const text = JSON.stringify(exportPlan(plan));
@@ -319,6 +396,147 @@ describe('round trip', () => {
   });
 });
 
+describe('join relations', () => {
+  test('all four join kinds round trip with a canonical single equality', () => {
+    const kinds: JoinKind[] = ['inner', 'left', 'right', 'full'];
+    const types = ['INNER', 'LEFT', 'RIGHT', 'OUTER'];
+    for (let i = 0; i < kinds.length; i++) {
+      const plan = joinPlan(kinds[i]!, [0], [0]);
+      const rel = relationAt(exportPlan(plan), 2);
+      expect(rel).toMatchObject({ rel: 'join', left: 0, right: 1, type: types[i] });
+      const cond = rel.condition as Record<string, unknown>;
+      expect(cond).toMatchObject({ expr: 'call', fn: 'eq', substrait: 'functions_comparison:equal' });
+      const args = cond.args as Record<string, unknown>[];
+      expect(args[0]).toMatchObject({ expr: 'field', index: 0 });
+      // The right field is offset by the left schema's width (two columns here).
+      expect(args[1]).toMatchObject({ expr: 'field', index: 2 });
+      roundTrip(plan);
+    }
+  });
+
+  test('several key pairs become a left-associated and-chain and round trip', () => {
+    const plan = joinPlan('inner', [0, 1], [1, 0]);
+    const cond = relationAt(exportPlan(plan), 2).condition as Record<string, unknown>;
+    expect(cond).toMatchObject({ expr: 'call', fn: 'and', substrait: 'functions_boolean:and' });
+    const args = cond.args as Record<string, unknown>[];
+    expect(args[0]).toMatchObject({ fn: 'eq' });
+    expect(args[1]).toMatchObject({ fn: 'eq' });
+    const firstEq = args[0] as Record<string, unknown>;
+    const secondEq = args[1] as Record<string, unknown>;
+    expect(((firstEq.args as Record<string, unknown>[])[1] as Record<string, unknown>).index).toBe(3);
+    expect(((secondEq.args as Record<string, unknown>[])[1] as Record<string, unknown>).index).toBe(2);
+    roundTrip(plan);
+  });
+
+  test('malformed join relations are structured PlanErrors', () => {
+    expect(() => importPlan(joinMutated(function (rel) {
+      // Purpose: reject a join type that is not a Substrait JoinType name
+      rel.type = 'STRAIGHT';
+    }))).toThrow(/plan\.relations\[2\]\.type: expected INNER, LEFT, RIGHT or OUTER/);
+    expect(() => importPlan(joinMutated(function (rel) {
+      // Purpose: reject a non-canonical function in the condition
+      const cond = rel.condition as Record<string, unknown>;
+      cond.fn = 'neq';
+      cond.substrait = 'functions_comparison:not_equal';
+    }))).toThrow(/plan\.relations\[2\]\.condition: expected an eq call/);
+    expect(() => importPlan(joinMutated(function (rel) {
+      // Purpose: reject the eq operands in the wrong order
+      const cond = rel.condition as Record<string, unknown>;
+      (cond.args as unknown[]).reverse();
+    }))).toThrow(/plan\.relations\[2\]\.condition\.args\[0\]\.index: expected a left field index/);
+    expect(() => importPlan(joinMutated(function (rel) {
+      // Purpose: reject a right field index that is not offset by the left width
+      const cond = rel.condition as Record<string, unknown>;
+      const args = cond.args as Record<string, unknown>[];
+      (args[1] as Record<string, unknown>).index = 0;
+    }))).toThrow(/plan\.relations\[2\]\.condition\.args\[1\]\.index: expected a right field index/);
+    const threeKeys = clone(exportPlan(joinPlan('inner', [0, 1, 0], [0, 1, 0])));
+    const cond = (relationAt(threeKeys, 2).condition as Record<string, unknown>);
+    (cond.args as unknown[]).reverse();
+    expect(function () {
+      // Purpose: reject a right-associated instead of left-associated conjunction
+      importPlan(threeKeys);
+    }).toThrow(/plan\.relations\[2\]\.condition\.args\[1\]: expected an eq call/);
+  });
+});
+
+describe('window relations', () => {
+  test('the three window functions round trip with pinned names and the fixed frame', () => {
+    const plan = windowPlan(['row_number', 'rank', 'dense_rank']);
+    const rel = relationAt(exportPlan(plan), 1);
+    expect(rel.rel).toBe('window');
+    const fns = rel.functions as Record<string, unknown>[];
+    expect(fns.map(function (fn) {
+      // Purpose: collect the zamda names of the exported window functions
+      return fn.fn;
+    })).toEqual(['row_number', 'rank', 'dense_rank']);
+    expect(fns.map(function (fn) {
+      // Purpose: collect the Substrait names of the exported window functions
+      return fn.substrait;
+    })).toEqual([
+      'functions_arithmetic:row_number',
+      'functions_arithmetic:rank',
+      'functions_arithmetic:dense_rank',
+    ]);
+    for (const fn of fns) {
+      expect(fn).toMatchObject({
+        phase: 'initial_to_result',
+        bounds_type: 'rows',
+        lower_bound: { kind: 'unbounded' },
+        upper_bound: { kind: 'current_row' },
+        invocation: 'all',
+      });
+    }
+    roundTrip(plan);
+  });
+
+  test('malformed window functions are structured PlanErrors', () => {
+    const badFn = function (change: (fn: Record<string, unknown>) => void): unknown {
+      // Purpose: apply one mutation to the exported window function
+      return windowMutated(function (rel) {
+        // Purpose: mutate the single exported window function
+        change((rel.functions as Record<string, unknown>[])[0]!);
+      });
+    };
+    expect(() => importPlan(badFn(function (fn) {
+      // Purpose: reject a wrong phase
+      fn.phase = 'final_to_result';
+    }))).toThrow(/plan\.relations\[1\]\.functions\[0\]\.phase: expected initial_to_result/);
+    expect(() => importPlan(badFn(function (fn) {
+      // Purpose: reject a range frame
+      fn.bounds_type = 'range';
+    }))).toThrow(/plan\.relations\[1\]\.functions\[0\]\.bounds_type: expected rows/);
+    expect(() => importPlan(badFn(function (fn) {
+      // Purpose: reject a lower bound that is not unbounded preceding
+      fn.lower_bound = { kind: 'current_row' };
+    }))).toThrow(/lower_bound\.kind: expected unbounded/);
+    expect(() => importPlan(badFn(function (fn) {
+      // Purpose: reject an upper bound that is not the current row
+      fn.upper_bound = { kind: 'unbounded' };
+    }))).toThrow(/upper_bound\.kind: expected current_row/);
+    expect(() => importPlan(badFn(function (fn) {
+      // Purpose: reject a non-all invocation
+      fn.invocation = 'first';
+    }))).toThrow(/functions\[0\]\.invocation: expected all/);
+    expect(() => importPlan(badFn(function (fn) {
+      // Purpose: reject a Substrait name outside the mapped window functions
+      fn.substrait = 'functions_arithmetic:ntile';
+    }))).toThrow(/functions\[0\]\.substrait: expected functions_arithmetic:row_number/);
+    expect(() => importPlan(badFn(function (fn) {
+      // Purpose: reject a function name outside the registry
+      fn.fn = 'nope';
+    }))).toThrow(/functions\[0\]\.fn: expected a registered window function name/);
+    expect(() => importPlan(badFn(function (fn) {
+      // Purpose: reject a scalar function in a window relation
+      fn.fn = 'add';
+    }))).toThrow(/functions\[0\]\.fn: expected a window function/);
+    expect(() => importPlan(windowMutated(function (rel) {
+      // Purpose: reject an extra field on a window function
+      (rel.functions as Record<string, unknown>[])[0]!.surprise = 1;
+    }))).toThrow(/functions\[0\]: expected exactly the fields/);
+  });
+});
+
 function findExpressions(root: unknown): Record<string, unknown>[] {
   // Purpose: collect every expression object from a JSON plan
   const out: Record<string, unknown>[] = [];
@@ -387,15 +605,15 @@ describe('malformed input', () => {
   test('unknown relations, bad inputs and scan placement are refused', () => {
     expect(() => importPlan(mutated(function (o) {
       // Purpose: reject an unsupported relation
-      (o.relations as Record<string, unknown>[])[1]!.rel = 'join';
-    }))).toThrow(/plan\.relations\[1\]\.rel: expected a supported relation, found string "join"/);
+      (o.relations as Record<string, unknown>[])[1]!.rel = 'bogus';
+    }))).toThrow(/plan\.relations\[1\]\.rel: expected a supported relation, found string "bogus"/);
     expect(() => importPlan(mutated(function (o) {
       // Purpose: reject a second scan
       const rel = (o.relations as Record<string, unknown>[])[1]!;
       rel.rel = 'read';
       delete rel.input;
       delete rel.expressions;
-    }))).toThrow(/a read relation only at node 0/);
+    }))).toThrow(/a read relation at node 0 or as a join right/);
     expect(() => importPlan(mutated(function (o) {
       // Purpose: reject a forward reference
       (o.relations as Record<string, unknown>[])[2]!.input = 99;

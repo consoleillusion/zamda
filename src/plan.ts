@@ -75,21 +75,54 @@ function formatNode(node: IrNode): string {
     }
     case 'limit':
       return `limit ${node.count}`;
+    case 'join':
+      return `join ${node.how} right=#${node.right} leftKeys=[${node.leftKeys.join(', ')}] rightKeys=[${node.rightKeys.join(', ')}]`;
+    case 'window': {
+      const partitions = node.partitions.map(formatExpr).join(', ');
+      const sorts = node.sorts.map(function (k) {
+        return `${formatExpr(k.expr)} ${k.descending ? 'desc' : 'asc'}${k.nullsFirst ? ' nulls first' : ''}`;
+      });
+      const functions = node.functions.map(function (f) {
+        return f.fn;
+      });
+      return `window partitionBy=[${partitions}] orderBy=[${sorts}] functions=[${functions.join(', ')}]`;
+    }
   }
+}
+
+function extraScanIndexes(plan: IrPlan): number[] {
+  // Purpose: indexes of the plan's scan nodes after the primary one, in IR order
+  const out: number[] = [];
+  for (let i = 1; i < plan.nodes.length; i++) {
+    if (plan.nodes[i]!.op === 'scan') out.push(i);
+  }
+  return out;
 }
 
 export class Plan<In extends Fields, Out extends Fields, P extends ParamDecls = NoParams> {
   readonly ir: IrPlan;
+  // Right-hand tables bound when the plan was compiled, in extra-scan order (D-076).
+  readonly sources: readonly Table[];
 
-  constructor(ir: IrPlan) {
-    // Purpose: hold a validated IR plan; reusable across tables with a matching schema
+  constructor(ir: IrPlan, sources: readonly Table[] = []) {
+    // Purpose: hold a validated IR plan and the tables its extra scans read
     this.ir = ir;
+    this.sources = sources;
   }
 
   async execute(table: Table<In>, ...args: ExecuteArgs<P>): Promise<Result<Out>> {
     // Purpose: run the plan on the backend that owns the table (C-PARAM for parameters)
     const options: ExecuteOptions<P> = args[0] ?? {};
     checkCompatible(this.ir.input, table.schema.list);
+    const scans = extraScanIndexes(this.ir);
+    if (this.sources.length !== scans.length) {
+      throw new PlanError(
+        `Plan binds ${scans.length} extra scan${scans.length === 1 ? '' : 's'} but found ${this.sources.length} source${this.sources.length === 1 ? '' : 's'}`,
+      );
+    }
+    for (let i = 0; i < scans.length; i++) {
+      checkCompatible(this.ir.nodes[scans[i]!]!.schema, this.sources[i]!.schema.list);
+    }
     const given = (options.params ?? {}) as Readonly<Record<string, unknown>>;
     const params = new Map<string, LiteralValue | readonly LiteralValue[]>();
     for (const param of this.ir.params) {
@@ -120,10 +153,14 @@ export class Plan<In extends Fields, Out extends Fields, P extends ParamDecls = 
       throw new PlanError(`sliceMs must be zero or more, got ${sliceMs}`);
     }
     if (options.signal?.aborted) throw new AbortError();
-    table.backend.retain?.(table);
+    const tables: readonly Table[] = [table, ...this.sources];
+    for (const bound of tables) bound.backend.retain?.(bound);
     let data: ResultData;
     try {
       const target = table.backend.unwrap?.(table) ?? table;
+      const sources = this.sources.map(function (source) {
+        return source.backend.unwrap?.(source) ?? source;
+      });
       data = await table.backend.execute(this.ir, target, {
         params,
         signal: options.signal,
@@ -131,9 +168,10 @@ export class Plan<In extends Fields, Out extends Fields, P extends ParamDecls = 
         sliceMs,
         onProgress: options.onProgress,
         session: options.session,
+        sources,
       });
     } finally {
-      table.backend.release?.(table);
+      for (let i = tables.length - 1; i >= 0; i--) tables[i]!.backend.release?.(tables[i]!);
     }
     return new Result<Out>(data);
   }

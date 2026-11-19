@@ -19,7 +19,8 @@ Import rejects any other version.
 
 The top-level object has `version`, `ir_version`, `input`, `relations`, `root`,
 `output` and `params`. `relations` is the flat IR node table; relation `i` is
-node `i` and names its input by index. The relation names follow Substrait:
+node `i` and names its input (or, for a join, its `left` and `right` inputs) by
+index. The relation names follow Substrait:
 
 | IR node | `rel` | Other fields |
 | --- | --- | --- |
@@ -29,6 +30,15 @@ node `i` and names its input by index. The relation names follow Substrait:
 | `aggregate` | `aggregate` | `input`, `schema`, `groupings`, `measures` |
 | `sort` | `sort` | `input`, `schema`, `sorts` |
 | `limit` | `fetch` | `input`, `schema`, `count` |
+| `join` | `join` | `left`, `right`, `schema`, `type`, `condition` |
+| `window` | `window` | `input`, `schema`, `partitions`, `sorts`, `functions` |
+
+A join's `condition` is the canonical conjunction of `eq` calls over its key
+pairs: right field indexes are offset by the left schema width, and import
+accepts no other shape (D-077). A window function carries the pinned Substrait
+name (`functions_arithmetic:row_number`, `:rank` or `:dense_rank`), phase
+`initial_to_result`, `BOUNDS_TYPE_ROWS` and unbounded-preceding to current-row
+bounds; import rejects any other frame or function.
 
 Expressions use `expr` as the tag: `field`, `literal`, `param`, `call`,
 `ifThen` (Substrait's IfThen, for the registry's `if_else`), `cast` and `in`

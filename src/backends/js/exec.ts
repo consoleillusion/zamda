@@ -25,12 +25,13 @@
 
 import type { BackendOptions, ResultData } from '../../backend';
 import type { AnyCells, Column } from '../../column';
-import { allocate, cells, concat, emptyColumn, makeColumn, nums, slice, stringColumn, take, texts } from '../../column';
+import { allocate, bigs, cells, concat, emptyColumn, makeColumn, nums, slice, stringColumn, take, texts } from '../../column';
 import { AbortError, PlanError } from '../../errors';
-import type { IrExpr, IrNode, IrPlan, LiteralValue } from '../../ir';
+import type { IrExpr, IrNode, IrPlan, IrSortKey, LiteralValue, WindowFnName } from '../../ir';
 import { nodeExprs, walkExpr } from '../../ir';
 import type { Field } from '../../schema';
 import type { DataType } from '../../types';
+import { isBigInt, isString, t } from '../../types';
 import { Aggregator } from './aggregate';
 import { KERNELS } from './kernels';
 import { castColumn } from './kernels-arith';
@@ -63,13 +64,16 @@ interface Stage {
 
 type AggregateNode = Extract<IrNode, { op: 'aggregate' }>;
 type SortNode = Extract<IrNode, { op: 'sort' }>;
+type JoinNode = Extract<IrNode, { op: 'join' }>;
+type WindowNode = Extract<IrNode, { op: 'window' }>;
 
 // ---------------------------------------------------------------------------
 // Plan analysis
 // ---------------------------------------------------------------------------
 
 function chainOf(plan: IrPlan): number[] {
-  // Purpose: node indexes from the scan to the root, following each node's input
+  // Purpose: node indexes from the scan to the root, following each node's input;
+  // a join's right scan is an extra source and is deliberately not followed here
   const chain: number[] = [];
   let at = plan.root;
   for (;;) {
@@ -79,6 +83,23 @@ function chainOf(plan: IrPlan): number[] {
     at = node.input;
   }
   return chain.reverse();
+}
+
+export function extraScanIndexes(plan: IrPlan): number[] {
+  // Purpose: indexes of the plan's scan nodes after the primary one, in IR order
+  const out: number[] = [];
+  for (let i = 1; i < plan.nodes.length; i++) {
+    if (plan.nodes[i]!.op === 'scan') out.push(i);
+  }
+  return out;
+}
+
+function mergeNeeded(current: Needed | undefined, wants: Needed): Needed {
+  // Purpose: combine the column requirements two consumers place on one node
+  if (wants === null || current === null) return null;
+  if (current === undefined) return wants;
+  for (const index of wants) current.add(index);
+  return current;
 }
 
 export function neededColumns(plan: IrPlan): Needed[] {
@@ -91,21 +112,57 @@ export function neededColumns(plan: IrPlan): Needed[] {
     const own = needed[i];
     // A node nothing reads contributes no requirements.
     if (own === undefined) continue;
-    let wants: Needed = new Set<number>();
+    if (node.op === 'join') {
+      // C-JOIN: the join reads its key columns on both sides, and passes the
+      // remaining columns of each side through to whatever comes next. The
+      // right scan is an extra source, not part of the root chain.
+      const leftWidth = plan.nodes[node.input]!.schema.length;
+      let leftWants: Needed = new Set<number>(node.leftKeys);
+      let rightWants: Needed = new Set<number>(node.rightKeys);
+      if (own !== null) {
+        for (const index of own) {
+          if (index < leftWidth) (leftWants as Set<number>).add(index);
+          else (rightWants as Set<number>).add(index - leftWidth);
+        }
+      } else {
+        leftWants = null;
+        rightWants = null;
+      }
+      needed[node.input] = mergeNeeded(needed[node.input], leftWants);
+      needed[node.right] = mergeNeeded(needed[node.right], rightWants);
+      continue;
+    }
+    const wants = new Set<number>();
     for (const expr of nodeExprs(node)) {
       walkExpr(expr, function (e) {
-        if (e.kind === 'field') (wants as Set<number>).add(e.index);
+        if (e.kind === 'field') wants.add(e.index);
       });
     }
-    // filter, sort and limit pass their input columns through unchanged.
+    let pass: Needed = wants;
+    // A window evaluates its partition and order keys over every input row, so
+    // those columns are needed even when no later node reads them. All input
+    // columns pass through; only the appended function columns are new.
+    if (node.op === 'window') {
+      const inputWidth = plan.nodes[node.input]!.schema.length;
+      if (own === null) pass = null;
+      else {
+        for (const index of own) if (index < inputWidth) wants.add(index);
+        pass = wants;
+      }
+    }
+    // filter, sort and limit pass their input columns through unchanged, but
+    // their own expressions must still be evaluated before that pruning.
     if (node.op === 'filter' || node.op === 'sort' || node.op === 'limit') {
-      if (own === null) wants = null;
-      else for (const index of own) wants.add(index);
+      if (own === null) pass = null;
+      else {
+        for (const index of own) wants.add(index);
+        pass = wants;
+      }
     }
     const current = needed[node.input];
-    if (wants === null || current === null) needed[node.input] = null;
-    else if (current === undefined) needed[node.input] = wants;
-    else for (const index of wants) current.add(index);
+    if (pass === null || current === null) needed[node.input] = null;
+    else if (current === undefined) needed[node.input] = pass;
+    else for (const index of pass) current.add(index);
   }
   return needed.map(function (n) {
     return n === undefined ? new Set<number>() : n;
@@ -613,6 +670,322 @@ class SortSink implements Sink {
   }
 }
 
+// --- joins and windows: blocking sinks over one or two sources ---
+
+interface KeySpec {
+  // Null keys form one group for grouping and sorting; in a join they never match.
+  readonly nullsGroup: boolean;
+  // NaN is one group for grouping (C-NAN-ORDER); a predicate never matches it (C-NAN-PREDICATE).
+  readonly nanGroup: boolean;
+}
+
+const JOIN_KEYS: KeySpec = { nullsGroup: false, nanGroup: false };
+const GROUP_KEYS: KeySpec = { nullsGroup: true, nanGroup: true };
+
+function keyPart(column: Column, row: number, spec: KeySpec): string | null {
+  // Purpose: one typed key component, or null when the row cannot take part in a key
+  if (column.valid && !column.valid[row]) return spec.nullsGroup ? 'z' : null;
+  if (isString(column.type)) return `s:${texts(column)[row]!}`;
+  if (isBigInt(column.type)) return `b:${bigs(column)[row]!}`;
+  const value = nums(column)[row]!;
+  if (Number.isNaN(value)) return spec.nanGroup ? 'n:NaN' : null;
+  return `n:${String(value)}`;
+}
+
+function rowKey(columns: readonly Column[], row: number, spec: KeySpec): string | null {
+  // Purpose: a collision-free encoding of one row's key components
+  const parts: string[] = [];
+  for (const column of columns) {
+    const part = keyPart(column, row, spec);
+    if (part === null) return null;
+    parts.push(`${part.length}:${part}`);
+  }
+  return parts.join('');
+}
+
+function keyColumns(indexes: readonly number[], batch: Batch, where: string): Column[] {
+  // Purpose: the key columns of one join side, refusing a column that was pruned
+  return indexes.map(function (index) {
+    const column = batch.columns[index];
+    if (!column) throw new PlanError(`JS backend: ${where} key column ${index} was pruned`);
+    return column;
+  });
+}
+
+type KeyIndex = Map<string, number[]>;
+
+function* buildRightIndex(columns: readonly Column[], rows: number): Generator<void, KeyIndex> {
+  // Purpose: hash the right rows by their key, keeping right order inside each bucket
+  const index: KeyIndex = new Map();
+  for (let row = 0; row < rows; row++) {
+    const key = rowKey(columns, row, JOIN_KEYS);
+    if (key === null) continue;
+    let bucket = index.get(key);
+    if (!bucket) {
+      bucket = [];
+      index.set(key, bucket);
+    }
+    bucket.push(row);
+    if ((row + 1) % GATHER_BLOCK_ROWS === 0) yield;
+  }
+  return index;
+}
+
+interface JoinPairs {
+  readonly left: readonly number[];
+  readonly right: readonly number[];
+  readonly rightMatched: Uint8Array;
+}
+
+function* joinPairs(
+  node: JoinNode,
+  leftKeys: readonly Column[],
+  rightKeys: readonly Column[],
+  index: KeyIndex,
+  leftRows: number,
+  rightRows: number,
+): Generator<void, JoinPairs> {
+  // Purpose: C-JOIN: matched pairs in left then right order, then unmatched rows in side order
+  const outLeft: number[] = [];
+  const outRight: number[] = [];
+  const rightMatched = new Uint8Array(rightRows);
+  const wantLeft = node.how === 'left' || node.how === 'full';
+  const wantRight = node.how === 'right' || node.how === 'full';
+  for (let left = 0; left < leftRows; left++) {
+    const key = rowKey(leftKeys, left, JOIN_KEYS);
+    const bucket = key === null ? undefined : index.get(key);
+    let matches = 0;
+    if (bucket) {
+      for (const right of bucket) {
+        rightMatched[right] = 1;
+        outLeft.push(left);
+        outRight.push(right);
+        matches++;
+      }
+    }
+    if (matches === 0 && wantLeft) {
+      outLeft.push(left);
+      outRight.push(-1);
+    }
+    if ((left + 1) % GATHER_BLOCK_ROWS === 0) yield;
+  }
+  if (wantRight) {
+    for (let right = 0; right < rightRows; right++) {
+      if (!rightMatched[right]) {
+        outLeft.push(-1);
+        outRight.push(right);
+      }
+      if ((right + 1) % GATHER_BLOCK_ROWS === 0) yield;
+    }
+  }
+  return { left: outLeft, right: outRight, rightMatched };
+}
+
+function* gatherSide(type: DataType, column: Column, rows: readonly number[]): Generator<void, Column> {
+  // Purpose: gather one output column, decoding and re-encoding strings so two dictionaries can differ
+  const text = isString(type);
+  const values = text ? new Array<string>(rows.length).fill('') : allocate(type, rows.length);
+  const dst = values as unknown as AnyCells;
+  let anyNull = false;
+  for (const row of rows) {
+    if (row < 0 || (column.valid && !column.valid[row])) {
+      anyNull = true;
+      break;
+    }
+  }
+  const valid = anyNull ? new Uint8Array(rows.length).fill(1) : null;
+  const src = text
+    ? (texts(column) as unknown as AnyCells)
+    : isBigInt(type)
+      ? (bigs(column) as unknown as AnyCells)
+      : nums(column);
+  const zero = isBigInt(type) ? 0n : 0;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    dst[i] = row < 0 ? (text ? '' : zero) : src[row]!;
+    if (valid && (row < 0 || (column.valid && !column.valid[row]))) valid[i] = 0;
+    if ((i + 1) % GATHER_BLOCK_ROWS === 0) yield;
+  }
+  if (text) return stringColumn(type, values as string[], valid);
+  return makeColumn(type, values, valid);
+}
+
+function sideNeeded(needed: Needed, keys: readonly number[], offset: number): Needed {
+  // Purpose: the columns one side of a join must keep: its keys and what downstream reads
+  if (needed === null) return null;
+  const out = new Set<number>(keys);
+  for (const index of needed) if (index >= offset) out.add(index - offset);
+  return out;
+}
+
+class JoinSink implements Sink {
+  private readonly collector: Collector;
+  private readonly rightCollector: Collector;
+
+  constructor(
+    private readonly node: JoinNode,
+    private readonly leftFields: readonly Field[],
+    private readonly rightFields: readonly Field[],
+    needed: Needed,
+    private readonly rightSources: readonly Stage[],
+    private readonly chunkRows: number,
+  ) {
+    // Purpose: collect the left branch and the extra right scans before matching them
+    this.collector = new Collector(leftFields, sideNeeded(needed, node.leftKeys, 0));
+    this.rightCollector = new Collector(rightFields, sideNeeded(needed, node.rightKeys, leftFields.length));
+  }
+
+  consume(stage: Stage): void {
+    // Purpose: keep one chunk of the left branch's rows (C-JOIN reads it as it streams)
+    if (stage.rowCount === 0) return;
+    this.collector.add(dense(stage));
+  }
+
+  private *collectRight(): Generator<void, Batch> {
+    // Purpose: read the right scans in source order, chunk by chunk, to the same snapshot rules
+    for (const source of this.rightSources) {
+      for (let start = 0; start < source.rowCount; start += this.chunkRows) {
+        const end = Math.min(start + this.chunkRows, source.rowCount);
+        this.rightCollector.add(dense(chunkOf(source, start, end)));
+        yield;
+      }
+    }
+    return this.rightCollector.finish();
+  }
+
+  *finish(): Generator<void, Stage> {
+    // Purpose: index the right rows, emit pairs in contract order, then gather both sides' columns
+    const left = this.collector.finish();
+    const right = yield* this.collectRight();
+    const leftKeys = keyColumns(this.node.leftKeys, left, 'left');
+    const rightKeys = keyColumns(this.node.rightKeys, right, 'right');
+    const index = yield* buildRightIndex(rightKeys, right.rowCount);
+    const pairs = yield* joinPairs(this.node, leftKeys, rightKeys, index, left.rowCount, right.rowCount);
+    const columns: (Column | undefined)[] = [];
+    for (let c = 0; c < this.node.schema.length; c++) {
+      const field = this.node.schema[c]!;
+      const source = c < this.leftFields.length ? left : right;
+      const rows = c < this.leftFields.length ? pairs.left : pairs.right;
+      const at = c < this.leftFields.length ? c : c - this.leftFields.length;
+      const column = source.columns[at];
+      if (!column) throw new PlanError(`JS backend: join output column ${c} (${field.name}) was pruned`);
+      columns.push(yield* gatherSide(field.type, column, rows));
+      yield;
+    }
+    return { batch: { columns, rowCount: pairs.left.length }, selection: null, rowCount: pairs.left.length, needed: null };
+  }
+}
+
+function* sortedPartition(
+  rows: readonly number[],
+  keys: readonly Column[],
+  sorts: readonly IrSortKey[],
+): Generator<void, number[]> {
+  // Purpose: one partition's rows in contract sort order, reusing the executor's stable sort
+  const local = Uint32Array.from(rows);
+  const columns: SortColumn[] = keys.map(function (column, k) {
+    return {
+      column: take(column, local),
+      descending: sorts[k]!.descending,
+      nullsFirst: sorts[k]!.nullsFirst,
+    };
+  });
+  const order = yield* sortSteps(columns, rows.length, null);
+  return Array.from(order, function (i) {
+    return rows[i]!;
+  });
+}
+
+class WindowSink implements Sink {
+  private readonly collector: Collector;
+
+  constructor(
+    private readonly node: WindowNode,
+    private readonly inputFields: readonly Field[],
+    private readonly needed: Needed,
+    private readonly options: BackendOptions,
+  ) {
+    // Purpose: keep every input row in original order while the window is computed
+    this.collector = new Collector(inputFields, null);
+  }
+
+  consume(stage: Stage): void {
+    // Purpose: keep one chunk of the window's input
+    if (stage.rowCount === 0) return;
+    this.collector.add(dense(stage));
+  }
+
+  *finish(): Generator<void, Stage> {
+    // Purpose: C-WINDOW: rank each partition, then emit input rows in order with the new columns appended
+    const input = this.collector.finish();
+    const rows = input.rowCount;
+    const partitions = this.node.partitions.map(expr => evaluate(expr, input, this.options));
+    const sorts = this.node.sorts.map(key => evaluate(key.expr, input, this.options));
+    const buckets = new Map<string, number[]>();
+    for (let row = 0; row < rows; row++) {
+      const key = rowKey(partitions, row, GROUP_KEYS)!;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = [];
+        buckets.set(key, bucket);
+      }
+      bucket.push(row);
+      if ((row + 1) % GATHER_BLOCK_ROWS === 0) yield;
+    }
+    const rowNumber = new BigInt64Array(rows);
+    const rank = new BigInt64Array(rows);
+    const denseRank = new BigInt64Array(rows);
+    for (const bucket of buckets.values()) {
+      const order = yield* sortedPartition(bucket, sorts, this.node.sorts);
+      let peer: string | null = null;
+      let peerRank = 0n;
+      let peerDense = 0n;
+      let group = 0;
+      for (let at = 0; at < order.length; at++) {
+        const row = order[at]!;
+        const key = rowKey(sorts, row, GROUP_KEYS)!;
+        if (key !== peer) {
+          peer = key;
+          peerRank = BigInt(at + 1);
+          peerDense = BigInt(++group);
+        }
+        rowNumber[row] = BigInt(at + 1);
+        rank[row] = peerRank;
+        denseRank[row] = peerDense;
+        if ((at + 1) % GATHER_BLOCK_ROWS === 0) yield;
+      }
+      yield;
+    }
+    const byName = new Map<WindowFnName, BigInt64Array>([
+      ['row_number', rowNumber],
+      ['rank', rank],
+      ['dense_rank', denseRank],
+    ]);
+    const columns: (Column | undefined)[] = [];
+    for (let c = 0; c < this.inputFields.length; c++) {
+      if (!wanted(this.needed, c)) {
+        columns.push(undefined);
+        continue;
+      }
+      const column = input.columns[c];
+      if (!column) throw new PlanError(`JS backend: window input column ${c} (${this.inputFields[c]!.name}) was pruned`);
+      columns.push(column);
+    }
+    for (let f = 0; f < this.node.functions.length; f++) {
+      const index = this.inputFields.length + f;
+      if (!wanted(this.needed, index)) {
+        columns.push(undefined);
+        continue;
+      }
+      const fn = this.node.functions[f]!;
+      const values = byName.get(fn.fn);
+      if (!values) throw new PlanError(`JS backend: window function "${fn.fn}" is not implemented`);
+      columns.push(makeColumn(fn.type, values, null));
+    }
+    return { batch: { columns, rowCount: rows }, selection: null, rowCount: rows, needed: this.needed };
+  }
+}
+
 function limitAfter(plan: IrPlan, chain: readonly number[], position: number): number | null {
   // Purpose: if the node after this sort is a limit, return its count so the sort can do top-k
   const next = chain[position + 1];
@@ -697,11 +1070,21 @@ export function* runPlan(
   segments: readonly Segment[],
   options: BackendOptions,
   progress: Progress,
+  sourceSegments: readonly (readonly Segment[])[] = [],
 ): Generator<void, ResultData> {
-  // Purpose: run a validated plan over a table's segments in resumable steps, returning the root's output
+  // Purpose: run a validated plan over every bound table's segments in resumable steps
   const chain = chainOf(plan);
   const needed = neededColumns(plan);
   const chunkRows = options.chunkRows ?? DEFAULT_CHUNK_ROWS;
+  const scans = extraScanIndexes(plan);
+  if (sourceSegments.length !== scans.length) {
+    throw new PlanError(`JS backend: plan has ${scans.length} extra scans but ${sourceSegments.length} source segment lists`);
+  }
+  const secondary: Stage[][] = sourceSegments.map(function (pieces, i) {
+    return pieces.map(function (segment) {
+      return { batch: segment, selection: null, rowCount: segment.rowCount, needed: needed[scans[i]!]! };
+    });
+  });
   let sources: Stage[] = segments.map(function (segment) {
     return { batch: segment, selection: null, rowCount: segment.rowCount, needed: needed[0]! };
   });
@@ -711,7 +1094,7 @@ export function* runPlan(
     const streaming: number[] = [];
     while (position < chain.length) {
       const op = plan.nodes[chain[position]!]!.op;
-      if (op === 'aggregate' || op === 'sort') break;
+      if (op === 'aggregate' || op === 'sort' || op === 'join' || op === 'window') break;
       streaming.push(chain[position++]!);
     }
     const last = position === chain.length;
@@ -724,7 +1107,23 @@ export function* runPlan(
       const index = chain[position]!;
       const node = plan.nodes[index]!;
       if (node.op === 'aggregate') sink = new AggregateSink(node, options);
-      else sink = new SortSink(node as SortNode, needed[index]!, limitAfter(plan, chain, position), options);
+      else if (node.op === 'sort') sink = new SortSink(node, needed[index]!, limitAfter(plan, chain, position), options);
+      else if (node.op === 'join') {
+        const scan = scans.indexOf(node.right);
+        if (scan === -1) throw new PlanError(`JS backend: join node ${index} does not read an extra scan node`);
+        sink = new JoinSink(
+          node,
+          plan.nodes[node.input]!.schema,
+          plan.nodes[node.right]!.schema,
+          needed[index]!,
+          secondary[scan]!,
+          chunkRows,
+        );
+      } else if (node.op === 'window') {
+        sink = new WindowSink(node, plan.nodes[node.input]!.schema, needed[index]!, options);
+      } else {
+        throw new PlanError(`JS backend: node ${index} (${node.op}) is not an operator`);
+      }
       position++;
     }
     yield* runPhase(plan, sources, streaming, sink, needed, chunkRows, options, first ? progress : null);
@@ -779,6 +1178,7 @@ export async function executeJs(
   plan: IrPlan,
   segments: readonly Segment[],
   options: BackendOptions,
+  sourceSegments: readonly (readonly Segment[])[] = [],
 ): Promise<ResultData> {
   // Purpose: drive a run in time slices, pausing between them and stopping if the signal aborts
   const signal = options.signal;
@@ -787,7 +1187,7 @@ export async function executeJs(
   let rowCount = 0;
   for (const segment of segments) rowCount += segment.rowCount;
   const progress: Progress = { rowsScanned: 0, rowsTotal: rowCount };
-  const run = runPlan(plan, segments, options, progress);
+  const run = runPlan(plan, segments, options, progress, sourceSegments);
   let sliceStart = performance.now();
   for (;;) {
     const step = run.next();

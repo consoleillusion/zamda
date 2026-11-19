@@ -56,9 +56,21 @@ component, or bad row data, is rejected without changing the table. A run sees
 the table exactly as it stood when it started (C-LIVE-KEY). The WASM backend
 provides its own bound factory on the object returned by `createWasmBackend(host)`.
 
+### Joins and window functions
+
+`join(right, keys, how)` binds a right table when the pipeline is compiled. It
+matches rows on equal, non-null key columns (`utf8` and `dictionary` compare by
+value) and outputs the left columns followed by the right columns; duplicate
+output names are rejected. `how` is `inner` (default), `left`, `right` or
+`full`. `window({ partitionBy, orderBy, functions })` keeps the input rows in
+order and appends `int64` columns computed over each partition's peer groups:
+`row_number`, `rank` or `dense_rank`. Both run on the JS backend; the WASM
+backend raises `PlanError` for these nodes rather than changing their meaning
+(C-JOIN, C-WINDOW, D-076, D-077).
+
 | Area | Available |
 | --- | --- |
-| Pipeline | `filter`, `select`, `withColumns`, `rename`, `groupBy().agg()`, `agg()`, `distinct`, `sort`, `limit` |
+| Pipeline | `filter`, `select`, `withColumns`, `rename`, `groupBy().agg()`, `agg()`, `distinct`, `sort`, `limit`, `join`, `window` |
 | Comparison and logic | `eq`, `neq`, `lt`, `lte`, `gt`, `gte`, `between`, `isIn`, `isNull`, `isNaN`, `and`, `or`, `not`, `ifElse`, `coalesce` |
 | Arithmetic | `add`, `sub`, `mul`, `div`, `intDiv`, `mod`, `neg`, `abs`, `floor`, `ceil`, `round`, `bin`, `cast`, and wrapping forms |
 | Strings | `lower`, `upper`, `length`, `startsWith`, `endsWith`, `contains` |
