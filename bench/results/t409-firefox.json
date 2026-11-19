@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "checks": [
+    {
+      "name": "worker starts and answers",
+      "pass": true,
+      "measured": "18 ms",
+      "limit": "starts"
+    },
+    {
+      "name": "transfer moves the typed arrays to the worker",
+      "pass": true,
+      "measured": "4 of 4 arrays detached on the page",
+      "limit": "all detached"
+    },
+    {
+      "name": "worker answers equal the JS backend",
+      "pass": true,
+      "measured": "7 of 7 queries equal",
+      "limit": "all equal"
+    },
+    {
+      "name": "page thread gap while the worker runs plans",
+      "pass": true,
+      "measured": "5.0 ms longest gap between 4 ms timer ticks",
+      "limit": "under 50 ms (a 4 ms tick that is 50 ms late is visible jank)"
+    },
+    {
+      "name": "abort rejects at once, the worker stays usable",
+      "pass": true,
+      "measured": "AbortError 0.0 ms after abort(); next run correct",
+      "limit": "AbortError within 50 ms of abort(); next run correct"
+    },
+    {
+      "name": "byte limit raises MemoryError and keeps the engine",
+      "pass": true,
+      "measured": "MemoryError; engine replaced 0 times; first table still correct",
+      "limit": "MemoryError; 0 replacements; first table still correct"
+    }
+  ],
+  "info": [
+    "1,000,000 rows",
+    "control: the same plans on this thread leave a gap of 1016.0 ms (no limit; it shows what the worker saves)",
+    "median per query: Q1 worker 21.0 ms, this thread 19.0 ms; Q2 worker 4.0 ms, this thread 3.0 ms; Q3 worker 14.0 ms, this thread 14.0 ms; Q4 worker 11.0 ms, this thread 11.0 ms; Q5 worker 16.0 ms, this thread 16.0 ms; Q6 worker 7.0 ms, this thread 7.0 ms; Q7 worker 132.0 ms, this thread 123.0 ms"
+  ],
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0"
+}
