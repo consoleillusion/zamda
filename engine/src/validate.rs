@@ -16,6 +16,7 @@ fn depth(e: &Expr) -> usize {
     match &e.kind {
         ExprKind::Cast(arg) => depth(arg) + 1,
         ExprKind::In { arg, .. } => depth(arg) + 1,
+        ExprKind::Lookup { arg, .. } => depth(arg) + 1,
         ExprKind::Call { args, .. } => args.iter().map(depth).max().unwrap_or(0) + 1,
         _ => 1,
     }
@@ -62,6 +63,13 @@ fn check_expr(e: &Expr, input: &[Field], params: &[Param], node: usize) -> Resul
         ExprKind::Cast(arg) => {
             if !CAN_CAST[arg.ty.id() as usize][e.ty.id() as usize] {
                 return fail(Code::BadCast, node);
+            }
+            check_expr(arg, input, params, node)
+        }
+        ExprKind::Lookup { arg, .. } => {
+            // A table indexed by string id, giving something that is not a string.
+            if !matches!(arg.ty, Type::Utf8 | Type::Dictionary) || matches!(e.ty, Type::Utf8 | Type::Dictionary) {
+                return fail(Code::LookupBadType, node);
             }
             check_expr(arg, input, params, node)
         }

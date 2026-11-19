@@ -1,15 +1,25 @@
-// Plan execution (T-405): runs a chain scan -> (filter | project | limit)* over a
-// snapshot, chunk by chunk, and collects the rows. It mirrors the JS executor
-// (src/backends/js/exec.ts): the same chunks, the same order of evaluation, the
-// same stop once a limit is satisfied, so the same rows and the same first error.
-// Aggregate and sort (T-406, T-407) will plug in as sinks of the same driver.
+// Plan execution (T-405, T-406): runs a chain of nodes over a snapshot, chunk by
+// chunk. Streaming nodes (filter, project, limit) run inside a phase; a blocking
+// node (aggregate, later sort) ends the phase, and what it produces is the source
+// of the next. It mirrors the JS executor (src/backends/js/exec.ts): the same
+// phases, chunks, order of evaluation and stop once a limit is satisfied, so the
+// same rows and the same first error.
+//
+// Utf8 and dictionary columns hold per-segment codes. The host gives every such
+// column a map from each segment's codes to canonical ids, one id per distinct
+// string across the snapshot, numbered in code-point order of the strings (C-STR-ORDER).
+// The scan applies the map, so from then on equal strings are equal ids and ids
+// order like strings; results hold ids and the host turns them back into strings.
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
+use crate::agg::{Aggregator, Rows, Table};
+use crate::sort::Sorter;
 use crate::eval::{eval, supported, Batch, Params};
 use crate::ir::{Expr, ExprKind, Op, Plan};
 use crate::kernels::EvalError;
-use crate::store::Snapshot;
+use crate::store::{Snapshot, View};
 use crate::types::Type;
 use crate::vector::{Data, Scalar, Values, Vector};
 
@@ -29,29 +39,58 @@ struct Stage<'a> {
 
 struct Collector {
     types: Vec<Type>,
+    // Which columns to keep; the others are skipped.
+    keep: Vec<bool>,
     values: Vec<Option<Values<'static>>>,
     valid: Vec<Option<Vec<u8>>>,
     rows: usize,
+}
+
+// A phase: streaming nodes (positions in the chain) feeding one sink.
+struct Phase {
+    streaming: Vec<usize>,
+    // The aggregate or sort node that ends the phase; None for the last phase, which collects rows.
+    sink: Option<usize>,
+}
+
+enum Sink {
+    Collect(Collector),
+    Aggregate(Aggregator, usize),
+    // The rows kept for later nodes, the sort keys, and the node.
+    Sort(Collector, Sorter, usize),
+}
+
+enum Source {
+    Table,
+    // Rows held in memory, in the order of the selection if there is one (a sort's output).
+    Owned(Rc<Table>, Option<Rc<Vec<u32>>>),
 }
 
 pub struct Run {
     plan: Rc<Plan>,
     params: Rc<Params>,
     snapshot: Snapshot,
+    // Canonical-id maps for utf8 and dictionary columns, by scan column then segment.
+    canon: Vec<Vec<Option<Vec<u32>>>>,
     // Nodes after the scan, in order.
     chain: Vec<usize>,
     // Per node index: which of its output columns anything later reads.
     needed: Vec<Vec<bool>>,
     chunk_rows: usize,
+    phases: Vec<Phase>,
+    phase: usize,
+    source: Source,
+    sink: Option<Sink>,
+    // Position in the current source.
     segment: usize,
     pos: usize,
     // Rows a limit node still lets through, by position in `chain`.
     remaining: Vec<u64>,
-    finished: bool,
-    // Rows of the segments already passed, and rows read so far in all.
+    phase_done: bool,
+    // Rows of the table's segments already passed, and rows read so far in all.
     passed: u64,
     scanned: u64,
-    collector: Collector,
+    result: Option<Vec<OutColumn>>,
 }
 
 fn chain_of(plan: &Plan) -> Vec<usize> {
@@ -77,6 +116,7 @@ pub fn reads(expr: &Expr, into: &mut [bool]) {
         ExprKind::Literal(_) | ExprKind::Param(_) => {}
         ExprKind::Call { args, .. } => args.iter().for_each(|a| reads(a, into)),
         ExprKind::Cast(a) => reads(a, into),
+        ExprKind::Lookup { arg, .. } => reads(arg, into),
         ExprKind::In { arg, list } => {
             reads(arg, into);
             // A list holds literals or a parameter, never columns.
@@ -104,7 +144,19 @@ fn needed_columns(plan: &Plan, chain: &[usize]) -> Vec<Vec<bool>> {
                 needed[*input] = r;
             }
             Op::Limit { input, .. } => needed[*input] = out,
-            _ => {}
+            // Keys and arguments are evaluated whether or not their results are read later.
+            Op::Aggregate { input, keys, aggs } => {
+                let mut r = vec![false; plan.nodes[*input].schema.len()];
+                keys.iter().for_each(|e| reads(e, &mut r));
+                aggs.iter().filter_map(|a| a.arg.as_ref()).for_each(|e| reads(e, &mut r));
+                needed[*input] = r;
+            }
+            Op::Sort { input, keys } => {
+                let mut r = out;
+                keys.iter().for_each(|k| reads(&k.expr, &mut r));
+                needed[*input] = r;
+            }
+            Op::Scan => {}
         }
     }
     needed
@@ -121,24 +173,35 @@ pub fn check_supported(plan: &Plan) -> Result<(), EvalError> {
                     supported(e).map_err(EvalError::Unsupported)?;
                 }
             }
-            Op::Aggregate { .. } => return Err(EvalError::Unsupported("aggregate")),
-            Op::Sort { .. } => return Err(EvalError::Unsupported("sort")),
+            Op::Aggregate { keys, aggs, .. } => {
+                for e in keys.iter().chain(aggs.iter().filter_map(|a| a.arg.as_ref())) {
+                    supported(e).map_err(EvalError::Unsupported)?;
+                }
+            }
+            Op::Sort { keys, .. } => {
+                for k in keys {
+                    supported(&k.expr).map_err(EvalError::Unsupported)?;
+                }
+            }
         }
     }
     Ok(())
 }
 
 impl Collector {
-    fn new(types: Vec<Type>) -> Collector {
-        // Purpose: an empty collector for columns of these types
+    fn new(types: Vec<Type>, keep: Vec<bool>) -> Collector {
+        // Purpose: an empty collector for columns of these types, keeping the ones marked
         let n = types.len();
-        Collector { types, values: (0..n).map(|_| None).collect(), valid: (0..n).map(|_| None).collect(), rows: 0 }
+        Collector { types, keep, values: (0..n).map(|_| None).collect(), valid: (0..n).map(|_| None).collect(), rows: 0 }
     }
 
     fn add(&mut self, batch: Batch<'_>, rows: usize) {
         // Purpose: append a dense batch's rows to the result
         for (c, column) in batch.columns.into_iter().enumerate() {
             let Some(vector) = column else { continue };
+            if !self.keep[c] {
+                continue;
+            }
             let (values, valid) = vector.into_columns(rows);
             match &mut self.values[c] {
                 Some(acc) => acc.append(&values),
@@ -230,6 +293,49 @@ fn keep_rows(predicate: &Vector<'_>, rows: usize) -> Option<Vec<u32>> {
     }
 }
 
+
+fn scan_column<'a>(view: &'a View, col: usize, ty: Type, start: usize, rows: usize, map: Option<&[u32]>, code: bool) -> Result<Vector<'a>, EvalError> {
+    // Purpose: one column of a chunk of a segment; a utf8 or dictionary column is mapped to canonical ids
+    if !code {
+        return Ok(crate::eval::column_vector(view, col, ty, start, rows));
+    }
+    let map = map.ok_or(EvalError::NeedsMap("a utf8 or dictionary column came without its map"))?;
+    let codes = &view.values::<i32>(col)[start..start + rows];
+    let valid = view.valid(col).map(|v| &v[start..start + rows]);
+    let mut out = Vec::with_capacity(rows);
+    for i in 0..rows {
+        if valid.is_some_and(|v| v[i] == 0) {
+            // A null row's code means nothing.
+            out.push(0);
+            continue;
+        }
+        match map.get(codes[i] as u32 as usize) {
+            Some(&id) => out.push(id as i32),
+            None => return Err(EvalError::NeedsMap("a dictionary map is shorter than its dictionary")),
+        }
+    }
+    Ok(Vector::column(ty, Values::I32(Cow::Owned(out)), valid.map(Cow::Borrowed)))
+}
+
+fn is_code(ty: Type) -> bool {
+    // Purpose: whether a column holds per-segment string codes
+    matches!(ty, Type::Utf8 | Type::Dictionary)
+}
+
+fn out_columns(table: Table, types: &[Type]) -> Vec<OutColumn> {
+    // Purpose: a table held in memory as result columns
+    let rows = table.rows;
+    table
+        .columns
+        .into_iter()
+        .zip(types)
+        .map(|(v, &ty)| {
+            let (values, valid) = v.into_columns(rows);
+            OutColumn { ty, values: values.into_owned(), valid: valid.map(|c| c.into_owned()) }
+        })
+        .collect()
+}
+
 impl Run {
     pub fn new(plan: Rc<Plan>, params: Rc<Params>, snapshot: Snapshot, chunk_rows: usize) -> Result<Run, EvalError> {
         // Purpose: prepare a run; refuses a plan the engine cannot execute
@@ -243,22 +349,78 @@ impl Run {
                 _ => 0,
             })
             .collect();
-        let types = plan.output.iter().map(|f| f.ty).collect();
-        Ok(Run {
+        let mut phases = Vec::new();
+        let mut streaming = Vec::new();
+        for (k, &at) in chain.iter().enumerate() {
+            if matches!(plan.nodes[at].op, Op::Aggregate { .. } | Op::Sort { .. }) {
+                phases.push(Phase { streaming: std::mem::take(&mut streaming), sink: Some(at) });
+            } else {
+                streaming.push(k);
+            }
+        }
+        phases.push(Phase { streaming, sink: None });
+        let canon = (0..plan.input.len()).map(|_| vec![None; snapshot.segments.len()]).collect();
+        let mut run = Run {
             plan,
             params,
             snapshot,
+            canon,
             chain,
             needed,
             chunk_rows: chunk_rows.max(1),
+            phases,
+            phase: 0,
+            source: Source::Table,
+            sink: None,
             segment: 0,
             pos: 0,
             remaining,
-            finished: false,
+            phase_done: false,
             passed: 0,
             scanned: 0,
-            collector: Collector::new(types),
-        })
+            result: None,
+        };
+        run.sink = Some(run.new_sink()?);
+        Ok(run)
+    }
+
+    pub fn set_canon(&mut self, column: usize, segment: usize, map: Vec<u32>) -> bool {
+        // Purpose: give a utf8 or dictionary column's segment its map to canonical ids; false if there is no such column or segment
+        match self.canon.get_mut(column).and_then(|c| c.get_mut(segment)) {
+            Some(slot) => {
+                *slot = Some(map);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn new_sink(&self) -> Result<Sink, EvalError> {
+        // Purpose: the sink that ends the current phase
+        match self.phases[self.phase].sink {
+            Some(at) => match &self.plan.nodes[at].op {
+                Op::Aggregate { keys, aggs, .. } => {
+                    let key_types: Vec<Type> = keys.iter().map(|k| k.ty).collect();
+                    Ok(Sink::Aggregate(Aggregator::new(&key_types, aggs)?, at))
+                }
+                Op::Sort { keys, .. } => {
+                    // A limit right after the sort only ever reads the first rows of the order.
+                    let position = self.chain.iter().position(|&i| i == at).expect("the sort is in the chain");
+                    let limit = match self.chain.get(position + 1).map(|&i| &self.plan.nodes[i].op) {
+                        Some(Op::Limit { count, .. }) => Some((*count).min(usize::MAX as u64) as usize),
+                        _ => None,
+                    };
+                    let types = self.plan.nodes[at].schema.iter().map(|f| f.ty).collect();
+                    Ok(Sink::Sort(Collector::new(types, self.needed[at].clone()), Sorter::new(keys, limit), at))
+                }
+                _ => unreachable!("phases end at aggregates and sorts"),
+            },
+            None => {
+                let types: Vec<Type> = self.plan.output.iter().map(|f| f.ty).collect();
+                let keep = vec![true; types.len()];
+                Ok(Sink::Collect(Collector::new(types, keep)))
+            }
+        }
     }
 
     pub fn rows_scanned(&self) -> u64 {
@@ -267,36 +429,122 @@ impl Run {
     }
 
     pub fn is_finished(&self) -> bool {
-        // Purpose: whether the run has read everything it needs
-        self.finished
+        // Purpose: whether the result is ready
+        self.result.is_some()
+    }
+
+    fn exhausted(&mut self) -> bool {
+        // Purpose: whether the current source has no rows left (skipping empty and finished segments)
+        match &self.source {
+            Source::Table => {
+                while self.segment < self.snapshot.segments.len() && self.pos >= self.snapshot.segments[self.segment].rows as usize {
+                    self.passed += self.snapshot.segments[self.segment].rows as u64;
+                    self.segment += 1;
+                    self.pos = 0;
+                }
+                self.segment >= self.snapshot.segments.len()
+            }
+            Source::Owned(t, order) => self.pos >= order.as_ref().map_or(t.rows, |o| o.len()),
+        }
+    }
+
+    fn end_phase(&mut self) -> Result<(), EvalError> {
+        // Purpose: the current source is used up: finish the sink and either start the next phase or set the result
+        match self.sink.take().expect("a phase has a sink") {
+            Sink::Collect(c) => self.result = Some(c.finish()),
+            Sink::Aggregate(a, _) => {
+                let table = a.finish()?;
+                self.phase += 1;
+                self.source = Source::Owned(Rc::new(table), None);
+                self.segment = 0;
+                self.pos = 0;
+                self.phase_done = false;
+                self.sink = Some(self.new_sink()?);
+            }
+            Sink::Sort(collector, sorter, _) => {
+                let rows = collector.rows;
+                let order = sorter.finish();
+                let columns = collector
+                    .finish()
+                    .into_iter()
+                    .map(|c| Vector::column(c.ty, c.values, c.valid.map(Cow::Owned)))
+                    .collect();
+                self.phase += 1;
+                self.source = Source::Owned(Rc::new(Table { rows, columns }), Some(Rc::new(order)));
+                self.segment = 0;
+                self.pos = 0;
+                self.phase_done = false;
+                self.sink = Some(self.new_sink()?);
+            }
+        }
+        Ok(())
     }
 
     pub fn step(&mut self) -> Result<bool, EvalError> {
-        // Purpose: process one chunk (or finish); true once the run is complete
-        if self.finished {
+        // Purpose: process one chunk (or end a phase); true once the result is ready
+        if self.result.is_some() {
             return Ok(true);
         }
-        // Skip past exhausted (or empty) segments.
-        while self.segment < self.snapshot.segments.len() && self.pos >= self.snapshot.segments[self.segment].rows as usize {
-            self.passed += self.snapshot.segments[self.segment].rows as u64;
-            self.segment += 1;
-            self.pos = 0;
+        // A last phase with nothing to stream: the table the previous phase made is the result.
+        if self.phase + 1 == self.phases.len() && self.phases[self.phase].streaming.is_empty() {
+            if let Source::Owned(t, order) = &self.source {
+                let table = match order {
+                    // A sort's rows are gathered once, in order; every column is read here.
+                    Some(order) => Table { rows: order.len(), columns: t.columns.iter().map(|c| c.gather(order)).collect() },
+                    None => Table { rows: t.rows, columns: t.columns.iter().map(|c| c.reborrow().into_static()).collect() },
+                };
+                let types: Vec<Type> = self.plan.output.iter().map(|f| f.ty).collect();
+                self.result = Some(out_columns(table, &types));
+                self.sink = None;
+                return Ok(true);
+            }
         }
-        if self.segment >= self.snapshot.segments.len() {
-            self.finished = true;
-            return Ok(true);
+        if self.phase_done || self.exhausted() {
+            self.end_phase()?;
+            return Ok(self.result.is_some());
         }
-        let view = self.snapshot.segments[self.segment].clone();
-        let start = self.pos;
-        let rows = (view.rows as usize - start).min(self.chunk_rows);
-        let types: Vec<Type> = self.plan.input.iter().map(|f| f.ty).collect();
         let plan = Rc::clone(&self.plan);
         let params = Rc::clone(&self.params);
-        let mut batch = Batch::from_view(&view, &types, start, rows);
-        prune(&mut batch, &self.needed[0]);
-        let mut stage = Stage { batch, sel: None, rows };
-        let mut limit_done = false;
-        for (k, &at) in self.chain.iter().enumerate() {
+        let owned = match &self.source {
+            Source::Owned(t, order) => Some((Rc::clone(t), order.clone())),
+            Source::Table => None,
+        };
+        let view = if owned.is_none() { Some(self.snapshot.segments[self.segment].clone()) } else { None };
+        let start = self.pos;
+        let total = match (&owned, &view) {
+            (Some((t, order)), _) => order.as_ref().map_or(t.rows, |o| o.len()),
+            (None, Some(v)) => v.rows as usize,
+            _ => unreachable!(),
+        };
+        let rows = (total - start).min(self.chunk_rows);
+        // The node whose output the chunk's columns are, for pruning.
+        let source_node = if self.phase == 0 { 0 } else { self.phases[self.phase - 1].sink.expect("later phases follow an aggregate or a sort") };
+        let mut stage = match (&owned, &view) {
+            (Some((t, None)), _) => {
+                let columns = t.columns.iter().enumerate().map(|(c, v)| if self.needed[source_node][c] { Some(v.slice(start, rows)) } else { None }).collect();
+                Stage { batch: Batch { rows, columns }, sel: None, rows }
+            }
+            // A sort's output: the rows as gathered, read through the next stretch of the order.
+            (Some((t, Some(order))), _) => {
+                let columns = t.columns.iter().enumerate().map(|(c, v)| if self.needed[source_node][c] { Some(v.reborrow()) } else { None }).collect();
+                Stage { batch: Batch { rows: t.rows, columns }, sel: Some(order[start..start + rows].to_vec()), rows }
+            }
+            (None, Some(view)) => {
+                let mut columns: Vec<Option<Vector>> = Vec::with_capacity(plan.input.len());
+                for (c, field) in plan.input.iter().enumerate() {
+                    if !self.needed[0][c] {
+                        columns.push(None);
+                        continue;
+                    }
+                    let map = self.canon[c][self.segment].as_deref();
+                    columns.push(Some(scan_column(view, c, field.ty, start, rows, map, is_code(field.ty))?));
+                }
+                Stage { batch: Batch { rows, columns }, sel: None, rows }
+            }
+            _ => unreachable!(),
+        };
+        for &k in &self.phases[self.phase].streaming {
+            let at = self.chain[k];
             match &plan.nodes[at].op {
                 Op::Filter { predicate, .. } => {
                     let (input, n) = dense(stage);
@@ -324,14 +572,17 @@ impl Run {
                     if count < stage.rows {
                         match &mut stage.sel {
                             Some(sel) => sel.truncate(count),
-                            None => stage.batch.columns.iter_mut().flatten().for_each(|v| v.truncate(count)),
+                            None => {
+                                stage.batch.columns.iter_mut().flatten().for_each(|v| v.truncate(count));
+                                stage.batch.rows = count;
+                            }
                         }
-                        stage.batch.rows = if stage.sel.is_some() { stage.batch.rows } else { count };
                         stage.rows = count;
                     }
                     prune(&mut stage.batch, &self.needed[at]);
+                    // Once a limit is satisfied, nothing later in the source can matter.
                     if left - count as u64 == 0 {
-                        limit_done = true;
+                        self.phase_done = true;
                     }
                 }
                 _ => return Err(EvalError::Internal("operator is not streaming")),
@@ -341,19 +592,48 @@ impl Run {
             }
         }
         if stage.rows > 0 {
-            let (batch, n) = dense(stage);
-            self.collector.add(batch, n);
+            let mut sink = self.sink.take().expect("a phase has a sink");
+            let outcome = consume(&mut sink, stage, &plan, &params);
+            self.sink = Some(sink);
+            outcome?;
         }
         self.pos += rows;
-        self.scanned = self.passed + self.pos as u64;
-        if limit_done {
-            self.finished = true;
+        if self.phase == 0 {
+            self.scanned = self.passed + self.pos as u64;
         }
-        Ok(self.finished)
+        Ok(false)
     }
 
     pub fn finish(self) -> Vec<OutColumn> {
         // Purpose: the result columns of a finished run
-        self.collector.finish()
+        self.result.unwrap_or_default()
     }
+}
+
+fn consume(sink: &mut Sink, stage: Stage<'_>, plan: &Plan, params: &Params) -> Result<(), EvalError> {
+    // Purpose: hand one chunk's rows to the sink that ends the phase
+    match sink {
+        Sink::Collect(c) => {
+            let (batch, n) = dense(stage);
+            c.add(batch, n);
+        }
+        Sink::Sort(collector, sorter, at) => {
+            let Op::Sort { keys, .. } = &plan.nodes[*at].op else { unreachable!("a sort sink holds a sort node") };
+            let (batch, n) = dense(stage);
+            let key_vectors = keys.iter().map(|k| eval(&k.expr, &batch, params)).collect::<Result<Vec<_>, _>>()?;
+            sorter.consume(&key_vectors, n);
+            collector.add(batch, n);
+        }
+        Sink::Aggregate(agg, at) => {
+            let Op::Aggregate { keys, aggs, .. } = &plan.nodes[*at].op else { unreachable!("an aggregate sink holds an aggregate node") };
+            // Plain column references can be read through the selection without copying.
+            let direct = keys.iter().chain(aggs.iter().filter_map(|a| a.arg.as_ref())).all(|e| matches!(e.kind, ExprKind::Field(_)));
+            let Stage { batch, sel, rows } = stage;
+            let (batch, sel) = if sel.is_some() && direct { (batch, sel) } else { (dense(Stage { batch, sel, rows }).0, None) };
+            let key_vectors = keys.iter().map(|e| eval(e, &batch, params)).collect::<Result<Vec<_>, _>>()?;
+            let args = aggs.iter().map(|a| a.arg.as_ref().map(|e| eval(e, &batch, params)).transpose()).collect::<Result<Vec<_>, _>>()?;
+            agg.consume(&key_vectors, &args, &Rows { count: rows, sel: sel.as_deref() })?;
+        }
+    }
+    Ok(())
 }

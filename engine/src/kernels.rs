@@ -22,6 +22,8 @@ pub enum EvalError {
     BadLiteral,
     MissingParam(String),
     Internal(&'static str),
+    // A utf8 or dictionary column the plan reads came without a usable map to canonical ids.
+    NeedsMap(&'static str),
 }
 
 // ---------------------------------------------------------------------------

@@ -206,6 +206,10 @@ fn read_expr(r: &mut Reader, depth: usize) -> Result<Expr, Error> {
             };
             ExprKind::In { arg, list }
         }
+        6 => {
+            let arg = Box::new(read_expr(r, depth + 1)?);
+            ExprKind::Lookup { arg, table: r.size()? }
+        }
         _ => return fail(Code::UnknownExprKind, at),
     };
     Ok(Expr { ty, kind })
@@ -337,5 +341,5 @@ pub fn decode_params(bytes: &[u8], declared: &[Param]) -> Result<crate::eval::Pa
     if r.left() != 0 {
         return fail(Code::TrailingBytes, r.at);
     }
-    Ok(crate::eval::Params { values })
+    Ok(crate::eval::Params { values, tables: Default::default() })
 }

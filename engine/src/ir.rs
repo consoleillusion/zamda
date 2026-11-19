@@ -27,6 +27,8 @@ pub enum ExprKind {
     Call { func: String, args: Vec<Expr> },
     Cast(Box<Expr>),
     In { arg: Box<Expr>, list: InList },
+    // Engine only (never in a JS plan): the result of a function of one string, looked up by the string's canonical id in a table the host supplies for the run (see docs/IR-BINARY.md).
+    Lookup { arg: Box<Expr>, table: usize },
 }
 
 #[derive(Clone, Debug)]

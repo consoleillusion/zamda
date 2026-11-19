@@ -189,3 +189,20 @@ describe('latest()', () => {
     expect((await run(big, { params: { min: N - 10 } })).toArray()).toEqual([{ n: 10 }]);
   });
 });
+
+describe('grouping by small integer keys', () => {
+  test('every uint16 and int16 value is its own group, including values of 32768 and above', async () => {
+    // Found by the engine cross-check (T-406): uint16 keys of 32768 or more used to land in group 0.
+    for (const type of [t.uint16, t.int16] as const) {
+      const values = type === t.uint16 ? [0, 1, 32767, 32768, 40000, 65535] : [-32768, -1, 0, 1, 32767];
+      const s = schema({ k: type });
+      const data = table(s, [...values, ...values].map(k => ({ k })));
+      const plan = pipe(s)
+        .groupBy(c => ({ k: c.k }))
+        .agg(() => ({ n: count() }))
+        .compile();
+      const rows = (await plan.execute(data)).toArray();
+      expect(rows as unknown).toEqual(values.map(k => ({ k, n: 2 })));
+    }
+  });
+});

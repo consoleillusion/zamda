@@ -112,7 +112,8 @@ class SmallIntKeys implements GroupTable {
         ids[i] = this.nullGroup;
         continue;
       }
-      const slot = values[r]! + 32768;
+      // int16 values -32768..32767 and uint16 values 0..65535 both map one-to-one onto 0..65535.
+      const slot = (values[r]! + 32768) & 0xffff;
       let g = slots[slot]!;
       if (g === -1) {
         g = this.groups++;

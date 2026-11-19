@@ -27,9 +27,10 @@ pub(crate) const INTERNAL: u32 = 306;
 pub(crate) const SCHEMA_MISMATCH: u32 = 307;
 pub(crate) const BAD_HANDLE: u32 = 308;
 pub(crate) const BAD_ARGUMENT: u32 = 309;
+pub(crate) const NEEDS_MAP: u32 = 310;
 
 // The operation names an overflow or division error can carry, by index.
-const WHATS: [&str; 9] = ["add", "sub", "mul", "div", "intDiv", "mod", "neg", "abs", "cast"];
+const WHATS: [&str; 10] = ["add", "sub", "mul", "div", "intDiv", "mod", "neg", "abs", "cast", "sum"];
 
 pub(crate) struct EvalResult {
     pub(crate) ty: Type,
@@ -72,6 +73,7 @@ pub(crate) fn eval_error(e: &EvalError) -> u32 {
         EvalError::BadLiteral => set_error(BAD_LITERAL, 0, 0),
         EvalError::MissingParam(_) => set_error(MISSING_PARAM, 0, 0),
         EvalError::Internal(_) => set_error(INTERNAL, 0, 0),
+        EvalError::NeedsMap(_) => set_error(NEEDS_MAP, 0, 0),
     }
 }
 
@@ -117,13 +119,13 @@ fn input_of(op: &Op) -> Option<usize> {
 
 #[no_mangle]
 pub extern "C" fn zs_eval_error() -> u32 {
-    // Purpose: the code of the last failed call in this interface (plan errors 1-122, store errors 201-211, evaluation errors 301-309)
+    // Purpose: the code of the last failed call in this interface (plan errors 1-123, store errors 201-211, evaluation errors 301-310)
     LAST.with(|c| c.get().0)
 }
 
 #[no_mangle]
 pub extern "C" fn zs_eval_error_what() -> u32 {
-    // Purpose: for an overflow or division error, the operation as an index into ["add", "sub", "mul", "div", "intDiv", "mod", "neg", "abs", "cast"]; for a plan error, the position
+    // Purpose: for an overflow or division error, the operation as an index into ["add", "sub", "mul", "div", "intDiv", "mod", "neg", "abs", "cast", "sum"]; for a plan error, the position
     LAST.with(|c| c.get().1)
 }
 
@@ -305,4 +307,23 @@ pub extern "C" fn zs_result_valid(result: u32) -> *const u8 {
 pub extern "C" fn zs_result_free(result: u32) -> u32 {
     // Purpose: free a result
     REGISTRY.with(|r| release(&mut r.borrow_mut().results, result))
+}
+
+#[no_mangle]
+pub extern "C" fn zs_params_table(params: u32, index: u32, values: *const u8, bytes: usize, valid: *const u8, entries: usize) -> u32 {
+    // Purpose: give lookup table `index` its values (little-endian, one per entry, then one for null rows) and, if some entries are null, one validity byte per entry; 0 on success
+    let values = unsafe { std::slice::from_raw_parts(values, bytes) }.to_vec();
+    let valid = if valid.is_null() { None } else { Some(unsafe { std::slice::from_raw_parts(valid, entries) }.to_vec()) };
+    REGISTRY.with(|r| {
+        let mut r = r.borrow_mut();
+        let Some(Some(slot)) = (params as usize).checked_sub(1).and_then(|i| r.params.get_mut(i)) else {
+            return set_error(BAD_HANDLE, 0, 0);
+        };
+        // Tables are given before any run starts, while only the registry holds the parameters.
+        let Some(p) = Rc::get_mut(slot) else {
+            return set_error(BAD_ARGUMENT, 0, 0);
+        };
+        p.tables.insert(index as usize, crate::eval::LookupTable { entries, bytes: values, valid, decoded: std::cell::OnceCell::new() });
+        0
+    })
 }

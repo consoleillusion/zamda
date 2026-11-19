@@ -24,7 +24,22 @@ export const TYPE_NAMES: readonly TypeName[] = [
   'float32', 'float64', 'utf8', 'dictionary', 'date32', 'timestamp',
 ];
 const OPS = ['scan', 'filter', 'project', 'aggregate', 'sort', 'limit'] as const;
-const EXPR_KINDS = ['field', 'literal', 'param', 'call', 'cast', 'in'] as const;
+const EXPR_KINDS = ['field', 'literal', 'param', 'call', 'cast', 'in', 'lookup'] as const;
+
+// Engine only, never in a plan the JS side runs or validates: the result of a function of one string,
+// read by the string's canonical id from table `table` (docs/IR-BINARY.md). It sits in an IrExpr
+// position through a cast, so the core types do not know it.
+export interface LookupExpr {
+  readonly kind: 'lookup';
+  readonly arg: IrExpr;
+  readonly table: number;
+  readonly type: DataType;
+}
+
+export function lookupExpr(arg: IrExpr, table: number, type: DataType): IrExpr {
+  // Purpose: build a lookup expression for the engine
+  return { kind: 'lookup', arg, table, type } as LookupExpr as unknown as IrExpr;
+}
 
 // Literal kinds.
 const L_FALSE = 0;
@@ -165,6 +180,12 @@ function writeExpr(w: Writer, expr: IrExpr, depth: number): void {
   if (depth > MAX_DEPTH) bad('expression nested too deeply');
   w.byte(EXPR_KINDS.indexOf(expr.kind));
   writeType(w, expr.type);
+  if ((expr.kind as string) === 'lookup') {
+    const lookup = expr as unknown as LookupExpr;
+    writeExpr(w, lookup.arg, depth + 1);
+    w.varint(lookup.table);
+    return;
+  }
   switch (expr.kind) {
     case 'field':
       w.varint(expr.index);
@@ -441,6 +462,10 @@ function readExpr(r: Reader, depth: number): IrExpr {
     }
     case 'cast':
       return { kind, arg: readExpr(r, depth + 1), type };
+    case 'lookup': {
+      const arg = readExpr(r, depth + 1);
+      return { kind, arg, table: r.varint(), type } as LookupExpr as unknown as IrExpr;
+    }
     case 'in': {
       const arg = readExpr(r, depth + 1);
       const form = r.byte();

@@ -111,3 +111,20 @@ pub extern "C" fn zs_run_free(run: u32) -> u32 {
     // Purpose: free a run that is not finished (a finished run is already gone)
     REGISTRY.with(|r| release(&mut r.borrow_mut().runs, run))
 }
+
+#[no_mangle]
+pub extern "C" fn zs_run_canon(run: u32, column: u32, segment: u32, ptr: *const u32, len: usize) -> u32 {
+    // Purpose: give a utf8 or dictionary column's segment its map from codes to canonical ids (one u32 per code); 0 on success
+    let map = unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec();
+    REGISTRY.with(|r| {
+        let mut r = r.borrow_mut();
+        let Some(Some(run)) = (run as usize).checked_sub(1).and_then(|i| r.runs.get_mut(i)) else {
+            return set_error(BAD_HANDLE, 0, 0);
+        };
+        if run.set_canon(column as usize, segment as usize, map) {
+            0
+        } else {
+            set_error(BAD_ARGUMENT, 0, 0)
+        }
+    })
+}

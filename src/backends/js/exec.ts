@@ -42,7 +42,7 @@ import { isConstant, markConstant } from './kernel-util';
 export const DEFAULT_CHUNK_ROWS = 65536;
 export const DEFAULT_SLICE_MS = 8;
 
-interface Batch {
+export interface Batch {
   // A column no later node reads is left undefined instead of being copied.
   readonly columns: readonly (Column | undefined)[];
   readonly rowCount: number;
@@ -171,7 +171,7 @@ function broadcast(value: LiteralValue, type: DataType, n: number): Column {
 // Functions that never raise an error, whatever their input. Only expressions
 // built from these may be evaluated over dictionary entries that no row in the
 // batch uses (see dictionaryShortcut).
-const NEVER_FAILS = new Set([
+export const NEVER_FAILS = new Set([
   'eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'is_null', 'is_nan', 'coalesce', 'if_else', 'and', 'or', 'not',
   'lower', 'upper', 'length', 'starts_with', 'ends_with', 'contains',
 ]);
@@ -243,7 +243,7 @@ function dictionaryShortcut(expr: IrExpr, batch: Batch, options: BackendOptions)
   return take(perValue, indices);
 }
 
-function evaluateRows(expr: IrExpr, batch: Batch, options: BackendOptions): Column {
+export function evaluateRows(expr: IrExpr, batch: Batch, options: BackendOptions): Column {
   // Purpose: evaluate a call row by row, without the dictionary shortcut (which would recurse)
   if (expr.kind !== 'call') return evaluate(expr, batch, options);
   const kernel = KERNELS.get(expr.fn);
@@ -288,7 +288,7 @@ function logicalShortcut(
   return null;
 }
 
-function evaluate(expr: IrExpr, batch: Batch, options: BackendOptions): Column {
+export function evaluate(expr: IrExpr, batch: Batch, options: BackendOptions): Column {
   // Purpose: evaluate one expression over a batch, returning a column
   switch (expr.kind) {
     case 'field': {

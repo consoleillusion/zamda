@@ -48,6 +48,7 @@ pub enum Code {
     AggregateSchemaMismatch = 120,
     RootOutOfRange = 121,
     ExprTooDeep = 122,
+    LookupBadType = 123,
 }
 
 // `at` is the byte offset for a decoding error and the node index for a validation error.

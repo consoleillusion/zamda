@@ -199,6 +199,48 @@ impl Values<'_> {
         }
     }
 
+    pub fn from_le_bytes(ty: Type, bytes: &[u8]) -> Values<'static> {
+        // Purpose: values of a type's storage class read from little-endian bytes (a trailing partial value is ignored)
+        macro_rules! read {
+            ($t:ty, $variant:ident) => {
+                Values::$variant(Cow::Owned(bytes.chunks_exact(std::mem::size_of::<$t>()).map(|c| <$t>::from_le_bytes(c.try_into().expect("chunk has the width"))).collect()))
+            };
+        }
+        match storage(ty) {
+            Storage::I8 => read!(i8, I8),
+            Storage::I16 => read!(i16, I16),
+            Storage::I32 => read!(i32, I32),
+            Storage::I64 => read!(i64, I64),
+            Storage::U8 => read!(u8, U8),
+            Storage::U16 => read!(u16, U16),
+            Storage::U32 => read!(u32, U32),
+            Storage::U64 => read!(u64, U64),
+            Storage::F32 => read!(f32, F32),
+            Storage::F64 => read!(f64, F64),
+        }
+    }
+
+    pub fn slice(&self, start: usize, len: usize) -> Values<'_> {
+        // Purpose: values [start, start + len) borrowed from these
+        macro_rules! sub {
+            ($v:expr, $variant:ident) => {
+                Values::$variant(Cow::Borrowed(&$v[start..start + len]))
+            };
+        }
+        match self {
+            Values::I8(v) => sub!(v, I8),
+            Values::I16(v) => sub!(v, I16),
+            Values::I32(v) => sub!(v, I32),
+            Values::I64(v) => sub!(v, I64),
+            Values::U8(v) => sub!(v, U8),
+            Values::U16(v) => sub!(v, U16),
+            Values::U32(v) => sub!(v, U32),
+            Values::U64(v) => sub!(v, U64),
+            Values::F32(v) => sub!(v, F32),
+            Values::F64(v) => sub!(v, F64),
+        }
+    }
+
     pub fn truncate(&mut self, n: usize) {
         // Purpose: keep only the first n values
         fn cut<T: Clone>(c: &mut Cow<'_, [T]>, n: usize) {
@@ -331,6 +373,26 @@ impl<'a> Vector<'a> {
             Data::Const(_) => None,
             Data::Col { valid, .. } => valid.as_deref(),
         }
+    }
+
+    pub fn into_static(self) -> Vector<'static> {
+        // Purpose: the same vector with every borrowed slice copied
+        match self.data {
+            Data::Const(s) => Vector { ty: self.ty, data: Data::Const(s) },
+            Data::Col { values, valid } => Vector { ty: self.ty, data: Data::Col { values: values.into_owned(), valid: valid.map(|v| Cow::Owned(v.into_owned())) } },
+        }
+    }
+
+    pub fn slice(&self, start: usize, len: usize) -> Vector<'_> {
+        // Purpose: rows [start, start + len) borrowed from this vector (a constant is unchanged)
+        let data = match &self.data {
+            Data::Const(s) => Data::Const(*s),
+            Data::Col { values, valid } => Data::Col {
+                values: values.slice(start, len),
+                valid: valid.as_ref().map(|v| Cow::Borrowed(&v[start..start + len])),
+            },
+        };
+        Vector { ty: self.ty, data }
     }
 
     pub fn truncate(&mut self, n: usize) {

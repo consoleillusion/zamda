@@ -66,6 +66,7 @@ impl Writer {
             ExprKind::Call { .. } => 3,
             ExprKind::Cast(_) => 4,
             ExprKind::In { .. } => 5,
+            ExprKind::Lookup { .. } => 6,
         };
         self.0.push(kind);
         self.0.push(e.ty.id());
@@ -81,6 +82,10 @@ impl Writer {
                 }
             }
             ExprKind::Cast(arg) => self.expr(arg),
+            ExprKind::Lookup { arg, table } => {
+                self.expr(arg);
+                self.varint(*table as u64);
+            }
             ExprKind::In { arg, list } => {
                 self.expr(arg);
                 match list {

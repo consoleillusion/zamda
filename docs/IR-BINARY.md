@@ -74,6 +74,17 @@ expr    = byte kind, type (the result type), then by kind:
   3 call     string function name, list of expr
   4 cast     expr
   5 in       expr, byte form: 0 = list of literal, 1 = string parameter name
+  6 lookup   expr (an int32 string id), varint table number. Engine only: the host writes it
+             (src/backends/wasm/derive.ts, D-066); the JS side never reads or validates it.
+```
+
+A `lookup` yields, for each row, entry `id` of table `table` (the last entry for a null
+id). The host gives each table before a run starts with `zs_params_table(params, index,
+values, bytes, valid, entries)`: `entries` values of the lookup's type as little-endian
+bytes (one per string id, then one for null), and one validity byte per entry when some
+entry is null, else a null pointer.
+
+```
 ```
 
 ## Literals
@@ -96,7 +107,7 @@ integer that fits tag 2 is never written as tag 3, a NaN is always
 `0x7ff8000000000000`, a varint has no extra zero bytes and stays below 2^53, and
 a string keeps a leading byte order mark. The Rust engine (`engine/`) decodes
 the same bytes; its error codes are in `engine/src/error.rs` (1-19 decoding,
-101-122 validation).
+101-123 validation).
 
 ## Parameter values
 

@@ -13,6 +13,7 @@ export interface EvalHost extends EngineHost {
   planFree(plan: number): number;
   paramsLoad(plan: number, bytes: Uint8Array): number;
   paramsFree(params: number): number;
+  paramsTable(params: number, index: number, values: Uint8Array, valid: Uint8Array | null, entries: number): number;
   exprCount(plan: number, node: number): number;
   exprSupported(plan: number, node: number, expr: number): number;
   eval(plan: number, params: number, node: number, expr: number, snapshot: number, segment: number, start: number, rows: number): number;
@@ -27,6 +28,7 @@ export interface EvalHost extends EngineHost {
   runFinish(run: number): number;
   runColumn(index: number): number;
   runFree(run: number): number;
+  runCanon(run: number, column: number, segment: number, map: Uint32Array): number;
   evalError(): number;
   evalErrorWhat(): number;
   evalErrorType(): number;
@@ -74,6 +76,7 @@ export function nativeHost(): EvalHost | null {
     zs_plan_free: { args: [u], returns: u },
     zs_params_load: { args: [u, p, FFIType.u64], returns: u },
     zs_params_free: { args: [u], returns: u },
+    zs_params_table: { args: [u, u, p, FFIType.u64, p, FFIType.u64], returns: u },
     zs_expr_count: { args: [u, u], returns: FFIType.i32 },
     zs_expr_supported: { args: [u, u, u], returns: u },
     zs_eval: { args: [u, u, u, u, u, u, u, u], returns: u },
@@ -88,6 +91,7 @@ export function nativeHost(): EvalHost | null {
     zs_run_finish: { args: [u], returns: u },
     zs_run_column: { args: [u], returns: u },
     zs_run_free: { args: [u], returns: u },
+    zs_run_canon: { args: [u, u, u, p, FFIType.u64], returns: u },
     zs_eval_error: { args: [], returns: u },
     zs_eval_error_what: { args: [], returns: u },
     zs_eval_error_type: { args: [], returns: u },
@@ -134,6 +138,12 @@ export function nativeHost(): EvalHost | null {
     planFree: h => s.zs_plan_free!(h),
     paramsLoad: (plan, bytes) => withBytes(bytes, at => s.zs_params_load!(plan, ptr(at), bytes.length)),
     paramsFree: h => s.zs_params_free!(h),
+    paramsTable: (params, index, values, valid, entries) =>
+      withBytes(values, at =>
+        valid === null
+          ? s.zs_params_table!(params, index, ptr(at), values.length, null, entries)
+          : withBytes(valid, vat => s.zs_params_table!(params, index, ptr(at), values.length, ptr(vat), entries)),
+      ),
     exprCount: (plan, node) => s.zs_expr_count!(plan, node),
     exprSupported: (plan, node, expr) => s.zs_expr_supported!(plan, node, expr),
     eval: (plan, params, node, expr, snapshot, segment, start, rows) =>
@@ -149,6 +159,8 @@ export function nativeHost(): EvalHost | null {
     runFinish: r => s.zs_run_finish!(r),
     runColumn: i => s.zs_run_column!(i),
     runFree: r => s.zs_run_free!(r),
+    runCanon: (run, column, segment, map) =>
+      withBytes(new Uint8Array(map.buffer, map.byteOffset, map.byteLength), at => s.zs_run_canon!(run, column, segment, ptr(at), map.length)),
     evalError: () => s.zs_eval_error!(),
     evalErrorWhat: () => s.zs_eval_error_what!(),
     evalErrorType: () => s.zs_eval_error_type!(),

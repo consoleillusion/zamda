@@ -23,9 +23,21 @@ pub enum ParamValue {
     List(Vec<Literal>),
 }
 
+// What a string-function expression gives for every string: one value per canonical id, then one for a null row.
+#[derive(Clone, Debug)]
+pub struct LookupTable {
+    pub entries: usize,
+    pub bytes: Vec<u8>,
+    // One byte per entry (1 = a value), None when no entry is null.
+    pub valid: Option<Vec<u8>>,
+    pub decoded: std::cell::OnceCell<Values<'static>>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Params {
     pub values: HashMap<String, ParamValue>,
+    // Lookup tables by the index plans give them.
+    pub tables: HashMap<usize, LookupTable>,
 }
 
 // The columns an expression may read, for `rows` rows. A column nothing reads is None.
@@ -44,7 +56,7 @@ impl<'a> Batch<'a> {
     }
 }
 
-fn column_vector<'a>(view: &'a View, col: usize, ty: Type, start: usize, rows: usize) -> Vector<'a> {
+pub fn column_vector<'a>(view: &'a View, col: usize, ty: Type, start: usize, rows: usize) -> Vector<'a> {
     // Purpose: one segment column as a vector over [start, start + rows), without copying
     let end = start + rows;
     let values = match storage(ty) {
@@ -152,6 +164,7 @@ pub fn supported(expr: &Expr) -> Result<(), &'static str> {
             supported(a)?;
             Ok(())
         }
+        ExprKind::Lookup { arg, .. } => supported(arg),
         ExprKind::In { arg, .. } => {
             supported(arg)?;
             if strings(arg.ty) { Err("in on strings") } else { Ok(()) }
@@ -192,6 +205,7 @@ pub fn eval<'a>(expr: &Expr, batch: &Batch<'a>, params: &Params) -> Result<Vecto
             }
             _ => Err(EvalError::MissingParam(name.clone())),
         },
+        ExprKind::Lookup { arg, table } => lookup(arg, *table, expr.ty, batch, params),
         ExprKind::Cast(arg) => {
             let x = eval(arg, batch, params)?;
             if n == 0 { return Ok(empty(expr.ty)); }
@@ -334,4 +348,33 @@ fn call<'a>(func: &str, args: &[Expr], ty: Type, batch: &Batch<'a>, params: &Par
             Err(EvalError::Unsupported("a function the engine does not have"))
         }
     }
+}
+
+fn lookup<'a>(arg: &Expr, table: usize, ty: Type, batch: &Batch<'a>, params: &Params) -> Result<Vector<'a>, EvalError> {
+    // Purpose: the table's value for each row's string id (the table's last entry for a null row)
+    let t = params.tables.get(&table).ok_or(EvalError::NeedsMap("a lookup table was not given"))?;
+    let ids = eval(arg, batch, params)?;
+    let n = batch.rows;
+    let (values, valid) = ids.into_columns(n);
+    let Values::I32(ids) = values else { return Err(EvalError::Internal("a lookup over something other than string ids")) };
+    let decoded = t.decoded.get_or_init(|| Values::from_le_bytes(ty, &t.bytes));
+    if t.entries == 0 || decoded.len() != t.entries || t.valid.as_ref().is_some_and(|v| v.len() != t.entries) {
+        return Err(EvalError::NeedsMap("a lookup table does not match its size"));
+    }
+    let null_entry = (t.entries - 1) as u32;
+    let mut at = Vec::with_capacity(n);
+    for i in 0..n {
+        if valid.as_ref().is_some_and(|v| v[i] == 0) {
+            at.push(null_entry);
+        } else {
+            let id = ids[i] as u32;
+            if id >= null_entry {
+                return Err(EvalError::NeedsMap("a string id is past the end of a lookup table"));
+            }
+            at.push(id);
+        }
+    }
+    let out = decoded.gather(&at);
+    let out_valid = t.valid.as_ref().map(|v| Cow::Owned(at.iter().map(|&i| v[i as usize]).collect::<Vec<u8>>()));
+    Ok(Vector::column(ty, out, out_valid))
 }
