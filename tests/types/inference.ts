@@ -99,6 +99,37 @@ assertType<
   >
 >();
 
+// T-211 / C-STR-MIX: the two string storage types mix in one operation.
+const mixedStrings = pipe(Users)
+  .select(c => ({
+    eq: c.name.eq(c.country),
+    lt: c.name.lt(c.country),
+    starts: c.name.startsWith(c.country),
+    filled: c.name.coalesce(c.country),
+    revFilled: c.country.coalesce(c.name),
+    picked: ifElse(c.name.eq(c.country), c.name, c.country),
+  }))
+  .compile();
+assertType<
+  Same<
+    RowsOf<typeof mixedStrings>,
+    {
+      eq: boolean | null;
+      lt: boolean | null;
+      starts: boolean | null;
+      filled: string | null;
+      revFilled: string | null;
+      picked: string | null;
+    }
+  >
+>();
+const mixedList = pipe(Users, { names: list(t.utf8) })
+  .filter((c, p) => c.country.isIn(p.names))
+  .compile();
+void mixedList;
+// @ts-expect-error a string expression cannot be compared with a number
+pipe(Users).filter(c => c.name.eq(c.age));
+
 // withColumns replaces and adds; rename changes keys.
 const reshaped = pipe(Users)
   .select(c => ({ name: c.name, age: c.age }))

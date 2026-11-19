@@ -12,8 +12,9 @@ import { encodeParams, encodePlan, TYPE_NAMES } from '../../ir-binary';
 import type { Fields, Schema } from '../../schema';
 import type { Column } from '../../column';
 import type { IrExpr, LiteralValue } from '../../ir';
-import { walkExpr } from '../../ir';
+import { nodeExprs, walkExpr } from '../../ir';
 import { makeColumn } from '../../column';
+import { isString } from '../../types';
 import { DEFAULT_CHUNK_ROWS, DEFAULT_SLICE_MS, executeJs, neededColumns, pause } from '../js/exec';
 import type { TableInput, TableOptions } from '../js';
 import { buildCanon } from './canon';
@@ -210,6 +211,29 @@ export function createWasmBackend(host: EngineRunHost): { backend: WasmBackend; 
   return { backend, table };
 }
 
+function hasMixedStringTypes(plan: IrPlan): boolean {
+  // Purpose: detect expressions that combine utf8 and dictionary operands; the engine's validator rejects them, so the JS reference runs them (T-211)
+  for (const node of plan.nodes) {
+    for (const expr of nodeExprs(node)) {
+      let mixed = false;
+      walkExpr(expr, function (e: IrExpr): void {
+        if (e.kind === 'call') {
+          const names = new Set<string>();
+          for (const arg of e.args) if (isString(arg.type)) names.add(arg.type.name);
+          if (names.size > 1) mixed = true;
+        } else if (e.kind === 'in' && isString(e.arg.type) && e.param !== null) {
+          const param = plan.params.find(function (p) {
+            return p.name === e.param;
+          });
+          if (param && isString(param.type) && param.type.name !== e.arg.type.name) mixed = true;
+        }
+      });
+      if (mixed) return true;
+    }
+  }
+  return false;
+}
+
 async function runInEngine(
   host: EngineRunHost,
   plan: IrPlan,
@@ -220,6 +244,7 @@ async function runInEngine(
   sessionHandle: number,
 ): Promise<ResultData | null> {
   // Purpose: run the plan in the engine; null when the engine cannot (the caller then runs it on the JS executor)
+  if (hasMixedStringTypes(plan)) return null;
   const clock = performance.now();
   let last = clock;
   const phase = (name: keyof WasmStats['phasesMs']): void => {

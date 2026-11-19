@@ -79,6 +79,7 @@ and column. `utf8` and `dictionary` behave identically; they differ only in stor
 | C-STR-LENGTH | `length` counts code points, not UTF-16 units, and is `int32`. |
 | C-STR-CASE | `lower` and `upper` use locale-independent Unicode case mapping and return `utf8`. |
 | C-STR-MATCH | `startsWith`, `endsWith` and `contains` match literally; there are no patterns. The empty string matches everything. |
+| C-STR-MIX | `utf8` and `dictionary` expressions are interchangeable in one operation: comparisons, string functions, `coalesce`, `ifElse` and `isIn` treat both as strings. A string-producing result keeps the storage type of its first string operand. |
 
 ### Dates and times
 
@@ -103,7 +104,6 @@ characters. Cross-backend tests exclude those characters.
 
 ## Known limits
 
-- `utf8` and `dictionary` expressions cannot be mixed in one operation.
 - `avg` and `sum` of 64-bit integers convert through `float64` only for `avg`;
   values above 2^53 lose precision there.
 - Casts exist between numeric types only.

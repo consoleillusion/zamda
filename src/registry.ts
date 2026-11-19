@@ -11,7 +11,7 @@
 
 import { PlanError, TypeCheckError } from './errors';
 import type { DataType } from './types';
-import { isFloat, isInteger, isNumeric, isString, isTemporal, isUnsigned, sameType, t } from './types';
+import { compatibleTypes, isFloat, isInteger, isNumeric, isString, isTemporal, isUnsigned, sameType, t } from './types';
 
 export type NullBehaviour =
   // Result is null when any argument is null.
@@ -61,6 +61,12 @@ function sameTypes(fn: string, args: readonly DataType[]): void {
   }
 }
 
+function compatiblePair(fn: string, args: readonly DataType[], need: string): void {
+  // Purpose: require two operands with one behaviour, allowing utf8 and dictionary to mix (T-211)
+  arity(fn, args, 2);
+  if (!compatibleTypes(args[0]!, args[1]!)) fail(fn, need, args);
+}
+
 function fail(fn: string, need: string, args: readonly DataType[]): never {
   // Purpose: raise the standard "wrong operand type" error
   throw new TypeCheckError(`${fn} needs ${need}, got (${names(args)})`);
@@ -69,7 +75,7 @@ function fail(fn: string, need: string, args: readonly DataType[]): never {
 function equality(fn: string): Rule {
   // Purpose: type rule for eq and neq
   return function (args) {
-    sameTypes(fn, args);
+    compatiblePair(fn, args, 'two comparable operands');
     return t.bool;
   };
 }
@@ -77,7 +83,7 @@ function equality(fn: string): Rule {
 function ordering(fn: string): Rule {
   // Purpose: type rule for lt, lte, gt and gte
   return function (args) {
-    sameTypes(fn, args);
+    compatiblePair(fn, args, 'two ordered operands');
     if (args[0]!.name === 'bool') fail(fn, 'ordered operands', args);
     return t.bool;
   };
@@ -118,7 +124,7 @@ function isSigned(type: DataType): boolean {
 function stringPair(fn: string): Rule {
   // Purpose: type rule for starts_with, ends_with and contains
   return function (args) {
-    sameTypes(fn, args);
+    compatiblePair(fn, args, 'string operands');
     if (!isString(args[0]!)) fail(fn, 'string operands', args);
     return t.bool;
   };
@@ -157,13 +163,13 @@ const defs: FunctionDef[] = [
   }),
   scalar('is_nan', 'functions_comparison:is_nan', 'propagate', unary('is_nan', isFloat, 'a float operand', t.bool)),
   scalar('coalesce', 'functions_comparison:coalesce', 'custom', function (args) {
-    sameTypes('coalesce', args);
+    compatiblePair('coalesce', args, 'two operands of the same type');
     return args[0]!;
   }),
   // Substrait: the IfThen expression, not a function.
   scalar('if_else', 'expression:if_then', 'custom', function (args) {
     arity('if_else', args, 3);
-    if (args[0]!.name !== 'bool' || !sameType(args[1]!, args[2]!)) {
+    if (args[0]!.name !== 'bool' || !compatibleTypes(args[1]!, args[2]!)) {
       fail('if_else', 'a bool condition and two branches of the same type', args);
     }
     return args[1]!;

@@ -52,7 +52,7 @@ T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`
 | T-208 (done: type-aware ESLint rule and API reference, D-073; `bun run lint` clean, `bun run check` green) | ESLint rule flagging `&&`, `\|\|`, `!` and `===` in accessor callbacks; API reference docs | T-112 |
 | T-209 (build done: ESM + `.d.ts`, `bun run build`; npm alpha blocked: no npm auth here) | Build and publish: ESM output with `.d.ts`, npm alpha | T-206, T-208 |
 | T-210 | Measure the reference queries in Chrome and Firefox, not only Bun (the dashboard part is T-217) | T-207 |
-| T-211 | Allow `utf8` and `dictionary` expressions to be mixed in one operation | T-112 |
+| T-211 (done, C-STR-MIX, D-074) | Allow `utf8` and `dictionary` expressions to be mixed in one operation | T-112 |
 | T-215 | Run `bun run prep-bgp` against a real RIS dump; record row count, skipped prefixes and timings in `docs/BENCHMARKS.md`. **Done** (`docs/BENCHMARKS.md`). | T-205 |
 | T-216 | The first real run stopped at ~930k prefixes with "Path attribute runs past the entry"; a second run of the same dump found no bad entries. **Closed:** `scripts/check-dump.ts` gave identical results under four different splits of the same dump, with no bad entries; the first failure was most likely damage in that one download. | T-205 |
 | T-217 | Run `bun run demo` on a real `data/routes.bin` with the real RIS Live feed. **Done in Chromium** (owner, real RIPE data, real feed): 109 to 123 ms per interaction against the 200 ms target; live refresh 20 to 40 ms. Firefox not yet measured. | T-206 |

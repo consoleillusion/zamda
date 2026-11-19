@@ -108,6 +108,11 @@ export function sameType(a: DataType, b: DataType): boolean {
   return a.name === b.name;
 }
 
+export function compatibleTypes(a: DataType, b: DataType): boolean {
+  // Purpose: true for equal types and for the two string storage types, which share their values (T-211)
+  return sameType(a, b) || (isString(a) && isString(b));
+}
+
 export function isInteger(type: DataType): type is DataType<IntegerName> {
   // Purpose: true for any integer type, of any width
   return isInt(type) || isBigInt(type);

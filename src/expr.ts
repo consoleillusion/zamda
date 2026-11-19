@@ -17,13 +17,24 @@ import type {
   TemporalName,
   UnsignedName,
 } from './types';
-import { isFloat, isNumeric, isString, isTemporal, sameType, t } from './types';
+import { compatibleTypes, isFloat, isNumeric, isString, isTemporal, sameType, t } from './types';
 
 type Bool = DataType<'bool'>;
 type Num = DataType<NumericName>;
 
+// True when D may hold strings. The general Expr<DataType> counts, so a
+// specific string expression stays assignable to it (T-211).
+type MayBeString<D extends DataType> = [Extract<D['name'], StringName>] extends [never] ? false : true;
+
+// Any string expression is acceptable wherever one string storage type is
+// expected. For non-string D this is never, so the old signatures are unchanged.
+type MixedStringExpr<D extends DataType> = MayBeString<D> extends true ? Expr<DataType<StringName>> : never;
+
+// The list-parameter counterpart of MixedStringExpr.
+type MixedStringList<D extends DataType> = MayBeString<D> extends true ? ListParam<DataType<StringName>> : never;
+
 // A value accepted where an expression of type D is expected.
-export type Operand<D extends DataType> = Expr<D> | JsOf<D>;
+export type Operand<D extends DataType> = Expr<D> | MixedStringExpr<D> | JsOf<D>;
 
 // The expression class the DSL exposes for a column of type D.
 export type ExprFor<D extends DataType> =
@@ -164,10 +175,10 @@ export class Expr<D extends DataType = DataType> {
     return new BoolExpr(callNode('is_null', [this.node]));
   }
 
-  isIn(values: readonly JsOf<D>[] | ListParam<D>): BoolExpr {
+  isIn(values: readonly JsOf<D>[] | ListParam<D> | MixedStringList<D>): BoolExpr {
     // Purpose: C-IN: true where the value equals any list entry; null where the value is null
     if (values instanceof ListParam) {
-      if (!sameType(values.type, this.node.type)) {
+      if (!compatibleTypes(values.type, this.node.type)) {
         throw new TypeCheckError(
           `isIn: list parameter "${values.name}" is ${values.type.name}, the column is ${this.node.type.name}`,
         );

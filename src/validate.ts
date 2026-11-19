@@ -7,7 +7,7 @@ import type { IrExpr, IrParam, IrPlan } from './ir';
 import { IR_VERSION, nodeExprs, walkExpr } from './ir';
 import { canCast, lookup } from './registry';
 import type { Field } from './schema';
-import { sameType } from './types';
+import { compatibleTypes, sameType } from './types';
 
 const MAX_NODES = 1024;
 const MAX_EXPR_DEPTH = 256;
@@ -27,7 +27,7 @@ function checkParam(name: string, expr: IrExpr, list: boolean, params: ReadonlyM
   const declared = params.get(name);
   if (!declared) throw new PlanError(`${where}: parameter "${name}" is not declared`);
   const type = expr.kind === 'in' ? expr.arg.type : expr.type;
-  if (declared.list !== list || !sameType(declared.type, type)) {
+  if (declared.list !== list || !compatibleTypes(declared.type, type)) {
     throw new PlanError(`${where}: parameter "${name}" is used with a different type than declared`);
   }
 }
