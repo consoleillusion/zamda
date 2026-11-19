@@ -387,3 +387,34 @@ rows the WASM pair is 38 and 37 ms with nothing selected and 36 and 33 ms with t
 selected and 6.8 ms with the selection. The cross-checks against the JS backend and JS executor
 pass there and inside the page (`window.__benchResult` set, `WASM backend runs: 287 in the
 engine`).
+
+## Reference queries in Chrome and Firefox (T-210)
+
+Measured on 2026-11-19 on this machine with headless Chromium 156.0.8078.47 and Firefox
+158.0.1, using the real `data/routes.bin` from RIPE RIS rrc00 (1,165,315 routes) sampled to
+1,000,000 rows. `bench/reference/browser/main.ts` ran the same seven queries and two dashboard
+scenarios in each browser, seven timed runs after two warm-ups; every answer was checked against
+Arquero, and every WASM answer against the JS backend, before timing. Raw results are
+`bench/results/t210-chrome.json` and `t210-firefox.json`; the tables are in
+`bench/results/t210-browsers.md`.
+
+| Query (JS backend median, ms) | Chrome | Firefox |
+| --- | ---: | ---: |
+| Q1 routes per network | 24 | 28 |
+| Q2 routes per prefix length | 1.9 | 2 |
+| Q3 routes and distinct networks per region | 19 | 16 |
+| Q4 top 20 networks | 15 | 14 |
+| Q5 filtered region chart | 30 | 25 |
+| Q6 name search | 7.5 | 6 |
+| Q7 full sort | 62 | 72 |
+
+The four-chart "nothing selected" interaction took 67 ms in Chrome and 58 ms in Firefox;
+with /22-/24, ARIN and "cloud" it took 80 ms and 53 ms. On this machine the WASM backend was
+faster than JS on six queries in both browsers, but slower on the full sort (113 ms in Chrome,
+117 ms in Firefox), and the four-chart interaction was slower on WASM (95 to 105 ms in Chrome,
+75 to 88 ms in Firefox) because the engine falls back to JS for string results and mixed-string
+expressions (D-074, T-219): 127 runs in the engine and 168 on the JS executor.
+
+These are headless-browser numbers on the development machine, not the owner's machine, and
+they use the saved RIPE file rather than the live RIS feed. They close T-210's gap of having no
+browser numbers for the reference queries; T-217's Firefox acceptance still needs the real feed.

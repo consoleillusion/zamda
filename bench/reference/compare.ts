@@ -212,6 +212,6 @@ export function comparisonMarkdown(c: Comparison): string {
   for (const q of c.queries) lines.push(`| ${q.id} ${q.label} | ${fmt(q.zamda.median)} | ${fmt(q.zamdaNoSlice.median)} | ${fmt(q.arquero.median)} |${q.wasm ? ` ${fmt(q.wasm.median)} |` : ''}`);
   lines.push('', `| Dashboard interaction | four charts together | together, no slicing | one by one, no slicing |${withWasm ? ' WASM together | WASM one by one |' : ''}`, `| --- | ---: | ---: | ---: |${withWasm ? ' ---: | ---: |' : ''}`);
   for (const i of c.interactions) lines.push(`| ${i.label} | ${fmt(i.together.median)} | ${fmt(i.togetherNoSlice.median)} | ${fmt(i.oneByOne.median)} |${i.wasmTogether ? ` ${fmt(i.wasmTogether.median)} | ${fmt(i.wasmOneByOne!.median)} |` : ''}`);
-  if (c.wasmRuns) lines.push('', `WASM backend runs: ${c.wasmRuns.engine} in the engine, ${c.wasmRuns.fallback} on the JS executor (should be 0).`);
+  if (c.wasmRuns) lines.push('', `WASM backend runs: ${c.wasmRuns.engine} in the engine, ${c.wasmRuns.fallback} on the JS executor (the string fallbacks of D-074 and T-219).`);
   return lines.join('\n');
 }
