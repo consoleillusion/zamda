@@ -1,7 +1,7 @@
 // Tests for the table store (T-403): segments, validity, dictionary codes,
 // the retain window, snapshots and the C interface.
 
-use zamda_engine::store::{StoreError, Table};
+use zamda_engine::store::{Snapshot, StoreError, Table};
 use zamda_engine::types::Type;
 
 fn put<T: Copy>(table: &mut Table, col: usize, data: &[T]) {
@@ -317,6 +317,140 @@ fn the_c_interface_round_trips() {
     assert_eq!(zs_store_error(), StoreError::NoColumns as u32);
     assert_eq!(zs_type_width(4), 8);
     assert_eq!(zs_type_width(200), 0);
+}
+
+#[test]
+fn many_tiny_appends_compact_into_shared_storage() {
+    // Purpose: compaction changes the buffers, not the views: every id, row, value and snapshot stays as it was
+    let mut t = Table::new(&[Type::Int32], None).unwrap();
+    let mut ids = Vec::new();
+    let mut before: Option<Snapshot> = None;
+    for i in 0..40i32 {
+        t.begin(1).unwrap();
+        put(&mut t, 0, &[i]);
+        t.commit().unwrap();
+        ids.push(t.segments().last().unwrap().id);
+        if i == 7 {
+            before = Some(t.snapshot());
+        }
+    }
+    let before = before.unwrap();
+    assert_eq!((t.rows(), t.segments().len()), (40, 40));
+    assert_eq!(t.segments().iter().map(|v| v.id).collect::<Vec<_>>(), ids);
+    assert_eq!(read(&t), (0..40).collect::<Vec<_>>());
+
+    // Before the threshold each append owns its block; after it, a run of sixteen shares one.
+    assert!(!before.segments[0].shares_storage_with(&before.segments[1]));
+    let compacted = &t.segments()[0..16];
+    assert!(compacted[1..].iter().all(|v| v.shares_storage_with(&compacted[0])));
+    assert!(!t.segments()[16].shares_storage_with(&compacted[0]));
+    let fresh = t.snapshot();
+    assert!(fresh.segments[0].shares_storage_with(&fresh.segments[15]));
+
+    // A run started before compaction keeps the old blocks and their exact views.
+    assert!(!before.segments[0].shares_storage_with(&compacted[0]));
+    assert_eq!(before.rows, 8);
+    assert_eq!(before.segments.iter().map(|v| v.id).collect::<Vec<_>>(), ids[0..8]);
+    let old: Vec<i32> = before.segments.iter().flat_map(|v| v.values::<i32>(0).to_vec()).collect();
+    assert_eq!(old, (0..8).collect::<Vec<_>>());
+}
+
+#[test]
+fn compaction_keeps_dictionary_codes_validity_and_sizes() {
+    // Purpose: a merged block still answers with each view's own codes, dictionary size and presence of validity bytes
+    let mut t = Table::new(&[Type::Int32, Type::Dictionary], None).unwrap();
+    let mut expected: Vec<([i32; 2], u32, Option<Vec<u8>>)> = Vec::new();
+    let mut before: Option<Snapshot> = None;
+    for i in 0..24usize {
+        let dict_len = (i % 3 + 1) as u32;
+        let code = i as i32 % dict_len as i32;
+        let null = i % 4 == 1;
+        let codes = if null { [code, -7] } else { [code, code] };
+        let valid = if null { Some(vec![1u8, 0]) } else { None };
+        t.begin(2).unwrap();
+        put(&mut t, 0, &[i as i32 * 2, i as i32 * 2 + 1]);
+        put(&mut t, 1, &codes);
+        if let Some(v) = &valid {
+            put_valid(&mut t, 1, v);
+        }
+        t.set_dict_len(1, dict_len).unwrap();
+        t.commit().unwrap();
+        expected.push((codes, dict_len, valid));
+        if i == 3 {
+            before = Some(t.snapshot());
+        }
+    }
+    let before = before.unwrap();
+    for (i, v) in t.segments().iter().enumerate() {
+        assert_eq!(v.values::<i32>(0), &[i as i32 * 2, i as i32 * 2 + 1]);
+        assert_eq!(v.values::<i32>(1), &expected[i].0, "codes of segment {i}");
+        assert_eq!(v.dict_len(1), expected[i].1, "dictionary of segment {i}");
+        match &expected[i].2 {
+            Some(bytes) => {
+                assert_eq!(v.valid(1), Some(&bytes[..]), "validity of segment {i}");
+                assert!(v.has_nulls(1));
+            }
+            None => {
+                // Even though the merged block holds validity bytes for a
+                // neighbour, a segment that had none still reports none.
+                assert_eq!(v.valid(1), None, "validity of segment {i}");
+                assert!(!v.has_nulls(1));
+            }
+        }
+    }
+    for (i, v) in before.segments.iter().enumerate() {
+        assert_eq!(v.values::<i32>(1), &expected[i].0, "old codes of segment {i}");
+        assert_eq!(v.dict_len(1), expected[i].1, "old dictionary of segment {i}");
+        assert_eq!(v.valid(1), expected[i].2.as_ref().map(|b| &b[..]));
+    }
+}
+
+#[test]
+fn a_retain_window_trims_compacted_views_without_losing_rows() {
+    // Purpose: C-LIVE with compaction: the newest N rows are exact, and a snapshot from before compaction is untouched
+    let mut t = Table::new(&[Type::Int32], Some(20)).unwrap();
+    let mut before: Option<Snapshot> = None;
+    for i in 0..100i32 {
+        t.begin(1).unwrap();
+        put(&mut t, 0, &[i]);
+        t.commit().unwrap();
+        if i == 5 {
+            before = Some(t.snapshot());
+        }
+    }
+    let before = before.unwrap();
+    assert_eq!(read(&t), (80..100).collect::<Vec<_>>());
+    assert_eq!((t.rows(), t.dropped()), (20, 80));
+    let ids: Vec<u64> = t.segments().iter().map(|v| v.id).collect();
+    let mut unique = ids.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), ids.len(), "compaction must not repeat a segment id");
+    assert!(t.segments().iter().any(|v| v.offset() > 0), "the oldest view is trimmed inside a merged block");
+    let old: Vec<i32> = before.segments.iter().flat_map(|v| v.values::<i32>(0).to_vec()).collect();
+    assert_eq!(old, (0..6).collect::<Vec<_>>());
+    assert_eq!(before.rows, 6);
+}
+
+#[test]
+fn compaction_does_not_repeat_on_the_next_append() {
+    // Purpose: a new append starts a fresh block instead of copying the one just merged
+    let mut t = Table::new(&[Type::Int32], None).unwrap();
+    for i in 0..16i32 {
+        t.begin(1).unwrap();
+        put(&mut t, 0, &[i]);
+        t.commit().unwrap();
+    }
+    let first = &t.segments()[0];
+    let at = first.values_ptr(0);
+    assert!(first.shares_storage_with(&t.segments()[15]));
+    t.begin(1).unwrap();
+    put(&mut t, 0, &[16]);
+    t.commit().unwrap();
+    assert_eq!(t.segments()[0].values_ptr(0), at);
+    assert!(t.segments()[0].shares_storage_with(&t.segments()[15]));
+    assert!(!t.segments()[0].shares_storage_with(&t.segments()[16]));
+    assert_eq!(read(&t), (0..17).collect::<Vec<_>>());
 }
 
 #[test]

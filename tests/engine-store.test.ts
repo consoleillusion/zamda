@@ -166,6 +166,51 @@ maybe('engine tables', () => {
     engine.dispose();
   });
 
+  test('many tiny appends keep every row, dictionary and snapshot', () => {
+    // Purpose: C-LIVE with one-row appends (which the engine may compact): ids, codes, validity and the retain window stay exact
+    const s = schema({ x: t.int32, tag: t.dictionary });
+    const rows = Array.from({ length: 64 }, (_, i) => ({ x: i, tag: i % 5 === 3 ? null : `v${i % 4}` }));
+    const js = jsTable(s, [], { retain: { rows: 24 } });
+    const engine = new EngineTable(h, s, [], { retain: { rows: 24 } });
+    let before: EngineSnapshot | null = null;
+    for (let i = 0; i < rows.length; i++) {
+      js.append([rows[i]!]);
+      engine.append([rows[i]!]);
+      if (i === 7) before = engine.snapshot();
+    }
+    const old = before!;
+    const after = engine.snapshot();
+    const jsSegments = js.snapshot();
+    expect(after.rows).toBe(js.rowCount);
+    expect(engine.rowsDropped).toBe(js.rowsDropped);
+    expect(after.segments.map(g => g.rows)).toEqual(jsSegments.map(g => g.rowCount));
+    const ids = after.segments.map(g => g.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(old.rows).toBe(8);
+    expect(old.segments.map(g => g.rows)).toEqual(Array.from({ length: 8 }, () => 1));
+
+    // The retained rows are the last 24, one per segment, with their own codes.
+    after.segments.forEach((segment, i) => {
+      const row = rows[40 + i]!;
+      const x = readColumn(h, after, i, 0, 'int32');
+      const tag = readColumn(h, after, i, 1, 'dictionary');
+      expect(Array.from(new Int32Array(x.values.buffer))).toEqual([row.x]);
+      expect(segment.dictionaries[1]).toEqual(row.tag === null ? [] : [row.tag]);
+      expect(Array.from(new Int32Array(tag.values.buffer))).toEqual([0]);
+      expect(h.snapshotDictLen(after.handle, i, 1)).toBe(segment.dictionaries[1]!.length);
+      expect(tag.valid === null ? null : Array.from(tag.valid)).toEqual(row.tag === null ? [0] : null);
+    });
+    old.segments.forEach((segment, i) => {
+      const row = rows[i]!;
+      const x = readColumn(h, old, i, 0, 'int32');
+      expect(Array.from(new Int32Array(x.values.buffer))).toEqual([row.x]);
+      expect(segment.dictionaries[1]).toEqual(row.tag === null ? [] : [row.tag]);
+    });
+    old.release();
+    after.release();
+    engine.dispose();
+  });
+
   test('typed arrays with an offset are copied from the right place', () => {
     // Purpose: the loader copies a view's own bytes, not the start of its buffer
     const s = schema({ x: t.float64 });

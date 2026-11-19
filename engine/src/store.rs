@@ -6,15 +6,21 @@
 //
 // Strings never enter this crate: a utf8 or dictionary column is a column of
 // int32 codes plus the number of dictionary entries (`dict_len`); the host keeps
-// the strings. Validity is one byte per row (1 = present) and is dropped when
-// nothing is null. Every buffer is 8-byte aligned, so any element type can be
-// read in place.
+// the strings. Validity is one byte per row (1 = present) and is dropped from a
+// segment when nothing in it is null. Compaction may share one set of buffers
+// between several views, but keeps each view's dictionary sizes and validity
+// flags. Every buffer is 8-byte aligned, so any element type can be read in place.
 
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::ptr::NonNull;
 use std::rc::Rc;
 
 use crate::types::Type;
+
+// Compaction merges a tail run of at least this many small appends, holding no
+// more than COMPACT_MAX_ROWS rows together, into one shared set of buffers.
+const COMPACT_MIN_SEGMENTS: usize = 16;
+const COMPACT_MAX_ROWS: u64 = 65_536;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u32)]
@@ -99,10 +105,9 @@ impl Cell for f64 {}
 struct Column {
     ty: Type,
     values: Buf,
-    // None when no value is null.
+    // None when no view of the segment has validity bytes; whether a given view
+    // uses them, and which dictionary its codes belong to, is on the view.
     valid: Option<Buf>,
-    dict_len: u32,
-    nulls: u32,
 }
 
 struct SegmentData {
@@ -110,12 +115,18 @@ struct SegmentData {
 }
 
 // A segment, or the part of one that the retain window has not dropped yet.
+// Several views may share one SegmentData after compaction: each keeps its own
+// id, row range and per-column dictionary sizes, so neither a snapshot nor the
+// host's per-segment dictionaries can tell that the buffers were shared.
 #[derive(Clone)]
 pub struct View {
     pub id: u64,
     data: Rc<SegmentData>,
     offset: u32,
     pub rows: u32,
+    dict_lens: Vec<u32>,
+    has_valid: Vec<bool>,
+    compact_id: u64,
 }
 
 impl View {
@@ -128,14 +139,17 @@ impl View {
     }
 
     pub fn valid(&self, col: usize) -> Option<&[u8]> {
-        // Purpose: the column's validity bytes for this view's rows, or None when nothing in the column is null
+        // Purpose: this view's validity bytes, or None when the segment it came from had none
+        if !self.has_valid[col] {
+            return None;
+        }
         let c = &self.data.columns[col];
         c.valid.as_ref().map(|v| &v.bytes()[self.offset as usize..(self.offset + self.rows) as usize])
     }
 
     pub fn dict_len(&self, col: usize) -> u32 {
-        // Purpose: how many dictionary entries the column's codes may refer to (0 for other types)
-        self.data.columns[col].dict_len
+        // Purpose: how many dictionary entries this view's codes may refer to (0 for other types)
+        self.dict_lens[col]
     }
 
     pub fn column_type(&self, col: usize) -> Type {
@@ -160,8 +174,13 @@ impl View {
     }
 
     pub fn has_nulls(&self, col: usize) -> bool {
-        // Purpose: whether any row of the whole segment is null in this column (an upper bound for a trimmed view)
-        self.data.columns[col].nulls > 0
+        // Purpose: whether any row this view sees is null in this column
+        self.valid(col).map_or(false, |v| v.iter().any(|&b| b == 0))
+    }
+
+    pub fn shares_storage_with(&self, other: &View) -> bool {
+        // Purpose: whether two views read the same compacted buffers (for tests of compaction)
+        Rc::ptr_eq(&self.data, &other.data)
     }
 }
 
@@ -181,6 +200,7 @@ struct StagedColumn {
 
 thread_local! {
     static NEXT_SEGMENT_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
+    static NEXT_COMPACT_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
 }
 
 struct Staging {
@@ -289,6 +309,8 @@ impl Table {
         let staging = self.staging.take().ok_or(StoreError::NotStaged)?;
         let rows = staging.rows as usize;
         let mut columns = Vec::with_capacity(self.types.len());
+        let mut dict_lens = Vec::with_capacity(self.types.len());
+        let mut has_valid = Vec::with_capacity(self.types.len());
         for (index, staged) in staging.columns.into_iter().enumerate() {
             let ty = self.types[index];
             let values = staged.values.ok_or(StoreError::MissingColumn)?;
@@ -318,7 +340,9 @@ impl Table {
                     }
                 }
             }
-            columns.push(Column { ty, values, valid, dict_len, nulls });
+            has_valid.push(valid.is_some());
+            dict_lens.push(dict_len);
+            columns.push(Column { ty, values, valid });
         }
         if rows == 0 {
             return Ok(());
@@ -330,10 +354,106 @@ impl Table {
             id
         });
         self.next_id = id + 1;
-        self.segments.push(View { id, data: Rc::new(SegmentData { columns }), offset: 0, rows: staging.rows });
+        self.segments.push(View {
+            id,
+            data: Rc::new(SegmentData { columns }),
+            offset: 0,
+            rows: staging.rows,
+            dict_lens,
+            has_valid,
+            compact_id: 0,
+        });
         self.rows += rows as u64;
         self.enforce_retain();
+        self.compact_tail();
         Ok(())
+    }
+
+    fn compact_tail(&mut self) {
+        // Purpose: copy a run of small new segments into shared buffers, keeping every view's id, rows, codes and validity
+        let mut start = self.segments.len();
+        let mut rows = 0u64;
+        while start > 0 {
+            let view = &self.segments[start - 1];
+            if view.compact_id != 0 {
+                break;
+            }
+            let more = rows + view.rows as u64;
+            if more > COMPACT_MAX_ROWS {
+                break;
+            }
+            rows = more;
+            start -= 1;
+        }
+        if self.segments.len() - start < COMPACT_MIN_SEGMENTS {
+            return;
+        }
+        // Under memory pressure compaction is optional: if a block cannot be
+        // allocated, leave the table exactly as it was and try again next time.
+        if crate::memory::soft_exceeded() {
+            return;
+        }
+        let total = rows as usize;
+        let mut columns = Vec::with_capacity(self.types.len());
+        for (col, ty) in self.types.iter().enumerate() {
+            let w = width(*ty);
+            let bytes = match total.checked_mul(w) {
+                Some(bytes) => bytes,
+                None => return,
+            };
+            let mut values = match Buf::zeroed(bytes) {
+                Ok(buf) => buf,
+                Err(_) => return,
+            };
+            let any_valid = self.segments[start..].iter().any(|v| v.has_valid[col]);
+            let mut valid = if any_valid {
+                match Buf::zeroed(total) {
+                    Ok(buf) => Some(buf),
+                    Err(_) => return,
+                }
+            } else {
+                None
+            };
+            let to = values.as_mut_ptr();
+            let mut at = 0usize;
+            for view in &self.segments[start..] {
+                let n = view.rows as usize;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(view.values_ptr(col), to.add(at * w), n * w);
+                    if let Some(valid) = &mut valid {
+                        let bytes = valid.as_mut_ptr().add(at);
+                        match view.valid(col) {
+                            Some(v) => std::ptr::copy_nonoverlapping(v.as_ptr(), bytes, n),
+                            None => std::ptr::write_bytes(bytes, 1, n),
+                        }
+                    }
+                }
+                at += n;
+            }
+            columns.push(Column { ty: *ty, values, valid });
+        }
+        let compact_id = NEXT_COMPACT_ID.with(|n| {
+            let id = n.get();
+            n.set(id + 1);
+            id
+        });
+        let data = Rc::new(SegmentData { columns });
+        let mut views = Vec::with_capacity(self.segments.len() - start);
+        let mut offset = 0u32;
+        for old in &self.segments[start..] {
+            views.push(View {
+                id: old.id,
+                data: data.clone(),
+                offset,
+                rows: old.rows,
+                dict_lens: old.dict_lens.clone(),
+                has_valid: old.has_valid.clone(),
+                compact_id,
+            });
+            offset += old.rows;
+        }
+        self.segments.truncate(start);
+        self.segments.extend(views);
     }
 
     fn enforce_retain(&mut self) {
