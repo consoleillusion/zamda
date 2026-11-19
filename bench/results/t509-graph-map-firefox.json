@@ -1,0 +1,74 @@
+{
+  "state": {
+    "mode": "overview",
+    "nodes": 800,
+    "edges": 884,
+    "camera": {
+      "x": 0.5412008315324783,
+      "y": 0.5668970420956612,
+      "ratio": 0.5799672526465349
+    },
+    "detail": "Map overview · paths up to 3,000 km apart · 884 edges from the 2,000 strongest local · 800 ASes · hover for meaning, click to expand",
+    "live": "200 hot edges · 234 hot ASes in the last 60 s",
+    "status": "80,226 ASes · 122,862 directed edges from local file data/rrc00-bview.20261118.0000.gz · loaded in 80 ms",
+    "ms": "175 ms",
+    "map": {
+      "width": 1506,
+      "height": 560,
+      "painted": 314986
+    },
+    "legend": "edge = consecutive AS hops in one observed path  thickness = prefixes  red = live"
+  },
+  "hover": {
+    "point": {
+      "x": 733.7827458228987,
+      "y": 832.46762948503
+    },
+    "tooltip": {
+      "hidden": false,
+      "text": "AS34549\nDE · RIPE NCC · 1 route\nClick to expand its neighbourhood"
+    }
+  },
+  "afterClick": {
+    "mode": "neighbourhood",
+    "nodes": 800,
+    "edges": 1264,
+    "camera": {
+      "x": 0.5363682508468628,
+      "y": 0.7573865950107574,
+      "ratio": 0.42
+    },
+    "detail": "Neighbourhood of AS34549: 800 ASes, 1,264 edges · click Overview to return"
+  },
+  "afterOverview": {
+    "mode": "overview",
+    "nodes": 800,
+    "edges": 884,
+    "camera": {
+      "x": 0.5412008315324783,
+      "y": 0.5668970420956612,
+      "ratio": 0.5799672526465349
+    }
+  },
+  "afterAll": {
+    "mode": "all",
+    "nodes": 79882,
+    "edges": 122862,
+    "camera": {
+      "x": 0.506183996796608,
+      "y": 0.4560000002384186,
+      "ratio": 0.5131226471816712
+    }
+  },
+  "finalOverview": {
+    "mode": "overview",
+    "nodes": 800,
+    "edges": 884,
+    "camera": {
+      "x": 0.5412008315324783,
+      "y": 0.5668970420956612,
+      "ratio": 0.5799672526465349
+    }
+  },
+  "errors": []
+}

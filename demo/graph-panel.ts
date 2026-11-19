@@ -5,6 +5,7 @@
 import { loadGraph } from '../scripts/bgp/graph-file';
 import type { GraphArrays, GraphHeader } from '../scripts/bgp/graph-file';
 import {
+  LOCAL_SPAN_KM,
   OVERVIEW_EDGES,
   OVERVIEW_NODES,
   allEdges,
@@ -30,6 +31,7 @@ export interface GraphProbe {
   hotNodes: number;
   hotEdges: number;
   camera(): { x: number; y: number; ratio: number };
+  nodeScreen(asn: number): { x: number; y: number } | null;
   select(asn: number): Promise<void>;
   overview(): Promise<void>;
   all(): Promise<void>;
@@ -102,7 +104,7 @@ async function showOverview(
   current: () => boolean,
   camera: CameraMode,
 ): Promise<GraphDraw | null> {
-  // Purpose: draw the strongest edges, with a bounded node count for a readable first view
+  // Purpose: draw strong local paths on the map, with a bounded node count for a readable first view
   const began = performance.now();
   const rows = await overviewEdges(edges, OVERVIEW_EDGES, plans.overview);
   if (!current()) return null;
@@ -110,8 +112,9 @@ async function showOverview(
   if (!(await drawWithCamera(view, data, camera, current))) return null;
   view.setLive(hot);
   byId<HTMLElement>('graph-detail').textContent =
-    `Grouped by registered country · ${data.edges.length.toLocaleString()} edges drawn from the ` +
-    `${rows.length.toLocaleString()} strongest · ${data.nodes.length.toLocaleString()} ASes · click a node to expand`;
+    `Map overview · paths up to ${LOCAL_SPAN_KM.toLocaleString()} km apart · ` +
+    `${data.edges.length.toLocaleString()} edges from the ${rows.length.toLocaleString()} strongest local · ` +
+    `${data.nodes.length.toLocaleString()} ASes · hover for meaning, click to expand`;
   const ms = Math.round(performance.now() - began);
   byId<HTMLElement>('ms-graph').textContent = `${ms} ms`;
   return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms, edgeRows: rows };
@@ -194,6 +197,10 @@ export async function startGraph(): Promise<GraphPanel> {
     camera: function () {
       // Purpose: expose the renderer's camera state to the browser harness
       return view.camera();
+    },
+    nodeScreen: function (asn: number) {
+      // Purpose: expose a node's screen point so a browser check can hover it
+      return view.screen(asn);
     },
     select: runNeighbourhood,
     overview: runOverview,

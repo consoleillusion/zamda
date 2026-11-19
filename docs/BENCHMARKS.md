@@ -497,3 +497,23 @@ query to 200 hot edges with no console error. Raw samples are
 `bench/results/t508-graph-geo-chrome.json`, `bench/results/t508-graph-geo-firefox.json` and
 `bench/results/t508-graph-wheel-chrome.json`. These are development-machine numbers; the country
 centres are approximate, not city locations.
+
+## Map-first overview (T-509)
+
+Measured on 2026-11-20 after regenerating `data/graph.bin` from the same rrc00 dump. The `ZGR3`
+file is 6.7 MB and adds a country-centroid span to each of 122,862 edges: 88,638 are at most
+1,000 km, 6,812 are 1,000–3,000 km, 14,207 are 3,000–8,000 km and 13,205 are over 8,000 km. The
+overview plan keeps the 95,450 edges up to 3,000 km, picks the 2,000 strongest, and draws the 884
+whose endpoints fit the 800-AS node budget.
+
+| Browser | Graph load | Overview redraw | Overview state | Focus after click | All data | Errors |
+| --- | --- | --- | --- | --- | --- | --- |
+| Chrome 156 | 107 ms | 89 ms | 800 ASes, 884 edges, ratio 0.580 | 800 ASes, 1,264 edges, ratio 0.420 | 79,882 ASes, 122,862 edges, ratio 0.513 | 0 |
+| Firefox 158 | 80 ms | 175 ms | 800 ASes, 884 edges, ratio 0.580 | 800 ASes, 1,264 edges, ratio 0.420 | 79,882 ASes, 122,862 edges, ratio 0.513 | 0 |
+
+The map canvas painted about 315,000 pixels in both browsers and stayed under the graph while the
+camera moved. Both browsers showed the node tooltip (`AS34549 · DE · RIPE NCC · 1 route`), returned
+from a click to the same overview camera, then reached All data and returned again. The simulator
+still produced 200 hot edges. Raw samples are `bench/results/t509-graph-map-chrome.json` and
+`bench/results/t509-graph-map-firefox.json`. These are development-machine numbers; country
+centres, and therefore the span filter, are approximate rather than measured router locations.

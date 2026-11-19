@@ -57,8 +57,9 @@ The acceptance test for Milestone 2 and the benchmark for the spike.
   `as_name` dictionary, `path_len` uint8, `rir` dictionary.
 - **Graph data:** `bun run prep-bgp` also writes `data/graph.bin`: one row per
   AS and one weighted directed edge per consecutive pair in the chosen route's
-  `AS_PATH`, with labels and frozen positions (D-079). The same dump produced
-  80,226 nodes and 122,862 edges on 18 November 2026.
+  `AS_PATH`, with labels, frozen positions and approximate country-centre spans
+  (D-079, D-084). The same dump produced 80,226 nodes and 122,862 edges on
+  18 November 2026.
 - **Charts:** top 20 networks by route count; prefix-length histogram;
   path-length histogram; routes and distinct networks by region.
 - **Controls:** range brushes (`between`), region multi-select (`isIn`), name

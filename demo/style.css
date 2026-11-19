@@ -26,8 +26,14 @@ button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 6px; b
 .graph-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; }
 .graph-legend { color: var(--muted); display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 .graph-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-left: 6px; }
-.graph-canvas { width: 100%; height: 560px; border: 1px solid var(--line); border-radius: 8px; background: #fbfbf9; overflow: hidden; }
+.graph-canvas { position: relative; width: 100%; height: 560px; border: 1px solid var(--line); border-radius: 8px; background: #fbfbf9; overflow: hidden; }
 @media (prefers-color-scheme: dark) { .graph-canvas { background: #161615; } }
+.graph-world-map { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.graph-tooltip { position: absolute; z-index: 10; max-width: 240px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); box-shadow: 0 3px 12px #0002; font-size: 11px; line-height: 1.35; white-space: pre-line; pointer-events: none; }
+.graph-tooltip[hidden] { display: none; }
+.graph-edge-key { color: var(--muted); }
+.graph-edge-key i { display: inline-block; width: 16px; height: 2px; margin: 0 5px 3px 8px; background: #718096; }
+.graph-edge-key i.hot { background: var(--warn); }
 .chart { width: 100%; display: block; user-select: none; }
 .brushable { cursor: crosshair; touch-action: none; }
 .bar { fill: var(--accent); }

@@ -185,7 +185,8 @@ demo/dashboard.ts  the linked charts' plans, parameters and selection logic (tes
 demo/live.ts       RIS Live parsing, the live table and its plans, simulated feed (tested)
 demo/charts.ts     SVG drawing: bars, brushable histogram, region toggles, activity
 demo/graph-data.ts graph plans and the pure row-to-view conversion (tested)
-demo/graph-view.ts graphology + sigma WebGL renderer on frozen positions
+demo/graph-view.ts graphology + sigma WebGL renderer on frozen positions, synced world map
+demo/world-map.ts  committed, simplified Natural Earth land rings for the map layer
 demo/graph-panel.ts graph file loading, view controls and the browser probe
 demo/main.ts       wiring: load, run charts through latest(), feed the live panel
 ```

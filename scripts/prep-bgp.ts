@@ -221,6 +221,7 @@ export async function prepare(options: Options): Promise<void> {
   const graphFile = encodeGraph(graph, labels, centres, {
     ...source,
     layout: 'country-centroid-v1',
+    span: 'country-centroid-haversine-v1',
     centres: COUNTRIES_URL,
   });
   const directory = dirname(options.out);

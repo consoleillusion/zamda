@@ -2,14 +2,16 @@
 // into a zamda table without parsing each value.
 //
 // Layout:
-//   bytes 0-3   magic "ZGR2"
+//   bytes 0-3   magic "ZGR3"
 //   bytes 4-7   header length H, uint32 little-endian
 //   bytes 8..   header, UTF-8 JSON (GraphHeader), padded to a multiple of 4
 //   then        one buffer per column, each starting on a multiple of 4
 //
 // Node positions are stored, not recomputed in the browser: a deterministic
 // country-centred layout with small sunflowers per country, fixed for a given
-// file. Unknown countries fall back to an approximate regional centre.
+// file. Unknown countries fall back to an approximate regional centre. Each
+// edge also stores the great-circle distance between its endpoints' registered
+// country centres, so the browser can select local paths without recomputing it.
 
 import { schema, table, t } from '../../src';
 import type { JsTable } from '../../src';
@@ -20,11 +22,12 @@ export const GraphEdges = schema({
   from_as: t.uint32,
   to_as: t.uint32,
   prefixes: t.uint32,
+  span_km: t.uint16,
 });
 
 export type GraphEdgesTable = JsTable<typeof GraphEdges.fields>;
 
-const MAGIC = 'ZGR2';
+const MAGIC = 'ZGR3';
 const NO_NAME = 0xffffffff;
 const NO_RIR = 255;
 const NO_COUNTRY = 255;
@@ -39,7 +42,7 @@ interface ColumnRef {
 }
 
 export interface GraphHeader {
-  readonly version: 2;
+  readonly version: 3;
   readonly nodeCount: number;
   readonly edgeCount: number;
   readonly source: Readonly<Record<string, string | number>>;
@@ -48,7 +51,7 @@ export interface GraphHeader {
   readonly countries: readonly string[];
   readonly columns: Readonly<Record<
     'node_asn' | 'node_paths' | 'node_origins' | 'node_name' | 'node_rir' | 'node_country' | 'node_x' | 'node_y' |
-    'edge_from' | 'edge_to' | 'edge_prefixes',
+    'edge_from' | 'edge_to' | 'edge_prefixes' | 'edge_span',
     ColumnRef
   >>;
 }
@@ -78,6 +81,7 @@ export interface GraphArrays {
   readonly from_as: Uint32Array;
   readonly to_as: Uint32Array;
   readonly prefixes: Uint32Array;
+  readonly span_km: Uint16Array;
 }
 
 function align4(n: number): number {
@@ -116,6 +120,45 @@ function centreFor(
 function groupKey(centre: CountryCentre): string {
   // Purpose: one stable key for every AS that shares an approximate point
   return `${centre.lat},${centre.lon}`;
+}
+
+function haversineKm(a: CountryCentre, b: CountryCentre): number {
+  // Purpose: the great-circle distance between two approximate country points
+  const toRad = Math.PI / 180;
+  const lat1 = a.lat * toRad;
+  const lat2 = b.lat * toRad;
+  const halfLat = (lat2 - lat1) / 2;
+  const halfLon = (b.lon - a.lon) * toRad / 2;
+  const h = Math.sin(halfLat) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(halfLon) ** 2;
+  return 6371.0088 * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function edgeSpans(
+  asn: Uint32Array,
+  countryCodes: Uint8Array,
+  countries: readonly string[],
+  rirCodes: Uint8Array,
+  rirs: readonly string[],
+  centres: ReadonlyMap<string, CountryCentre>,
+  from: Uint32Array,
+  to: Uint32Array,
+): Uint16Array {
+  // Purpose: estimate each edge's length from its endpoints' registered-country centroids
+  const index = new Map<number, number>();
+  for (let i = 0; i < asn.length; i++) index.set(asn[i]!, i);
+  const spans = new Uint16Array(from.length);
+  for (let i = 0; i < from.length; i++) {
+    const a = index.get(from[i]!);
+    const b = index.get(to[i]!);
+    if (a === undefined || b === undefined) {
+      spans[i] = 65535;
+      continue;
+    }
+    const fromCentre = centreFor(countryKey(countryCodes[a]!, countries), rirCodes[a]!, rirs, centres);
+    const toCentre = centreFor(countryKey(countryCodes[b]!, countries), rirCodes[b]!, rirs, centres);
+    spans[i] = Math.min(65535, Math.round(haversineKm(fromCentre, toCentre)));
+  }
+  return spans;
 }
 
 function clampToCanvas(value: number): number {
@@ -223,6 +266,16 @@ export function encodeGraph(
     }
   }
   const { x, y } = layoutNodes(graph.nodes.asn, nodeCountry, countries, nodeRir, rirs, centres);
+  const spanKm = edgeSpans(
+    graph.nodes.asn,
+    nodeCountry,
+    countries,
+    nodeRir,
+    rirs,
+    centres,
+    graph.edges.from_as,
+    graph.edges.to_as,
+  );
 
   const buffers: [keyof GraphHeader['columns'], Uint8Array][] = [
     ['node_asn', new Uint8Array(graph.nodes.asn.buffer, graph.nodes.asn.byteOffset, n * 4)],
@@ -236,6 +289,7 @@ export function encodeGraph(
     ['edge_from', new Uint8Array(graph.edges.from_as.buffer, graph.edges.from_as.byteOffset, m * 4)],
     ['edge_to', new Uint8Array(graph.edges.to_as.buffer, graph.edges.to_as.byteOffset, m * 4)],
     ['edge_prefixes', new Uint8Array(graph.edges.prefixes.buffer, graph.edges.prefixes.byteOffset, m * 4)],
+    ['edge_span', new Uint8Array(spanKm.buffer, spanKm.byteOffset, m * 2)],
   ];
 
   let headerBytes = new Uint8Array(0);
@@ -248,7 +302,7 @@ export function encodeGraph(
       at = align4(at + bytes.length);
     }
     const header: GraphHeader = {
-      version: 2,
+      version: 3,
       nodeCount: n,
       edgeCount: m,
       source,
@@ -281,7 +335,7 @@ export function readGraphHeader(bytes: Uint8Array): GraphHeader {
   }
   const length = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(4, true);
   const header = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + length))) as GraphHeader;
-  if (header.version !== 2) throw new Error(`Unsupported graph file version ${String(header.version)}`);
+  if (header.version !== 3) throw new Error(`Unsupported graph file version ${String(header.version)}`);
   return header;
 }
 
@@ -295,6 +349,10 @@ export function decodeGraph(input: Uint8Array): { arrays: GraphArrays; header: G
   const u32 = function (ref: ColumnRef, count: number): Uint32Array {
     // Purpose: a Uint32Array view of one column
     return new Uint32Array(bytes.buffer, bytes.byteOffset + ref.offset, count);
+  };
+  const u16 = function (ref: ColumnRef, count: number): Uint16Array {
+    // Purpose: a Uint16Array view of one column
+    return new Uint16Array(bytes.buffer, bytes.byteOffset + ref.offset, count);
   };
   const u8 = function (ref: ColumnRef, count: number): Uint8Array {
     // Purpose: a Uint8Array view of one column
@@ -334,6 +392,7 @@ export function decodeGraph(input: Uint8Array): { arrays: GraphArrays; header: G
       from_as: u32(col.edge_from, m),
       to_as: u32(col.edge_to, m),
       prefixes: u32(col.edge_prefixes, m),
+      span_km: u16(col.edge_span, m),
     },
   };
 }
@@ -346,6 +405,7 @@ export function loadGraph(input: Uint8Array): { edges: GraphEdgesTable; arrays: 
       from_as: arrays.from_as,
       to_as: arrays.to_as,
       prefixes: arrays.prefixes,
+      span_km: arrays.span_km,
     },
   });
   return { edges, arrays, header };

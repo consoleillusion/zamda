@@ -9,13 +9,15 @@ import { GraphEdges } from '../scripts/bgp/graph-file';
 
 export type EdgeTable = JsTable<typeof GraphEdges.fields>;
 
-export const OVERVIEW_EDGES = 10_000;
-export const OVERVIEW_NODES = 2_000;
+export const OVERVIEW_EDGES = 2_000;
+export const OVERVIEW_NODES = 800;
+export const LOCAL_SPAN_KM = 3_000;
 export const NEIGHBOURHOOD_EDGES = 2_000;
 export const NEIGHBOURHOOD_NODES = 2_000;
 export const NEIGHBOURHOOD_HOPS = 2;
 // Sigma's camera ratio is the fraction of the graph's square shown: smaller is closer.
-export const FRAME_SPAN = 1.1;
+export const FRAME_SPAN = 0.9;
+export const FRAME_RATIO_MAX = 0.78;
 export const FOCUS_RATIO = 0.42;
 
 export interface CameraView {
@@ -28,6 +30,7 @@ export interface GraphEdgeRow {
   readonly from_as: number;
   readonly to_as: number;
   readonly prefixes: number;
+  readonly span_km: number;
 }
 
 export interface GraphNodeView {
@@ -47,6 +50,7 @@ export interface GraphEdgeView {
   readonly from: number;
   readonly to: number;
   readonly weight: number;
+  readonly spanKm: number;
 }
 
 export interface ActivityRow {
@@ -67,8 +71,9 @@ export interface ViewOptions {
 }
 
 export function compileOverviewPlan(edgeLimit: number = OVERVIEW_EDGES) {
-  // Purpose: the simplified overview's strongest-edge plan, compiled once
+  // Purpose: the map overview's local, strongest-edge plan, compiled once
   return pipe(GraphEdges)
+    .filter(c => c.span_km.lte(LOCAL_SPAN_KM))
     .sort(c => [c.prefixes.desc(), c.from_as.asc(), c.to_as.asc()])
     .limit(edgeLimit)
     .compile();
@@ -88,7 +93,7 @@ export function compileNeighbourhoodPlans(edgeLimit: number = NEIGHBOURHOOD_EDGE
 export function compileAllPlan() {
   // Purpose: the all-data mode's plan: every weighted edge, in file order
   return pipe(GraphEdges)
-    .select(c => ({ from_as: c.from_as, to_as: c.to_as, prefixes: c.prefixes }))
+    .select(c => ({ from_as: c.from_as, to_as: c.to_as, prefixes: c.prefixes, span_km: c.span_km }))
     .compile();
 }
 
@@ -127,7 +132,7 @@ export async function overviewEdges(
   limit: number = OVERVIEW_EDGES,
   plan = compileOverviewPlan(limit),
 ): Promise<readonly GraphEdgeRow[]> {
-  // Purpose: the strongest edges in the graph, within the given budget
+  // Purpose: the strongest local edges in the graph, within the given budget
   return (await plan.execute(edges)).toArray() as GraphEdgeRow[];
 }
 
@@ -198,7 +203,13 @@ export function buildViewData(
   const edges: GraphEdgeView[] = [];
   for (const row of rows) {
     if (!kept.has(row.from_as) || !kept.has(row.to_as)) continue;
-    edges.push({ key: edgeKey(row.from_as, row.to_as), from: row.from_as, to: row.to_as, weight: row.prefixes });
+    edges.push({
+      key: edgeKey(row.from_as, row.to_as),
+      from: row.from_as,
+      to: row.to_as,
+      weight: row.prefixes,
+      spanKm: row.span_km,
+    });
   }
   return { nodes, edges, truncated: rows.length - edges.length };
 }
@@ -219,5 +230,5 @@ export function frameCamera(data: GraphViewData): CameraView {
   const x = (minX + maxX + 2) / 4;
   const y = (minY + maxY + 2) / 4;
   const span = Math.max(maxX - minX, maxY - minY, 0.05);
-  return { x, y, ratio: Math.min(1, Math.max(0.45, FRAME_SPAN / span)) };
+  return { x, y, ratio: Math.min(FRAME_RATIO_MAX, Math.max(0.45, FRAME_SPAN / span)) };
 }

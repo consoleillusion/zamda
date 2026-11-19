@@ -368,7 +368,7 @@ describe('AS adjacency graph', () => {
     const centres = parseCountryCentres(COUNTRIES_JSON);
     const encoded = encodeGraph(builder.finish(), labels, centres, { collector: 'fixture' });
     const { arrays, header } = decodeGraph(encoded);
-    expect(header.version).toBe(2);
+    expect(header.version).toBe(3);
     expect(header.nodeCount).toBe(7);
     expect(header.edgeCount).toBe(3);
     expect(header.source).toEqual({ collector: 'fixture' });
@@ -380,6 +380,10 @@ describe('AS adjacency graph', () => {
     expect(arrays.country[byAsn.get(200)!]).toBeNull();
     expect(arrays.rir[byAsn.get(3356)!]).toBe('ARIN');
     expect(arrays.rir[byAsn.get(64512)!]).toBeNull();
+    expect(arrays.span_km.length).toBe(3);
+    expect(arrays.span_km[0]).toBeGreaterThan(0);
+    expect(arrays.span_km[1]).toBe(0);
+    expect(arrays.span_km[2]).toBeGreaterThan(0);
     expect(arrays.x.every(Number.isFinite) && arrays.y.every(Number.isFinite)).toBe(true);
     expect(arrays.x.every(v => Math.abs(v) <= 1) && arrays.y.every(v => Math.abs(v) <= 1)).toBe(true);
     const us = [byAsn.get(13335)!, byAsn.get(3356)!];

@@ -34,9 +34,10 @@ function sample(): { arrays: GraphArrays; edges: JsTable<typeof GraphEdges.field
     from_as: Uint32Array.from([1, 2, 3, 4, 5, 1]),
     to_as: Uint32Array.from([2, 3, 4, 5, 6, 6]),
     prefixes: Uint32Array.from([10, 9, 8, 7, 6, 1]),
+    span_km: Uint16Array.from([100, 200, 300, 400, 500, 9000]),
   };
   const edges = table(GraphEdges, {
-    columns: { from_as: arrays.from_as, to_as: arrays.to_as, prefixes: arrays.prefixes },
+    columns: { from_as: arrays.from_as, to_as: arrays.to_as, prefixes: arrays.prefixes, span_km: arrays.span_km },
   });
   return { arrays, edges };
 }
@@ -46,10 +47,13 @@ describe('graph data selection', () => {
     const { edges } = sample();
     const rows = await overviewEdges(edges, 3);
     expect(rows).toEqual([
-      { from_as: 1, to_as: 2, prefixes: 10 },
-      { from_as: 2, to_as: 3, prefixes: 9 },
-      { from_as: 3, to_as: 4, prefixes: 8 },
+      { from_as: 1, to_as: 2, prefixes: 10, span_km: 100 },
+      { from_as: 2, to_as: 3, prefixes: 9, span_km: 200 },
+      { from_as: 3, to_as: 4, prefixes: 8, span_km: 300 },
     ]);
+    const local = await overviewEdges(edges, 10);
+    expect(local.length).toBe(5);
+    expect(local.some(row => row.from_as === 1 && row.to_as === 6)).toBe(false);
   });
 
   test('all-data mode returns every edge in file order', async () => {
@@ -68,10 +72,10 @@ describe('graph data selection', () => {
     const plans = compileGraphPlans();
     const rows = await neighbourhoodEdges(edges, plans, 3, 10);
     expect(rows).toEqual([
-      { from_as: 1, to_as: 2, prefixes: 10 },
-      { from_as: 2, to_as: 3, prefixes: 9 },
-      { from_as: 3, to_as: 4, prefixes: 8 },
-      { from_as: 4, to_as: 5, prefixes: 7 },
+      { from_as: 1, to_as: 2, prefixes: 10, span_km: 100 },
+      { from_as: 2, to_as: 3, prefixes: 9, span_km: 200 },
+      { from_as: 3, to_as: 4, prefixes: 8, span_km: 300 },
+      { from_as: 4, to_as: 5, prefixes: 7, span_km: 400 },
     ]);
   });
 
@@ -95,12 +99,12 @@ describe('graph data selection', () => {
     const view = buildViewData(arrays, rows, { nodeLimit: 4 });
     expect(view.nodes.map(n => n.asn)).toEqual([1, 2, 3, 4]);
     expect(view.nodes[1]).toMatchObject({ asn: 2, name: null, label: 'AS2', rir: 'RIPE', country: 'DE' });
-    expect(view.edges.map(e => [e.from, e.to, e.weight])).toEqual([
-      [1, 2, 10],
-      [2, 3, 9],
-      [3, 4, 8],
+    expect(view.edges.map(e => [e.from, e.to, e.weight, e.spanKm])).toEqual([
+      [1, 2, 10, 100],
+      [2, 3, 9, 200],
+      [3, 4, 8, 300],
     ]);
-    expect(view.truncated).toBe(3);
+    expect(view.truncated).toBe(2);
   });
 
   test('the default view frames closer, and a click focus zooms in further', async () => {
