@@ -26,6 +26,7 @@ export interface GraphNodeView {
   readonly name: string | null;
   readonly label: string;
   readonly rir: string | null;
+  readonly country: string | null;
   readonly x: number;
   readonly y: number;
   readonly paths: number;
@@ -178,6 +179,7 @@ export function buildViewData(
       name: arrays.name[i] ?? null,
       label: arrays.name[i] ?? `AS${asn}`,
       rir: arrays.rir[i] ?? null,
+      country: arrays.country[i] ?? null,
       x: arrays.x[i]!,
       y: arrays.y[i]!,
       paths: arrays.paths[i]!,

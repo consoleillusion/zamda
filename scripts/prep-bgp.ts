@@ -6,7 +6,7 @@
 //   bun run prep-bgp                         latest full day: yesterday 00:00 UTC, collector rrc00
 //   bun run prep-bgp --date 20261101         a given day
 //   bun run prep-bgp --rrc rrc01 --time 0800 another collector and dump time (0000, 0800, 1600)
-//   bun run prep-bgp --mrt dump.gz --names asn.txt --stats nro-delegated-stats
+//   bun run prep-bgp --mrt dump.gz --names asn.txt --stats nro-delegated-stats --countries countries.json
 //                                            local files instead of downloads
 //   bun run prep-bgp --graph-out data/x.bin  write the graph somewhere else
 //
@@ -23,11 +23,13 @@ import { encodeRoutes } from './bgp/file';
 import { GraphBuilder } from './bgp/graph';
 import { encodeGraph } from './bgp/graph-file';
 import { MrtReader } from './bgp/mrt';
-import { parseAsNames, parseRirRanges, rirLookup } from './bgp/registry';
+import { parseAsCountries, parseAsNames, parseCountryCentres, parseRirRanges, rirLookup } from './bgp/registry';
 import { RouteBuilder } from './bgp/routes';
 
 const ASN_NAMES_URL = 'https://ftp.ripe.net/ripe/asnames/asn.txt';
 const NRO_STATS_URL = 'https://ftp.ripe.net/pub/stats/ripencc/nro-stats/latest/nro-delegated-stats';
+const COUNTRIES_URL =
+  'https://raw.githubusercontent.com/mledoze/countries/5d15c0ff8c87ef2f1f8e944093522d4b2de2dd5b/countries.json';
 
 export interface Options {
   rrc: string;
@@ -36,6 +38,7 @@ export interface Options {
   mrt: string | null;
   names: string | null;
   stats: string | null;
+  countries: string | null;
   out: string;
   graphOut: string;
 }
@@ -55,6 +58,7 @@ export function parseArgs(argv: readonly string[]): Options {
     mrt: null,
     names: null,
     stats: null,
+    countries: null,
     out: 'data/routes.bin',
     graphOut: 'data/graph.bin',
   };
@@ -68,6 +72,7 @@ export function parseArgs(argv: readonly string[]): Options {
     else if (flag === '--mrt') options.mrt = value;
     else if (flag === '--names') options.names = value;
     else if (flag === '--stats') options.stats = value;
+    else if (flag === '--countries') options.countries = value;
     else if (flag === '--out') options.out = value;
     else if (flag === '--graph-out') options.graphOut = value;
     else throw new Error(`Unknown option ${flag}`);
@@ -144,13 +149,23 @@ async function* dumpBytes(options: Options): AsyncGenerator<Uint8Array> {
 export async function prepare(options: Options): Promise<void> {
   // Purpose: read the dump and registry files, build one route and one graph per prefix, and write both files
   const started = performance.now();
-  const [namesText, statsText] = await Promise.all([text(options.names, ASN_NAMES_URL), text(options.stats, NRO_STATS_URL)]);
+  const [namesText, statsText, countriesText] = await Promise.all([
+    text(options.names, ASN_NAMES_URL),
+    text(options.stats, NRO_STATS_URL),
+    text(options.countries, COUNTRIES_URL),
+  ]);
   const names = parseAsNames(namesText);
+  const countries = parseAsCountries(namesText);
+  const centres = parseCountryCentres(countriesText);
   const rir = rirLookup(parseRirRanges(statsText));
   const labels = {
     asName: function (asn: number): string | null {
       // Purpose: the network's name, if asn.txt has it
       return names.get(asn) ?? null;
+    },
+    country: function (asn: number): string | null {
+      // Purpose: the registered country, if asn.txt has it
+      return countries.get(asn) ?? null;
     },
     rir,
   };
@@ -203,7 +218,11 @@ export async function prepare(options: Options): Promise<void> {
     generated: new Date().toISOString(),
   };
   const file = encodeRoutes(routes, labels, source);
-  const graphFile = encodeGraph(graph, labels, source);
+  const graphFile = encodeGraph(graph, labels, centres, {
+    ...source,
+    layout: 'country-centroid-v1',
+    centres: COUNTRIES_URL,
+  });
   const directory = dirname(options.out);
   await mkdir(directory, { recursive: true });
   await writeFile(options.out, file);

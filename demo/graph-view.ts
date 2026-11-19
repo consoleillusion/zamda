@@ -30,8 +30,9 @@ const LIVE_COLOR = '#e83e3e';
 const EDGE_COLOR = 'rgba(113, 128, 150, 0.28)';
 const LIVE_EDGE_COLOR = 'rgba(232, 62, 62, 0.95)';
 const LABEL_LIMIT = 8;
-const ZOOM_DURATION = 550;
-const FOCUS_RATIO = 1.8;
+const ZOOM_DURATION = 450;
+const FOCUS_RATIO = 2.8;
+const WHEEL_RATIO = 1.35;
 
 interface CameraView {
   x: number;
@@ -73,6 +74,7 @@ function populateGraph(graph: Graph, data: GraphViewData): void {
       asn: node.asn,
       paths: node.paths,
       rir: node.rir,
+      country: node.country,
     });
   }
   for (const edge of data.edges) {
@@ -148,7 +150,7 @@ export function createGraphView(container: HTMLElement, onSelect: (asn: number) 
         maxCameraRatio: 12,
         stagePadding: 24,
         zoomDuration: ZOOM_DURATION,
-        zoomingRatio: 1.12,
+        zoomingRatio: WHEEL_RATIO,
         inertiaDuration: 350,
         inertiaRatio: 0.8,
       },

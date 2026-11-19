@@ -10,7 +10,7 @@ import { count, pipe } from '../src';
 import { Routes, encodeRoutes, formatPrefix, loadRoutes } from '../scripts/bgp/file';
 import type { RibGraphRecord, RibRecord } from '../scripts/bgp/mrt';
 import { MrtFormatError, MrtReader } from '../scripts/bgp/mrt';
-import { parseAsNames, parseRirRanges, rirLookup } from '../scripts/bgp/registry';
+import { parseAsCountries, parseAsNames, parseCountryCentres, parseRirRanges, rirLookup } from '../scripts/bgp/registry';
 import { GraphBuilder } from '../scripts/bgp/graph';
 import { GraphEdges, decodeGraph, encodeGraph, loadGraph } from '../scripts/bgp/graph-file';
 import { RouteBuilder } from '../scripts/bgp/routes';
@@ -352,36 +352,42 @@ describe('AS adjacency graph', () => {
     expect(second.stats.duplicatePrefixedPairs).toBe(1);
   });
 
-  test('graph.bin round-trips labels and frozen coordinates, and loads an edges table', async () => {
+  test('graph.bin round-trips labels, country centres and frozen coordinates, and loads an edges table', async () => {
     const builder = new GraphBuilder();
     for (const r of readAll(DUMP, DUMP.length).records) {
       builder.add({ prefix: r.prefix, prefixLength: r.prefixLength, paths: r.paths });
     }
     const names = parseAsNames(ASN_TXT);
+    const countries = parseAsCountries(ASN_TXT);
     const rir = rirLookup(parseRirRanges(NRO_STATS));
     const labels = {
       asName: (asn: number) => names.get(asn) ?? null,
+      country: (asn: number) => countries.get(asn) ?? null,
       rir,
     };
-    const encoded = encodeGraph(builder.finish(), labels, { collector: 'fixture' });
+    const centres = parseCountryCentres(COUNTRIES_JSON);
+    const encoded = encodeGraph(builder.finish(), labels, centres, { collector: 'fixture' });
     const { arrays, header } = decodeGraph(encoded);
+    expect(header.version).toBe(2);
     expect(header.nodeCount).toBe(7);
     expect(header.edgeCount).toBe(3);
     expect(header.source).toEqual({ collector: 'fixture' });
+    expect(new Set(header.countries)).toEqual(new Set(['US', 'ZZ', 'NZ']));
     const byAsn = new Map(Array.from(arrays.asn, (asn, i) => [asn, i] as const));
     expect(arrays.name[byAsn.get(13335)!]).toBe('CLOUDFLARENET');
+    expect(arrays.country[byAsn.get(13335)!]).toBe('US');
+    expect(arrays.country[byAsn.get(64512)!]).toBe('ZZ');
+    expect(arrays.country[byAsn.get(200)!]).toBeNull();
     expect(arrays.rir[byAsn.get(3356)!]).toBe('ARIN');
     expect(arrays.rir[byAsn.get(64512)!]).toBeNull();
     expect(arrays.x.every(Number.isFinite) && arrays.y.every(Number.isFinite)).toBe(true);
     expect(arrays.x.every(v => Math.abs(v) <= 1) && arrays.y.every(v => Math.abs(v) <= 1)).toBe(true);
-    let closest = Infinity;
-    for (let i = 0; i < arrays.x.length; i++) {
-      for (let j = i + 1; j < arrays.x.length; j++) {
-        closest = Math.min(closest, Math.hypot(arrays.x[i]! - arrays.x[j]!, arrays.y[i]! - arrays.y[j]!));
-      }
-    }
-    expect(closest).toBeGreaterThan(0.2);
-    expect(decodeGraph(encodeGraph(builder.finish(), labels, { collector: 'fixture' })).arrays.x).toEqual(arrays.x);
+    const us = [byAsn.get(13335)!, byAsn.get(3356)!];
+    const nz = byAsn.get(4200000001)!;
+    const sameCountry = Math.hypot(arrays.x[us[0]]! - arrays.x[us[1]]!, arrays.y[us[0]]! - arrays.y[us[1]]!);
+    const acrossCountries = Math.hypot(arrays.x[us[0]]! - arrays.x[nz]!, arrays.y[us[0]]! - arrays.y[nz]!);
+    expect(sameCountry).toBeLessThan(acrossCountries / 8);
+    expect(decodeGraph(encodeGraph(builder.finish(), labels, centres, { collector: 'fixture' })).arrays.x).toEqual(arrays.x);
 
     const loaded = loadGraph(encoded);
     expect(loaded.edges.rowCount).toBe(3);
@@ -408,6 +414,14 @@ const ASN_TXT = [
   '',
 ].join('\n');
 
+const COUNTRIES_JSON = JSON.stringify([
+  { cca2: 'US', latlng: [38, -97] },
+  { cca2: 'NZ', latlng: [-41, 174] },
+  { cca2: 'AU', latlng: [-27, 133] },
+  { cca2: 'BAD', latlng: 'wrong' },
+  { cca2: 'NONE' },
+]);
+
 const NRO_STATS = [
   '2.3|nro|20261116|999|19830705|20261116|+0000',
   'arin|*|asn|*|100|summary',
@@ -426,6 +440,23 @@ describe('registry files', () => {
     expect(names.get(4200000001)).toBe('EXAMPLE-NET');
     expect(names.get(9999)).toBe('Name, with a comma');
     expect(names.size).toBe(6);
+  });
+
+  test('asn.txt: the trailing country is kept for the geographic layout', () => {
+    const countries = parseAsCountries(ASN_TXT);
+    expect(countries.get(13335)).toBe('US');
+    expect(countries.get(9999)).toBe('AU');
+    expect(countries.get(64512)).toBe('ZZ');
+    expect(countries.has(123)).toBe(false);
+  });
+
+  test('country centres: only valid ISO-2 points are used', () => {
+    const centres = parseCountryCentres(COUNTRIES_JSON);
+    expect(centres.size).toBe(3);
+    expect(centres.get('US')).toEqual({ lat: 38, lon: -97 });
+    expect(centres.get('NZ')).toEqual({ lat: -41, lon: 174 });
+    expect(centres.has('BAD')).toBe(false);
+    expect(centres.has('NONE')).toBe(false);
   });
 
   test('NRO stats: AS ranges by registry, IANA and summary lines skipped', () => {
@@ -496,6 +527,7 @@ describe('prep-bgp', () => {
     await writeFile(mrt, Bun.gzipSync(DUMP as Uint8Array<ArrayBuffer>));
     await writeFile(join(dir, 'asn.txt'), ASN_TXT);
     await writeFile(join(dir, 'stats'), NRO_STATS);
+    await writeFile(join(dir, 'countries.json'), COUNTRIES_JSON);
     const out = join(dir, 'out', 'routes.bin');
     const graphOut = join(dir, 'out', 'graph.bin');
     const log = console.log;
@@ -506,6 +538,7 @@ describe('prep-bgp', () => {
           '--mrt', mrt,
           '--names', join(dir, 'asn.txt'),
           '--stats', join(dir, 'stats'),
+          '--countries', join(dir, 'countries.json'),
           '--out', out,
           '--graph-out', graphOut,
         ]),
@@ -528,6 +561,7 @@ describe('prep-bgp', () => {
     expect(() => parseArgs(['--bogus', 'x'])).toThrow('Unknown option');
     expect(parseArgs([]).out).toBe('data/routes.bin');
     expect(parseArgs([]).graphOut).toBe('data/graph.bin');
+    expect(parseArgs([]).countries).toBeNull();
   });
 });
 
@@ -543,10 +577,12 @@ describe('prep-bgp download', () => {
     const dir = await mkdtemp(join(tmpdir(), 'zamda-dl-'));
     await writeFile(join(dir, 'asn.txt'), ASN_TXT);
     await writeFile(join(dir, 'stats'), NRO_STATS);
+    await writeFile(join(dir, 'countries.json'), COUNTRIES_JSON);
     const args = [
       '--date', '20261116',
       '--names', join(dir, 'asn.txt'),
       '--stats', join(dir, 'stats'),
+      '--countries', join(dir, 'countries.json'),
       '--out', join(dir, 'routes.bin'),
       '--graph-out', join(dir, 'graph.bin'),
     ];

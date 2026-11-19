@@ -26,6 +26,7 @@ function sample(): { arrays: GraphArrays; edges: JsTable<typeof GraphEdges.field
     origins: Uint32Array.from([10, 20, 30, 40, 50, 60]),
     name: ['ONE', null, 'THREE', 'FOUR', 'FIVE', 'SIX'],
     rir: ['ARIN', 'RIPE', 'APNIC', 'ARIN', 'LACNIC', null],
+    country: ['US', 'DE', 'JP', 'US', 'BR', null],
     x: Float32Array.from([0, 0.1, 0.2, 0.3, 0.4, 0.5]),
     y: Float32Array.from([0, 0.1, 0.2, 0.3, 0.4, 0.5]),
     from_as: Uint32Array.from([1, 2, 3, 4, 5, 1]),
@@ -91,7 +92,7 @@ describe('graph data selection', () => {
     const rows = await overviewEdges(edges, 6);
     const view = buildViewData(arrays, rows, { nodeLimit: 4 });
     expect(view.nodes.map(n => n.asn)).toEqual([1, 2, 3, 4]);
-    expect(view.nodes[1]).toMatchObject({ asn: 2, name: null, label: 'AS2', rir: 'RIPE' });
+    expect(view.nodes[1]).toMatchObject({ asn: 2, name: null, label: 'AS2', rir: 'RIPE', country: 'DE' });
     expect(view.edges.map(e => [e.from, e.to, e.weight])).toEqual([
       [1, 2, 10],
       [2, 3, 9],

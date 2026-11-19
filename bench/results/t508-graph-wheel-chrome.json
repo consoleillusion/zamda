@@ -1,0 +1,21 @@
+{
+  "before": {
+    "x": 0.5469688028097153,
+    "y": 0.5634869039058685,
+    "ratio": 1.2699350919907655
+  },
+  "zoomedIn": {
+    "x": 0.5283141346531218,
+    "y": 0.8918090373870804,
+    "ratio": 0.9406926607339003
+  },
+  "zoomedOut": {
+    "x": 0.5469687108624491,
+    "y": 0.5634885365617587,
+    "ratio": 1.269933466102216
+  },
+  "inFactor": 1.35,
+  "outFactor": 1.3499982716049381,
+  "graphDetail": "Grouped by registered country · 3,881 edges drawn from the 10,000 strongest · 2,000 ASes · click a node to expand",
+  "errors": []
+}

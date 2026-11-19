@@ -110,8 +110,8 @@ async function showOverview(
   if (!(await drawWithCamera(view, data, camera, current))) return null;
   view.setLive(hot);
   byId<HTMLElement>('graph-detail').textContent =
-    `${data.edges.length.toLocaleString()} edges drawn from the ${rows.length.toLocaleString()} strongest · ` +
-    `${data.nodes.length.toLocaleString()} ASes · click a node to expand`;
+    `Grouped by registered country · ${data.edges.length.toLocaleString()} edges drawn from the ` +
+    `${rows.length.toLocaleString()} strongest · ${data.nodes.length.toLocaleString()} ASes · click a node to expand`;
   const ms = Math.round(performance.now() - began);
   byId<HTMLElement>('ms-graph').textContent = `${ms} ms`;
   return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms, edgeRows: rows };
@@ -134,7 +134,8 @@ async function showAll(
   if (!(await drawWithCamera(view, data, camera, current))) return null;
   view.setLive(hot);
   byId<HTMLElement>('graph-detail').textContent =
-    `All ${data.edges.length.toLocaleString()} directed edges · ${data.nodes.length.toLocaleString()} ASes · pan and zoom to inspect`;
+    `All ${data.edges.length.toLocaleString()} directed edges · ${data.nodes.length.toLocaleString()} ASes · ` +
+    'grouped by registered country; pan and zoom to inspect';
   const ms = Math.round(performance.now() - began);
   byId<HTMLElement>('ms-graph').textContent = `${ms} ms`;
   return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms, edgeRows: rows };
