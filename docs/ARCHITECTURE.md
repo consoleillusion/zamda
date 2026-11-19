@@ -179,11 +179,14 @@ Substrait mapping.
 ## The reference dashboard (demo/, not part of the package)
 
 ```
-demo/server.ts     Bun.serve: bundles index.html and serves data/routes.bin
+demo/server.ts     Bun.serve: bundles index.html and serves data/routes.bin and data/graph.bin
 demo/index.html    page layout; demo/style.css
 demo/dashboard.ts  the linked charts' plans, parameters and selection logic (tested)
 demo/live.ts       RIS Live parsing, the live table and its plans, simulated feed (tested)
 demo/charts.ts     SVG drawing: bars, brushable histogram, region toggles, activity
+demo/graph-data.ts graph plans and the pure row-to-view conversion (tested)
+demo/graph-view.ts graphology + sigma WebGL renderer on frozen positions
+demo/graph-panel.ts graph file loading, view controls and the browser probe
 demo/main.ts       wiring: load, run charts through latest(), feed the live panel
 ```
 

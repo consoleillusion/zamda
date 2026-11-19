@@ -5,6 +5,7 @@ import { latest } from '../src';
 import { formatPrefix, loadRoutes } from '../scripts/bgp/file';
 import { createHistogram, drawActivity, drawRegions, drawTopNetworks, formatCount } from './charts';
 import type { ActivityBucket } from './charts';
+import { startGraph } from './graph-panel';
 import { EMPTY_SELECTION, affectedBy, compilePlans, nameIndex, paramsFor, parseAddressRange, summariseNetworks } from './dashboard';
 import type { ChartId, RoutesTable, Selection } from './dashboard';
 import type { WasmSession } from '../src/backends/wasm';
@@ -61,6 +62,11 @@ async function start(): Promise<void> {
   const names = new Map<number, string>();
   const dashboard = createDashboard(routes, names);
   dashboard.runAll();
+  void startGraph().catch(function (error: unknown) {
+    // Purpose: a graph failure must not take the route charts down with it
+    byId<HTMLElement>('graph-status').textContent = `Graph failed: ${String(error)}`;
+    console.error('graph failed', error);
+  });
   startLive(names);
 }
 

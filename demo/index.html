@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>zamda · BGP routing table</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -28,6 +29,22 @@
       <article class="card wide">
         <h2>Networks announcing the most routes <span class="ms" id="ms-networks"></span></h2>
         <svg id="chart-top" class="chart"></svg>
+      </article>
+      <article class="card wide graph-card">
+        <h2>AS graph <span class="ms" id="ms-graph"></span></h2>
+        <p class="hint" id="graph-status">Loading graph…</p>
+        <div class="graph-toolbar">
+          <button id="graph-overview" type="button">Overview</button>
+          <span id="graph-detail" class="hint"></span>
+          <span class="graph-legend">
+            <i style="background:#2f6fdb"></i> ARIN
+            <i style="background:#d0573c"></i> RIPE
+            <i style="background:#2e9e6b"></i> APNIC
+            <i style="background:#9b59b6"></i> LACNIC
+            <i style="background:#d69a00"></i> AFRINIC
+          </span>
+        </div>
+        <div id="graph-canvas" class="graph-canvas"></div>
       </article>
       <article class="card">
         <h2>Prefix length <span class="ms" id="ms-prefixLen"></span></h2>

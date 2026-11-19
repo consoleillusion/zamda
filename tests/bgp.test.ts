@@ -536,7 +536,13 @@ describe('prep-bgp download', () => {
     const dir = await mkdtemp(join(tmpdir(), 'zamda-dl-'));
     await writeFile(join(dir, 'asn.txt'), ASN_TXT);
     await writeFile(join(dir, 'stats'), NRO_STATS);
-    const args = ['--date', '20261116', '--names', join(dir, 'asn.txt'), '--stats', join(dir, 'stats'), '--out', join(dir, 'routes.bin')];
+    const args = [
+      '--date', '20261116',
+      '--names', join(dir, 'asn.txt'),
+      '--stats', join(dir, 'stats'),
+      '--out', join(dir, 'routes.bin'),
+      '--graph-out', join(dir, 'graph.bin'),
+    ];
     const gz = Bun.gzipSync(DUMP as Uint8Array<ArrayBuffer>);
     const realFetch = globalThis.fetch;
     const log = console.log;
@@ -565,5 +571,6 @@ describe('prep-bgp download', () => {
     const saved = new Uint8Array(await Bun.file(cachePath(parseArgs(args))).arrayBuffer());
     expect(saved).toEqual(gz);
     expect(loadRoutes(new Uint8Array(await Bun.file(join(dir, 'routes.bin')).arrayBuffer())).table.rowCount).toBe(4);
+    expect(decodeGraph(new Uint8Array(await Bun.file(join(dir, 'graph.bin')).arrayBuffer())).header.edgeCount).toBe(3);
   });
 });
