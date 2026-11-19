@@ -64,14 +64,13 @@ bun run check     # must pass before you finish: typecheck + tests + size
 ## How to do a task
 
 1. In `docs/TASKS.md`, set the task's status to `in progress` with your name.
-2. Work on a branch named `t-<id>-<slug>`, for example `t-103-aggregate`.
-3. Stay within the files the task lists. If you need to touch others, say why in
+2. Stay within the files the task lists. If you need to touch others, say why in
    the task notes.
-4. Finish only when the task's acceptance list is fully met and `bun run check`
+3. Finish only when the task's acceptance list is fully met and `bun run check`
    passes.
-5. Update the docs the task affects: status in `docs/CONTRACT.md` and
+4. Update the docs the task affects: status in `docs/CONTRACT.md` and
    `docs/TASKS.md`, and `README.md` if user-visible behaviour changed.
-6. Report: what you did, what you verified, and anything you could not verify.
+5. Report: what you did, what you verified, and anything you could not verify.
 
 ## Hot files
 
