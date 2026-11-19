@@ -25,7 +25,7 @@
 
 import type { BackendOptions, ResultData } from '../../backend';
 import type { AnyCells, Column } from '../../column';
-import { allocate, concat, emptyColumn, makeColumn, nums, slice, take } from '../../column';
+import { allocate, cells, concat, emptyColumn, makeColumn, nums, slice, stringColumn, take, texts } from '../../column';
 import { AbortError, PlanError } from '../../errors';
 import type { IrExpr, IrNode, IrPlan, LiteralValue } from '../../ir';
 import { nodeExprs, walkExpr } from '../../ir';
@@ -468,8 +468,97 @@ class AggregateSink implements Sink {
   }
 }
 
+// One chunk of a sort's input, kept by reference. Its columns are not gathered
+// before the sort: the row numbers in `order` are positions in the concatenation
+// of these pieces, and a piece's own selection resolves one to a source row.
+interface SortPiece {
+  readonly batch: Batch;
+  readonly selection: Uint32Array | null;
+  readonly offset: number;
+  readonly rowCount: number;
+}
+
+interface GatherReader {
+  readonly values: AnyCells;
+  readonly valid: Uint8Array | null;
+  readonly selection: Uint32Array | null;
+  readonly offset: number;
+}
+
+// Rows gathered between two yields, so a large gather can still be aborted.
+const GATHER_BLOCK_ROWS = 65536;
+
+function* gatherColumn(
+  type: DataType,
+  readers: readonly GatherReader[],
+  pieceOf: Uint32Array,
+  order: Uint32Array,
+): Generator<void, Column> {
+  // Purpose: read one output column straight from the sort's source pieces, in sorted order
+  const textual = type.name === 'utf8' || type.name === 'dictionary';
+  const values = textual ? new Array<string>(order.length) : allocate(type, order.length);
+  const dst = values as unknown as AnyCells;
+  let anyNull = false;
+  for (const reader of readers) {
+    if (reader.valid) {
+      anyNull = true;
+      break;
+    }
+  }
+  const valid = anyNull ? new Uint8Array(order.length) : null;
+  for (let i = 0; i < order.length; i++) {
+    const row = order[i]!;
+    const piece = readers[pieceOf[row]!]!;
+    const local = piece.selection ? piece.selection[row - piece.offset]! : row - piece.offset;
+    dst[i] = piece.values[local]!;
+    if (valid) valid[i] = piece.valid ? piece.valid[local]! : 1;
+    if ((i + 1) % GATHER_BLOCK_ROWS === 0) yield;
+  }
+  // Pieces can carry different dictionaries, so gather dictionary rows as strings and re-encode.
+  if (type.name === 'dictionary') return stringColumn(type, values as string[], valid);
+  return makeColumn(type, values, valid);
+}
+
+function* gatherRows(
+  schema: readonly Field[],
+  needed: Needed,
+  pieces: readonly SortPiece[],
+  order: Uint32Array,
+): Generator<void, Batch> {
+  // Purpose: gather only the sorted rows, once, from the pieces the sort read its keys from
+  let total = 0;
+  for (const piece of pieces) total += piece.rowCount;
+  const pieceOf = new Uint32Array(total);
+  for (let p = 0; p < pieces.length; p++) {
+    const piece = pieces[p]!;
+    pieceOf.fill(p, piece.offset, piece.offset + piece.rowCount);
+  }
+  const columns: (Column | undefined)[] = [];
+  for (let c = 0; c < schema.length; c++) {
+    if (!wanted(needed, c)) {
+      columns.push(undefined);
+      continue;
+    }
+    const type = schema[c]!.type;
+    const textual = type.name === 'utf8' || type.name === 'dictionary';
+    const readers = pieces.map(function (piece): GatherReader {
+      const column = piece.batch.columns[c]!;
+      return {
+        values: textual ? (texts(column) as unknown as AnyCells) : cells(column),
+        valid: column.valid,
+        selection: piece.selection,
+        offset: piece.offset,
+      };
+    });
+    columns.push(yield* gatherColumn(type, readers, pieceOf, order));
+  }
+  return { columns, rowCount: order.length };
+}
+
 class SortSink implements Sink {
-  private readonly rows: Collector;
+  private readonly pieces: SortPiece[] = [];
+  private rowCount = 0;
+  private readonly keyFields = new Set<number>();
   private readonly keyPieces: Column[][];
 
   constructor(
@@ -478,33 +567,49 @@ class SortSink implements Sink {
     private readonly limit: number | null,
     private readonly options: BackendOptions,
   ) {
-    // Purpose: gather the rows and the evaluated sort keys for one sort node
-    this.rows = new Collector(node.schema, needed);
+    // Purpose: hold the sort's source rows as a selection and evaluate its keys in chunks
+    for (const key of node.keys) {
+      walkExpr(key.expr, e => {
+        if (e.kind === 'field') this.keyFields.add(e.index);
+      });
+    }
     this.keyPieces = node.keys.map(function () {
       return [];
     });
   }
 
   consume(stage: Stage): void {
-    // Purpose: keep this chunk's rows and evaluate its sort keys
-    const batch = dense(stage);
-    if (batch.rowCount === 0) return;
+    // Purpose: keep this chunk's source rows and gather only the columns the keys need
+    if (stage.rowCount === 0) return;
+    this.pieces.push({
+      batch: stage.batch,
+      selection: stage.selection,
+      offset: this.rowCount,
+      rowCount: stage.rowCount,
+    });
+    this.rowCount += stage.rowCount;
+    const keyStage: Stage = {
+      batch: stage.batch,
+      selection: stage.selection,
+      rowCount: stage.rowCount,
+      needed: this.keyFields,
+    };
+    const batch = dense(keyStage);
     this.node.keys.forEach((key, k) => {
       this.keyPieces[k]!.push(evaluate(key.expr, batch, this.options));
     });
-    this.rows.add(batch);
   }
 
   *finish(): Generator<void, Stage> {
-    // Purpose: sort row indexes in steps; the output is a selection over the gathered rows
-    const batch = this.rows.finish();
+    // Purpose: sort a selection over the source in steps, then gather the chosen rows once
     const keys: SortColumn[] = this.node.keys.map((key, k) => ({
       column: concat(key.expr.type, this.keyPieces[k]!),
       descending: key.descending,
       nullsFirst: key.nullsFirst,
     }));
-    const order = yield* sortSteps(keys, batch.rowCount, this.limit);
-    return { batch, selection: order, rowCount: order.length, needed: this.needed };
+    const order = yield* sortSteps(keys, this.rowCount, this.limit);
+    const batch = yield* gatherRows(this.node.schema, this.needed, this.pieces, order);
+    return { batch, selection: null, rowCount: order.length, needed: this.needed };
   }
 }
 
