@@ -349,8 +349,9 @@ export class Pipeline<In extends Fields, Cur extends Fields, P extends ParamDecl
     );
   }
 
-  compile(): Plan<In, Cur, P> {
-    // Purpose: assemble, optimize and validate the IR, returning a reusable plan
+  /** @internal */
+  _compile(optimized: boolean): Plan<In, Cur, P> {
+    // Purpose: assemble and validate the IR, optionally skipping optimizer passes (test hook)
     const params: IrParam[] = Object.entries(this._decls).map(function ([name, decl]) {
       return isListDecl(decl) ? { name, type: decl.list, list: true } : { name, type: decl, list: false };
     });
@@ -362,7 +363,12 @@ export class Pipeline<In extends Fields, Cur extends Fields, P extends ParamDecl
       output: this._current.list,
       params,
     };
-    return new Plan(validate(optimize(plan)));
+    return new Plan(validate(optimized ? optimize(plan) : plan));
+  }
+
+  compile(): Plan<In, Cur, P> {
+    // Purpose: assemble, optimize and validate the IR, returning a reusable plan
+    return this._compile(true);
   }
 }
 

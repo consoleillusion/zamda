@@ -44,7 +44,7 @@ T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`
 | --- | --- | --- |
 | T-201 | Chunked, resumable execution: 64k-row chunks, yield about every 8 ms, abort within one time slice, progress callback. **Done.** | T-112 |
 | T-202 | `latest(plan)` helper: a new run aborts the one in flight. **Done.** | T-201 |
-| T-203 | Optimizer passes: constant folding, filter and project fusion, projection pushdown, limit pushdown; golden suite runs with passes on and off | T-112 |
+| T-203 (done) | Optimizer passes: constant folding, filter and project fusion, projection pushdown, limit pushdown; golden suite runs with passes on and off | T-112 |
 | T-204 | Append-only live tables: `table.append(rows)`, rolling `retain` window, a run sees the table as of its start. **Done.** | T-201 |
 | T-205 | `scripts/prep-bgp.ts`: download one RIPE RIS snapshot and write the routes file matching the reference schema. **Done; not yet run against a real dump.** | T-112 |
 | T-206 | Reference dashboard under `demo/`: four linked charts, controls as parameters, live panel on RIPE RIS Live. **Done** (`bun run demo`); checked in headless Chrome on synthetic data with the simulated feed, not yet on real data or the real feed. | T-202, T-204, T-205 |
