@@ -153,3 +153,8 @@ pipe(Users).select(c => ({ total: c.age.sum() }));
 
 // @ts-expect-error rename accepts existing column names only
 pipe(Users).rename({ nope: 'x' });
+
+// Sessions: an opaque RunSession reference; the backend decides what it does with it (T-416).
+void projected.execute(users, { session: { kind: 'zamda/wasm-session' } });
+// @ts-expect-error a session is a RunSession (an object with a kind), not a number
+void projected.execute(users, { session: 42 });

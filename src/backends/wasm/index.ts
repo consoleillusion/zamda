@@ -5,7 +5,7 @@
 // runs on the JS executor over the same snapshot, and gives the same result
 // (D-067).
 
-import type { Backend, BackendOptions, ResultData, Table } from '../../backend';
+import type { Backend, BackendOptions, ResultData, RunSession, Table } from '../../backend';
 import { AbortError, ExecutionError, MemoryError, PlanError } from '../../errors';
 import type { IrPlan } from '../../ir';
 import { encodeParams, encodePlan, TYPE_NAMES } from '../../ir-binary';
@@ -36,10 +36,28 @@ export interface WasmStats {
   engine: number;
   // Runs that used the JS executor because the engine lacked something.
   fallback: number;
+  // Wall time of engine runs by phase, in ms, summed over runs: preparing the plan and parameters, the string
+  // numbering and lookup tables, starting the run, the steps, and reading the result out.
+  phasesMs: { prepare: number; tables: number; start: number; steps: number; read: number };
+  // Boolean subexpressions the engine answered from a session's cache, and lookups that missed (T-416).
+  cache: { hits: number; misses: number };
 }
 
 export interface WasmBackend extends Backend {
   readonly stats: WasmStats;
+  // Open a session: runs started with it as their `session` option share the engine's cache of boolean subexpressions (T-416). Closing drops the cache and folds the hit and miss counts into `stats.cache`.
+  session(): WasmSession;
+}
+
+export interface WasmSession extends RunSession {
+  readonly kind: 'zamda/wasm-session';
+  // Idempotent: closing twice does nothing.
+  close(): void;
+}
+
+interface SessionHandle extends WasmSession {
+  readonly handle: number;
+  closed: boolean;
 }
 
 // Canonical string ids for some columns of a set of segments, and the lookup tables built over them
@@ -124,19 +142,56 @@ export class WasmTable<F extends Fields = Fields> implements Table<F> {
 
 export function createWasmBackend(host: EngineRunHost): { backend: WasmBackend; table: <F extends Fields>(schema: Schema<F>, data: TableInput<F>, options?: TableOptions) => WasmTable<F> } {
   // Purpose: a backend over one engine instance, and the function that creates its tables
-  const stats: WasmStats = { engine: 0, fallback: 0 };
+  const stats: WasmStats = { engine: 0, fallback: 0, phasesMs: { prepare: 0, tables: 0, start: 0, steps: 0, read: 0 }, cache: { hits: 0, misses: 0 } };
+  // The sessions this backend has handed out and not closed (foreign sessions are rejected when a plan runs with one).
+  const liveSessions = new Set<SessionHandle>();
+  const session: WasmBackend['session'] = () => {
+    // Purpose: open a session over this engine instance
+    const handle = host.sessionBegin();
+    const s: SessionHandle = {
+      kind: 'zamda/wasm-session',
+      handle,
+      closed: false,
+      close(): void {
+        // Purpose: drop the session's cache and fold its counts into the backend's stats
+        if (s.closed) return;
+        s.closed = true;
+        liveSessions.delete(s);
+        stats.cache.hits += host.sessionHits(handle);
+        stats.cache.misses += host.sessionMisses(handle);
+        host.sessionEnd(handle);
+      },
+    };
+    liveSessions.add(s);
+    return s;
+  };
+  const sessionHandleOf = (option: RunSession | undefined): number => {
+    // Purpose: the engine handle for a session option; 0 when there is none; misuse is a PlanError, never a silent pass-through
+    if (option === undefined) return 0;
+    const s = option as Partial<SessionHandle> | undefined;
+    if (s === undefined || s.kind !== 'zamda/wasm-session') {
+      throw new PlanError('options.session is not an open session of this WASM backend; open one with backend.session()');
+    }
+    if (s.closed) throw new PlanError('options.session is closed; a session is single-use, open a new one');
+    if (!liveSessions.has(s as SessionHandle)) {
+      throw new PlanError('options.session is not an open session of this WASM backend; open one with backend.session()');
+    }
+    return s.handle!;
+  };
   const backend: WasmBackend = {
     name: 'wasm',
     stats,
+    session,
     async execute(plan: IrPlan, table: Table, options: BackendOptions): Promise<ResultData> {
       // Purpose: run a plan on a table owned by this backend, as the table stood when the run started
       if (!(table instanceof WasmTable) || table.backend !== backend) {
         throw new PlanError('The WASM backend can only run plans on tables it created');
       }
+      const sessionHandle = sessionHandleOf(options.session);
       if (options.signal?.aborted) throw new AbortError();
       const snapshot = table.engine.snapshot();
       try {
-        const done = await runInEngine(host, plan, table, snapshot, options);
+        const done = await runInEngine(host, plan, table, snapshot, options, stats, sessionHandle);
         if (done !== null) {
           stats.engine++;
           return done;
@@ -161,8 +216,18 @@ async function runInEngine(
   table: WasmTable,
   snapshot: ReturnType<EngineTable['snapshot']>,
   options: BackendOptions,
+  stats: WasmStats,
+  sessionHandle: number,
 ): Promise<ResultData | null> {
   // Purpose: run the plan in the engine; null when the engine cannot (the caller then runs it on the JS executor)
+  const clock = performance.now();
+  let last = clock;
+  const phase = (name: keyof WasmStats['phasesMs']): void => {
+    // Purpose: add the time since the last phase ended to this phase's total
+    const now = performance.now();
+    stats.phasesMs[name] += now - last;
+    last = now;
+  };
   const derived = deriveLookups(foldConstants(plan, options.params));
   const planHandle = host.planLoad(encodePlan(derived.plan));
   if (planHandle === 0) throw new ExecutionError(`The engine refused a valid plan (error ${host.evalError()}); this is a bug in zamda`);
@@ -171,6 +236,7 @@ async function runInEngine(
   try {
     paramsHandle = host.paramsLoad(planHandle, encodeParams(plan.params, options.params));
     if (paramsHandle === 0) throw new ExecutionError(`The engine refused the parameters (error ${host.evalError()}); this is a bug in zamda`);
+    phase('prepare');
     // Only the string columns the plan reads need ids (the original plan: walkExpr does not know lookups).
     const needed = neededColumns(plan)[0]!;
     const stringColumns = table.schema.list
@@ -183,17 +249,22 @@ async function runInEngine(
       const status = host.paramsTable(paramsHandle, spec.table, lookup.values, lookup.valid, lookup.entries);
       if (status !== 0) throw new ExecutionError(`The engine refused a lookup table (error ${host.evalError()}); this is a bug in zamda`);
     }
+    phase('tables');
     run = host.runNew(planHandle, paramsHandle, snapshot.handle, options.chunkRows ?? DEFAULT_CHUNK_ROWS);
     if (run === 0) {
       const code = host.evalError();
       if (code === UNSUPPORTED) return null;
       throw new ExecutionError(`The engine could not start the plan (error ${code}); this is a bug in zamda`);
     }
+    if (sessionHandle !== 0 && host.sessionArm(run, sessionHandle) !== 0) {
+      throw new ExecutionError(`The engine refused to arm the run to the session (error ${host.evalError()}); this is a bug in zamda`);
+    }
     for (const [segment, byColumn] of canon.maps) {
       for (const [column, map] of byColumn) {
         if (host.runCanon(run, column, segment, map) !== 0) throw new ExecutionError(`The engine refused a string map (error ${host.evalError()}); this is a bug in zamda`);
       }
     }
+    phase('start');
     const sliceMs = options.sliceMs ?? DEFAULT_SLICE_MS;
     let sliceStart = performance.now();
     for (;;) {
@@ -208,6 +279,7 @@ async function runInEngine(
       }
     }
     options.onProgress?.({ rowsScanned: host.runScanned(run), rowsTotal: snapshot.rows });
+    phase('steps');
     const count = host.runFinish(run);
     if (count !== plan.output.length) throw new ExecutionError('The engine returned the wrong number of columns; this is a bug in zamda');
     const columns: Column[] = [];
@@ -229,6 +301,7 @@ async function runInEngine(
       host.resultFree(result);
       rowCount = rows;
     }
+    phase('read');
     return { schema: plan.output, columns, rowCount };
   } finally {
     if (run !== 0) host.runFree(run);

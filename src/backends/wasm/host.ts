@@ -25,6 +25,11 @@ export interface EngineRunHost extends EngineHost {
   runColumn(index: number): number;
   runFree(run: number): number;
   runCanon(run: number, column: number, segment: number, map: Uint32Array): number;
+  sessionBegin(): number;
+  sessionEnd(session: number): number;
+  sessionArm(run: number, session: number): number;
+  sessionHits(session: number): number;
+  sessionMisses(session: number): number;
   evalError(): number;
   evalErrorWhat(): number;
   evalErrorType(): number;

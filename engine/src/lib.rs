@@ -13,6 +13,7 @@ pub mod eval;
 pub mod ir;
 pub mod kernels;
 pub mod signatures;
+pub mod session;
 pub mod store;
 pub mod store_abi;
 pub mod types;

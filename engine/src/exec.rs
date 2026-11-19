@@ -12,12 +12,14 @@
 // order like strings; results hold ids and the host turns them back into strings.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::agg::{Aggregator, Rows, Table};
 use crate::sort::Sorter;
 use crate::eval::{eval, supported, Batch, Params};
 use crate::ir::{Aggregate, Expr, ExprKind, Node, Op, Plan, SortKey};
+use crate::session::{Memo, MemoKey, Session};
 use crate::kernels::EvalError;
 use crate::store::{Snapshot, View};
 use crate::types::Type;
@@ -91,6 +93,8 @@ pub struct Run {
     passed: u64,
     scanned: u64,
     result: Option<Vec<OutColumn>>,
+    // The session this run shares its boolean subexpressions with, if any (T-416).
+    session: Option<Rc<RefCell<Session>>>,
 }
 
 fn chain_of(plan: &Plan) -> Vec<usize> {
@@ -235,12 +239,14 @@ impl Collector {
 
 fn dense<'a>(stage: Stage<'a>) -> (Batch<'a>, usize) {
     // Purpose: the stage's rows as a batch holding only them (copying through the selection if there is one)
-    let Stage { batch, sel, rows } = stage;
+    let Stage { mut batch, sel, rows } = stage;
     match sel {
         None => (batch, rows),
         Some(sel) => {
+            // The gathered rows are a different set than the scan recorded; nothing cached covers them.
+            batch.memo = None;
             let columns = batch.columns.iter().map(|c| c.as_ref().map(|v| v.gather(&sel))).collect();
-            (Batch { rows, columns }, rows)
+            (Batch { rows, columns, memo: None }, rows)
         }
     }
 }
@@ -362,7 +368,7 @@ fn simplified(plan: &Plan, params: &Params) -> Plan {
 }
 
 impl Run {
-    pub fn new(plan: Rc<Plan>, params: Rc<Params>, snapshot: Snapshot, chunk_rows: usize) -> Result<Run, EvalError> {
+    pub fn new(plan: Rc<Plan>, params: Rc<Params>, snapshot: Snapshot, chunk_rows: usize, session: Option<Rc<RefCell<Session>>>) -> Result<Run, EvalError> {
         // Purpose: prepare a run; refuses a plan the engine cannot execute
         let plan = Rc::new(simplified(&plan, &params));
         check_supported(&plan)?;
@@ -405,9 +411,15 @@ impl Run {
             passed: 0,
             scanned: 0,
             result: None,
+            session,
         };
         run.sink = Some(run.new_sink()?);
         Ok(run)
+    }
+
+    // Purpose: share this run's boolean subexpressions with the session; replaces any session set before
+    pub fn set_session(&mut self, session: Option<Rc<RefCell<Session>>>) {
+        self.session = session;
     }
 
     pub fn set_canon(&mut self, column: usize, segment: usize, map: Vec<u32>) -> bool {
@@ -548,12 +560,12 @@ impl Run {
         let mut stage = match (&owned, &view) {
             (Some((t, None)), _) => {
                 let columns = t.columns.iter().enumerate().map(|(c, v)| if self.needed[source_node][c] { Some(v.slice(start, rows)) } else { None }).collect();
-                Stage { batch: Batch { rows, columns }, sel: None, rows }
+                Stage { batch: Batch { rows, columns, memo: None }, sel: None, rows }
             }
             // A sort's output: the rows as gathered, read through the next stretch of the order.
             (Some((t, Some(order))), _) => {
                 let columns = t.columns.iter().enumerate().map(|(c, v)| if self.needed[source_node][c] { Some(v.reborrow()) } else { None }).collect();
-                Stage { batch: Batch { rows: t.rows, columns }, sel: Some(order[start..start + rows].to_vec()), rows }
+                Stage { batch: Batch { rows: t.rows, columns, memo: None }, sel: Some(order[start..start + rows].to_vec()), rows }
             }
             (None, Some(view)) => {
                 let mut columns: Vec<Option<Vector>> = Vec::with_capacity(plan.input.len());
@@ -565,7 +577,11 @@ impl Run {
                     let map = self.canon[c][self.segment].as_deref();
                     columns.push(Some(scan_column(view, c, field.ty, start, rows, map, is_code(field.ty))?));
                 }
-                Stage { batch: Batch { rows, columns }, sel: None, rows }
+                let memo = self.session.as_ref().map(|session| Memo {
+                    key: MemoKey { segment: view.id, offset: view.offset(), start: start as u64, rows: rows as u64 },
+                    session: Rc::clone(session),
+                });
+                Stage { batch: Batch { rows, columns, memo }, sel: None, rows }
             }
             _ => unreachable!(),
         };
@@ -587,7 +603,7 @@ impl Run {
                     for e in exprs {
                         columns.push(Some(eval(e, &input, &params)?));
                     }
-                    let mut batch = Batch { rows: n, columns };
+                    let mut batch = Batch { rows: n, columns, memo: None };
                     prune(&mut batch, &self.needed[at]);
                     stage = Stage { batch, sel: None, rows: n };
                 }
@@ -601,6 +617,7 @@ impl Run {
                             None => {
                                 stage.batch.columns.iter_mut().flatten().for_each(|v| v.truncate(count));
                                 stage.batch.rows = count;
+                                stage.batch.memo = None;
                             }
                         }
                         stage.rows = count;

@@ -7,6 +7,7 @@ import { createHistogram, drawActivity, drawRegions, drawTopNetworks, formatCoun
 import type { ActivityBucket } from './charts';
 import { EMPTY_SELECTION, affectedBy, compilePlans, nameIndex, paramsFor, parseAddressRange, summariseNetworks } from './dashboard';
 import type { ChartId, RoutesTable, Selection } from './dashboard';
+import type { WasmSession } from '../src/backends/wasm';
 import {
   ACTIVITY_BUCKET,
   ACTIVITY_SECONDS,
@@ -78,7 +79,7 @@ function createDashboard(routes: RoutesTable, names: Map<number, string>) {
     // Purpose: change one control and re-run the charts that depend on it
     selection = { ...selection, [control]: value };
     describeSelection();
-    for (const chart of affectedBy(control)) run(chart);
+    interaction(affectedBy(control));
     // A chart's own selection only changes how it is drawn.
     if (control === 'prefixLen' || control === 'pathLen' || control === 'regions') redrawOwn(control);
   };
@@ -124,17 +125,19 @@ function createDashboard(routes: RoutesTable, names: Map<number, string>) {
     else drawRegions(byId('chart-regions'), regionRows, selection.regions, toggleRegion);
   };
 
-  const run = function (chart: ChartId): void {
+  const run = function (chart: ChartId, session?: WasmSession, finished?: () => void): void {
     // Purpose: run one chart's plan with the current selection and draw the result
     const began = performance.now();
-    const options = { params: paramsFor(selection, chart) };
+    const options = { params: paramsFor(selection, chart), ...(session === undefined ? {} : { session }) };
     const done = function (): void {
       // Purpose: record the run time
       showMs(chart, performance.now() - began);
+      finished?.();
     };
     const failed = function (error: unknown): void {
       // Purpose: ignore runs replaced by newer ones; report anything else
       if (!isAbort(error)) console.error(`${chart} failed`, error);
+      finished?.();
     };
     if (chart === 'networks') {
       runs.networks(routes, options).then(function (result) {
@@ -216,9 +219,20 @@ function createDashboard(routes: RoutesTable, names: Map<number, string>) {
     runAll();
   });
 
+  const interaction = function (charts: readonly ChartId[]): void {
+    // Purpose: run the charts of one interaction, sharing the engine's cached filter pass between them (T-416) when the table's backend supports sessions, and closing it once they all settle
+    const backend = routes.backend as typeof routes.backend & { session?(): WasmSession };
+    const session = typeof backend.session === 'function' ? backend.session() : undefined;
+    let open = charts.length;
+    const finished = function (): void {
+      open -= 1;
+      if (open === 0) session?.close();
+    };
+    for (const chart of charts) run(chart, session, finished);
+  };
   const runAll = function (): void {
     // Purpose: run every chart
-    for (const chart of ['networks', 'prefixLen', 'pathLen', 'regions'] as const) run(chart);
+    interaction(['networks', 'prefixLen', 'pathLen', 'regions']);
   };
   window.addEventListener('resize', function onResize() {
     // Purpose: charts are drawn at the page width, so redraw on resize

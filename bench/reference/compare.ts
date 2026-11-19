@@ -11,6 +11,7 @@
 
 import { compilePlans, EMPTY_SELECTION, paramsFor } from '../../demo/dashboard';
 import type { Selection } from '../../demo/dashboard';
+import { count, pipe } from '../../src';
 import type { Table } from '../../src';
 import { Routes } from '../../scripts/bgp/file';
 import { arqueroFromColumns, sample, zamdaFromColumns } from './data';
@@ -18,6 +19,7 @@ import type { RouteArrays } from './data';
 import { measure } from './measure';
 import type { Timing } from './measure';
 import { QUERIES } from './queries';
+import type { WasmSession } from '../../src/backends/wasm';
 
 export interface QueryRow {
   readonly id: string;
@@ -54,7 +56,14 @@ export interface Comparison {
 // A WASM backend to measure beside the JS one: a table from the same columns, and its run counts.
 export interface WasmTarget {
   readonly table: (arrays: RouteArrays) => Table<typeof Routes.fields>;
-  readonly stats: () => { engine: number; fallback: number };
+  readonly stats: () => {
+    engine: number;
+    fallback: number;
+    phasesMs: { prepare: number; tables: number; start: number; steps: number; read: number };
+    cache: { hits: number; misses: number };
+  };
+  // Open a session for one interaction's runs to share, when the backend supports it.
+  readonly session?: () => WasmSession;
 }
 
 // Larger than any slice, so the executor never yields.
@@ -64,6 +73,20 @@ const SCENARIOS: readonly { label: string; selection: Selection }[] = [
   { label: 'nothing selected', selection: EMPTY_SELECTION },
   { label: 'prefix /22-/24, region ARIN, name "cloud"', selection: { ...EMPTY_SELECTION, prefixLen: [22, 24], regions: ['ARIN'], search: 'cloud' } },
 ];
+
+async function measureWithPhases(wasm: WasmTarget, log: (line: string) => void, f: () => Promise<unknown>, runs: number): Promise<Timing> {
+  // Purpose: time f like `measure`, and log where the engine runs spent their time per interaction (host and engine phases, ms)
+  const before = JSON.parse(JSON.stringify(wasm.stats())) as ReturnType<WasmTarget['stats']>;
+  const timing = await measure(f, runs);
+  const after = wasm.stats();
+  const n = (after.engine - before.engine) / 4;
+  const per = (k: keyof typeof after.phasesMs): string => ((after.phasesMs[k] - before.phasesMs[k]) / n).toFixed(1);
+  const hits = after.cache.hits - before.cache.hits;
+  const misses = after.cache.misses - before.cache.misses;
+  log(`  WASM phases per interaction (four runs): prepare ${per('prepare')}, strings and tables ${per('tables')}, start ${per('start')}, steps ${per('steps')}, read ${per('read')} ms`);
+  log(`  WASM session cache over these runs: ${hits} hits, ${misses} misses`);
+  return timing;
+}
 
 export async function runComparison(
   all: RouteArrays,
@@ -102,10 +125,20 @@ export async function runComparison(
   const charts = ['networks', 'prefixLen', 'pathLen', 'regions'] as const;
   const interactions: InteractionRow[] = [];
   for (const { label, selection } of SCENARIOS) {
-    const start = function (id: (typeof charts)[number], sliceMs?: number, on: Table<typeof Routes.fields> = zt): Promise<unknown> {
-      // Purpose: start one chart's plan with this scenario's parameters
-      const options = { params: paramsFor(selection, id), ...(sliceMs === undefined ? {} : { sliceMs }) };
+    const start = function (id: (typeof charts)[number], sliceMs?: number, on: Table<typeof Routes.fields> = zt, session?: WasmSession): Promise<unknown> {
+      // Purpose: start one chart's plan with this scenario's parameters, sharing work through `session` when given
+      const options = { params: paramsFor(selection, id), ...(sliceMs === undefined ? {} : { sliceMs }), ...(session === undefined ? {} : { session }) };
       return (plans[id] as { execute(t: typeof zt, o: unknown): Promise<unknown> }).execute(on as typeof zt, options);
+    };
+    // One session per interaction, closed once its charts settle, as the page will do (T-416).
+    const withSession = async function (body: (session: WasmSession | undefined) => Promise<unknown>): Promise<void> {
+      // Purpose: run one interaction with a fresh session, closing it afterwards
+      const session = wasm?.session?.();
+      try {
+        await body(session);
+      } finally {
+        session?.close();
+      }
     };
     const row: InteractionRow = {
       label,
@@ -118,15 +151,32 @@ export async function runComparison(
       ...(wt === undefined
         ? {}
         : {
-            wasmTogether: await measure(() => Promise.all(charts.map(id => start(id, undefined, wt))), runs),
-            wasmOneByOne: await measure(async () => {
-              // Purpose: the four charts in turn on the WASM backend
-              for (const id of charts) await start(id, NO_SLICING, wt);
-            }, runs),
+            wasmTogether: await measure(() => withSession(s => Promise.all(charts.map(id => start(id, undefined, wt, s)))), runs),
+            wasmOneByOne: await measureWithPhases(wasm!, log, () =>
+              withSession(async s => {
+                // Purpose: the four charts in turn on the WASM backend, sharing one session
+                for (const id of charts) await start(id, NO_SLICING, wt, s);
+              }), runs),
           }),
     };
     interactions.push(row);
     log(`interaction (${label}): together ${row.together.median.toFixed(0)} ms, together no slicing ${row.togetherNoSlice.median.toFixed(0)} ms, one by one ${row.oneByOne.median.toFixed(0)} ms${row.wasmTogether ? `; WASM together ${row.wasmTogether.median.toFixed(1)} ms, one by one ${row.wasmOneByOne!.median.toFixed(1)} ms` : ''}`);
+  }
+  if (wt !== undefined) {
+    // Each filter condition of the second scenario on its own, counting the rows that pass, to show which condition costs the time.
+    const alone = [
+      ['no filter', pipe(Routes).agg(() => ({ n: count() })).compile()],
+      ['prefix length 22-24', pipe(Routes).filter(c => c.prefix_len.between(22, 24)).agg(() => ({ n: count() })).compile()],
+      ['region is ARIN', pipe(Routes).filter(c => c.rir.isIn(['ARIN'])).agg(() => ({ n: count() })).compile()],
+      ['name contains cloud', pipe(Routes).filter(c => c.as_name.lower().contains('cloud')).agg(() => ({ n: count() })).compile()],
+      ['all three', pipe(Routes).filter(c => c.prefix_len.between(22, 24).and(c.rir.isIn(['ARIN'])).and(c.as_name.lower().contains('cloud'))).agg(() => ({ n: count() })).compile()],
+    ] as const;
+    const parts: string[] = [];
+    for (const [name, plan] of alone) {
+      const timing = await measure(() => (plan as { execute(t: typeof wt, o: unknown): Promise<unknown> }).execute(wt, { sliceMs: NO_SLICING }), runs);
+      parts.push(`${name} ${timing.median.toFixed(1)}`);
+    }
+    log(`  WASM one filter condition alone, counting rows (median ms): ${parts.join(', ')}`);
   }
   return { runtime, rows: arrays.rowCount, queries, interactions, ...(wasm === undefined ? {} : { wasmRuns: wasm.stats() }) };
 }

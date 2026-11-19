@@ -24,12 +24,22 @@ export interface BackendOptions {
   readonly sliceMs?: number;
   // Called between time slices and once at the end.
   readonly onProgress?: (progress: { rowsScanned: number; rowsTotal: number }) => void;
+  // An opaque handle grouping runs that share work; only the backend that made it understands it, the rest ignore it.
+  readonly session?: RunSession;
 }
 
 export interface ResultData {
   readonly schema: readonly Field[];
   readonly columns: readonly Column[];
   readonly rowCount: number;
+}
+
+// A group of runs a backend lets share work (the zamda/wasm backend: one dashboard interaction
+// shares the filter pass between its charts, T-416). A backend that does not define sessions
+// ignores the option. A session is single-use: closing it drops whatever it holds, and using it
+// afterwards is an error. Opaque to everyone but the backend that made it.
+export interface RunSession {
+  readonly kind: string;
 }
 
 export interface Backend {
