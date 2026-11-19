@@ -1,0 +1,24 @@
+{
+  "browser": "Chrome",
+  "scenario": "missing engine",
+  "state": {
+    "pill": "error",
+    "state": "Error: No WASM engine at /engine.wasm (404); run `bun run wasm:build` first",
+    "detail": "The charts still run on the JS reference engine.",
+    "speed": "—",
+    "wasm": "—",
+    "js": "—",
+    "routes": "1,163,624",
+    "networks": "79,592",
+    "topBars": 20,
+    "prefixBars": 32,
+    "probe": {
+      "jsMs": null,
+      "wasmMs": null,
+      "error": "Error: No WASM engine at /engine.wasm (404); run `bun run wasm:build` first"
+    }
+  },
+  "errors": [
+    "log: Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}

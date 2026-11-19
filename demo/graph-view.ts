@@ -22,16 +22,16 @@ export interface GraphView {
 }
 
 const RIR_COLORS: Readonly<Record<string, string>> = {
-  ARIN: '#2f6fdb',
-  RIPE: '#d0573c',
-  APNIC: '#2e9e6b',
-  LACNIC: '#9b59b6',
-  AFRINIC: '#d69a00',
+  ARIN: '#63a4ff',
+  RIPE: '#ff6b6b',
+  APNIC: '#45d4a1',
+  LACNIC: '#c792ea',
+  AFRINIC: '#ffc857',
 };
-const FALLBACK_COLOR = '#8a8a82';
-const LIVE_COLOR = '#e83e3e';
-const EDGE_COLOR = 'rgba(113, 128, 150, 0.32)';
-const LIVE_EDGE_COLOR = 'rgba(232, 62, 62, 0.95)';
+const FALLBACK_COLOR = '#8799b1';
+const LIVE_COLOR = '#ff4d5e';
+const EDGE_COLOR = 'rgba(142, 162, 186, 0.28)';
+const LIVE_EDGE_COLOR = 'rgba(255, 77, 94, 0.95)';
 const LABEL_LIMIT = 8;
 const COUNTRY_LABEL_LIMIT = 10;
 const COUNTRY_LABEL_RATIO = 0.5;
@@ -131,7 +131,8 @@ function drawMap(
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
   }
-  const dark = typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
+  const dark = document.documentElement.dataset.theme === 'dark' ||
+    (typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   context.clearRect(0, 0, width, height);
   context.beginPath();

@@ -1,0 +1,124 @@
+{
+  "browser": "Firefox",
+  "initial": {
+    "race": {
+      "label": "all routes",
+      "jsMs": 63,
+      "wasmMs": 54,
+      "speedup": "1.2×",
+      "engine": 4,
+      "fallbacks": 0,
+      "cacheHits": 0,
+      "match": true,
+      "status": "worker ready · 1,163,624 rows",
+      "error": null,
+      "phases": {
+        "prepare": 0,
+        "tables": 1,
+        "start": 0,
+        "steps": 85,
+        "read": 5
+      },
+      "samples": [
+        {
+          "label": "all routes",
+          "jsMs": 63,
+          "wasmMs": 54,
+          "fallbacks": 0,
+          "cacheHits": 0
+        }
+      ]
+    },
+    "graph": {
+      "mode": "overview",
+      "nodes": 800,
+      "edges": 884,
+      "camera": {
+        "x": 0.5412008315324783,
+        "y": 0.5668970420956612,
+        "ratio": 0.5799672526465349
+      },
+      "hotEdges": 200
+    },
+    "dom": {
+      "state": "worker ready · 1,163,624 rows",
+      "pill": "ready",
+      "speed": "1.2×",
+      "match": "answers match",
+      "js": "63 ms",
+      "wasm": "54 ms",
+      "runs": "4",
+      "fallbacks": "0",
+      "cache": "0",
+      "source": "1,163,624 IPv4 routes from RIPE RIS    · loaded in 162 ms",
+      "routes": "1,163,624",
+      "networks": "79,592",
+      "graphDetail": "Map overview · paths up to 3,000 km apart · 884 edges from the 2,000 strongest local · 800 ASes · hover for meaning, click to expand",
+      "bodyColor": "rgb(233, 241, 251)"
+    },
+    "map": {
+      "width": 977,
+      "height": 558,
+      "painted": 272729
+    }
+  },
+  "selected": {
+    "race": {
+      "label": "name \"cloud\"",
+      "jsMs": 75,
+      "wasmMs": 60,
+      "speedup": "1.3×",
+      "engine": 4,
+      "fallbacks": 0,
+      "cacheHits": 54,
+      "match": true,
+      "status": "worker ready · 1,163,624 rows",
+      "error": null,
+      "phases": {
+        "prepare": 1,
+        "tables": 36,
+        "start": 0,
+        "steps": 36,
+        "read": 0
+      },
+      "samples": [
+        {
+          "label": "all routes",
+          "jsMs": 63,
+          "wasmMs": 54,
+          "fallbacks": 0,
+          "cacheHits": 0
+        },
+        {
+          "label": "name \"cloud\"",
+          "jsMs": 75,
+          "wasmMs": 60,
+          "fallbacks": 0,
+          "cacheHits": 54
+        }
+      ]
+    },
+    "selection": "Showing: name \"cloud\"",
+    "graph": {
+      "mode": "overview",
+      "nodes": 800,
+      "edges": 884
+    }
+  },
+  "afterAll": {
+    "mode": "all",
+    "nodes": 79882,
+    "edges": 122862
+  },
+  "afterOverview": {
+    "mode": "overview",
+    "nodes": 800,
+    "edges": 884,
+    "camera": {
+      "x": 0.5412008315324783,
+      "y": 0.5668970420956612,
+      "ratio": 0.5799672526465349
+    }
+  },
+  "errors": []
+}

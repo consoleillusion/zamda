@@ -517,3 +517,27 @@ from a click to the same overview camera, then reached All data and returned aga
 still produced 200 hot edges. Raw samples are `bench/results/t509-graph-map-chrome.json` and
 `bench/results/t509-graph-map-firefox.json`. These are development-machine numbers; country
 centres, and therefore the span filter, are approximate rather than measured router locations.
+
+## Signal deck's live engine comparison (T-510)
+
+Measured on 2026-11-20 in the production demo server at 1,163,624 routes. The four chart plans
+ran once uncounted to warm the engine, then WASM ran in the worker before JS ran on the page, so
+neither clock included the other's work. Each WASM answer was checked against the JS answer before
+the timing was published.
+
+| Browser | Selection | JS | WASM worker | Measured speedup | Cache hits | Errors |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Chrome 156 | none | 87 ms | 48 ms | 1.8× | 0 | 0 |
+| Chrome 156 | name “cloud” | 85 ms | 54 ms | 1.6× | 54 | 0 |
+| Firefox 158 | none | 63 ms | 54 ms | 1.2× | 0 | 0 |
+| Firefox 158 | name “cloud” | 75 ms | 60 ms | 1.3× | 54 | 0 |
+
+There were no JS fallbacks. Both browsers drew the dark deck, the 800-AS overview over the synced
+map, 200 simulated hot edges, and reached all 79,882 ASes and 122,862 edges before returning to the
+overview. These are headless development-machine numbers from one warm-up and two interactions, not
+a fixed claim: the page prints whatever it measures on the reader's machine and shows an explicit
+error if the engine module is absent. Raw samples are
+`bench/results/t510-signal-deck-chrome.json` and `bench/results/t510-signal-deck-firefox.json`.
+A separate Chrome run with `ENGINE=dist/no-such-engine.wasm` showed the explicit 404 error, printed
+no speedup, and still drew 20 top-network bars and 32 prefix bars from the JS engine
+(`bench/results/t510-no-engine-chrome.json`; the browser logs one expected 404 resource error).

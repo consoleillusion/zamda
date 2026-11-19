@@ -1,0 +1,124 @@
+{
+  "browser": "Chrome",
+  "initial": {
+    "race": {
+      "label": "all routes",
+      "jsMs": 86.79999995231628,
+      "wasmMs": 47.59999990463257,
+      "speedup": "1.8×",
+      "engine": 4,
+      "fallbacks": 0,
+      "cacheHits": 0,
+      "match": true,
+      "status": "worker ready · 1,163,624 rows",
+      "error": null,
+      "phases": {
+        "prepare": 0.5999999046325684,
+        "tables": 0.10000014305114746,
+        "start": 0.2999999523162842,
+        "steps": 34.700000047683716,
+        "read": 4.200000047683716
+      },
+      "samples": [
+        {
+          "label": "all routes",
+          "jsMs": 86.79999995231628,
+          "wasmMs": 47.59999990463257,
+          "fallbacks": 0,
+          "cacheHits": 0
+        }
+      ]
+    },
+    "graph": {
+      "mode": "overview",
+      "nodes": 800,
+      "edges": 884,
+      "camera": {
+        "x": 0.5412008315324783,
+        "y": 0.5668970420956612,
+        "ratio": 0.5799672526465349
+      },
+      "hotEdges": 200
+    },
+    "dom": {
+      "state": "worker ready · 1,163,624 rows",
+      "pill": "ready",
+      "speed": "1.8×",
+      "match": "answers match",
+      "js": "87 ms",
+      "wasm": "48 ms",
+      "runs": "4",
+      "fallbacks": "0",
+      "cache": "0",
+      "source": "1,163,624 IPv4 routes from RIPE RIS    · loaded in 221 ms",
+      "routes": "1,163,624",
+      "networks": "79,592",
+      "graphDetail": "Map overview · paths up to 3,000 km apart · 884 edges from the 2,000 strongest local · 800 ASes · hover for meaning, click to expand",
+      "bodyColor": "rgb(233, 241, 251)"
+    },
+    "map": {
+      "width": 975,
+      "height": 558,
+      "painted": 272434
+    }
+  },
+  "selected": {
+    "race": {
+      "label": "name \"cloud\"",
+      "jsMs": 85,
+      "wasmMs": 53.799999952316284,
+      "speedup": "1.6×",
+      "engine": 4,
+      "fallbacks": 0,
+      "cacheHits": 54,
+      "match": true,
+      "status": "worker ready · 1,163,624 rows",
+      "error": null,
+      "phases": {
+        "prepare": 0.7000002861022949,
+        "tables": 35.299999952316284,
+        "start": 0.10000014305114746,
+        "steps": 16.59999990463257,
+        "read": 0.19999980926513672
+      },
+      "samples": [
+        {
+          "label": "all routes",
+          "jsMs": 86.79999995231628,
+          "wasmMs": 47.59999990463257,
+          "fallbacks": 0,
+          "cacheHits": 0
+        },
+        {
+          "label": "name \"cloud\"",
+          "jsMs": 85,
+          "wasmMs": 53.799999952316284,
+          "fallbacks": 0,
+          "cacheHits": 54
+        }
+      ]
+    },
+    "selection": "Showing: name \"cloud\"",
+    "graph": {
+      "mode": "overview",
+      "nodes": 800,
+      "edges": 884
+    }
+  },
+  "afterAll": {
+    "mode": "all",
+    "nodes": 79882,
+    "edges": 122862
+  },
+  "afterOverview": {
+    "mode": "overview",
+    "nodes": 800,
+    "edges": 884,
+    "camera": {
+      "x": 0.5412008315324783,
+      "y": 0.5668970420956612,
+      "ratio": 0.5799672526465349
+    }
+  },
+  "errors": []
+}

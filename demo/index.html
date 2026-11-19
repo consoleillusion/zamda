@@ -1,87 +1,227 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>zamda · BGP routing table</title>
+    <meta name="color-scheme" content="dark" />
+    <title>zamda · routing signal deck</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <header>
-      <div>
-        <h1>The internet's routing table</h1>
-        <p id="source">Loading routes…</p>
-      </div>
-      <div class="totals">
-        <span id="total-routes">–</span> routes · <span id="total-networks">–</span> networks
-      </div>
-    </header>
-
-    <section class="controls">
-      <label>Network name <input id="search" type="search" placeholder="e.g. google" autocomplete="off" /></label>
-      <label>Address block <input id="addr" type="text" placeholder="e.g. 8.0.0.0/8" autocomplete="off" /></label>
-      <button id="reset" type="button">Clear all</button>
-      <span id="selection" class="hint"></span>
-    </section>
-
-    <main class="grid">
-      <article class="card wide">
-        <h2>Networks announcing the most routes <span class="ms" id="ms-networks"></span></h2>
-        <svg id="chart-top" class="chart"></svg>
-      </article>
-      <article class="card wide graph-card">
-        <h2>AS graph <span class="ms" id="ms-graph"></span></h2>
-        <p class="hint" id="graph-status">Loading graph…</p>
-        <div class="graph-toolbar">
-          <button id="graph-overview" type="button">Overview</button>
-          <button id="graph-all" type="button">All data</button>
-          <span id="graph-detail" class="hint"></span>
-          <span id="graph-live" class="hint">No live edges in the last 60 s</span>
-          <span class="graph-legend">
-            <i style="background:#2f6fdb"></i> ARIN
-            <i style="background:#d0573c"></i> RIPE
-            <i style="background:#2e9e6b"></i> APNIC
-            <i style="background:#9b59b6"></i> LACNIC
-            <i style="background:#d69a00"></i> AFRINIC
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <div class="brand-name">zamda<span>/signal</span></div>
+            <div class="brand-sub">compiled columnar plans · two execution engines</div>
+          </div>
+        </div>
+        <div class="top-status">
+          <span class="status-pill" id="race-state-pill" data-state="loading">
+            <i></i><span id="race-state">engine starting…</span>
           </span>
-          <span class="graph-edge-key">edge = consecutive AS hops in one observed path <i></i> thickness = prefixes <i class="hot"></i> red = live</span>
+          <span class="status-pill static"><i class="live-dot"></i>RIS feed</span>
         </div>
-        <div id="graph-canvas" class="graph-canvas"></div>
-      </article>
-      <article class="card">
-        <h2>Prefix length <span class="ms" id="ms-prefixLen"></span></h2>
-        <p class="hint">Drag to select a range; double-click to clear. Shorter prefix = bigger block.</p>
-        <svg id="chart-prefixLen" class="chart brushable"></svg>
-      </article>
-      <article class="card">
-        <h2>AS path length <span class="ms" id="ms-pathLen"></span></h2>
-        <p class="hint">How many networks a route crosses from the collector. Drag to select.</p>
-        <svg id="chart-pathLen" class="chart brushable"></svg>
-      </article>
-      <article class="card">
-        <h2>Regional registry <span class="ms" id="ms-regions"></span></h2>
-        <p class="hint">Click regions to filter by them.</p>
-        <svg id="chart-regions" class="chart"></svg>
-      </article>
-      <article class="card live">
-        <h2>Live BGP updates <span class="ms" id="ms-live"></span></h2>
-        <p class="hint" id="live-status">Starting…</p>
-        <div class="live-totals">
-          <span><b id="live-announce">0</b> announcements</span>
-          <span><b id="live-withdraw">0</b> withdrawals</span>
-          <span class="hint">last 5 min · <span id="live-kept">0</span> kept in window</span>
-        </div>
-        <svg id="chart-activity" class="chart"></svg>
-        <h3>Most active networks</h3>
-        <ol id="live-active"></ol>
-      </article>
-    </main>
+      </header>
 
-    <footer>
-      Every chart is a compiled zamda plan run on the JS reference engine; the number beside
-      each title is its last run time. Charts are linked: each applies every selection except its own.
-    </footer>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="kicker">Global routing telemetry / live snapshot</p>
+          <h1>The internet's routing table,<br /><em>measured in motion.</em></h1>
+          <p id="source" class="source">Loading routes…</p>
+        </div>
+        <div class="hero-metrics">
+          <div class="metric">
+            <span>routes observed</span>
+            <strong id="total-routes">–</strong>
+          </div>
+          <div class="metric">
+            <span>announcing networks</span>
+            <strong id="total-networks">–</strong>
+          </div>
+          <div class="metric metric-engine">
+            <span>query plan</span>
+            <strong>filter · group · sort</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="controls" aria-label="Route filters">
+        <label>
+          <span>Network name</span>
+          <input id="search" type="search" placeholder="e.g. google" autocomplete="off" />
+        </label>
+        <label>
+          <span>Address block</span>
+          <input id="addr" type="text" placeholder="e.g. 8.0.0.0/8" autocomplete="off" />
+        </label>
+        <button id="reset" type="button">Clear all</button>
+        <div class="selection-wrap">
+          <span>active selection</span>
+          <p id="selection" class="hint">all routes</p>
+        </div>
+      </section>
+
+      <main class="deck">
+        <article class="panel atlas">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">BGP path atlas</p>
+              <h2>AS adjacency over registered country centres</h2>
+            </div>
+            <span class="ms" id="ms-graph"></span>
+          </div>
+          <p class="hint" id="graph-status">Loading graph…</p>
+          <div class="graph-toolbar">
+            <div class="segmented">
+              <button id="graph-overview" type="button">Overview</button>
+              <button id="graph-all" type="button">All data</button>
+            </div>
+            <span id="graph-live" class="hint">No live edges in the last 60 s</span>
+            <span class="graph-legend" aria-label="RIR colours">
+              <i style="background:#63a4ff"></i> ARIN
+              <i style="background:#ff6b6b"></i> RIPE
+              <i style="background:#45d4a1"></i> APNIC
+              <i style="background:#c792ea"></i> LACNIC
+              <i style="background:#ffc857"></i> AFRINIC
+            </span>
+          </div>
+          <div id="graph-canvas" class="graph-canvas"></div>
+          <p class="graph-foot">
+            <span id="graph-detail">Running the overview plan…</span>
+            <span class="graph-edge-key">edge = consecutive AS hops in one observed path <i></i> thickness = prefixes <i class="hot"></i> red = live</span>
+          </p>
+        </article>
+
+        <aside class="panel race">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">Engine race / measured</p>
+              <h2>JS reference vs WASM worker</h2>
+            </div>
+          </div>
+          <p class="race-context">Same routes, same plans, timed one after the other: WASM in the worker, then JS. One uncounted warm-up first.</p>
+
+          <div class="race-speed">
+            <div>
+              <span class="micro">latest speedup</span>
+              <strong id="race-speed">—</strong>
+            </div>
+            <span id="race-match" class="match" data-match="unknown">not checked</span>
+          </div>
+
+          <p id="race-label" class="race-label">waiting for interaction</p>
+
+          <div class="race-track">
+            <div class="track-head"><span>JS engine</span><b id="race-js-time">—</b></div>
+            <div class="track"><i id="race-js-bar" class="fill-js"></i></div>
+          </div>
+          <div class="race-track">
+            <div class="track-head"><span>WASM worker</span><b id="race-wasm-time">—</b></div>
+            <div class="track"><i id="race-wasm-bar" class="fill-wasm"></i></div>
+          </div>
+
+          <div class="spark-wrap">
+            <span class="micro">last 24 interactions</span>
+            <svg viewBox="0 0 220 28" preserveAspectRatio="none" aria-hidden="true">
+              <path id="race-spark-js" class="spark-js"></path>
+              <path id="race-spark-wasm" class="spark-wasm"></path>
+            </svg>
+            <div class="spark-key"><span class="key-js">JS</span><span class="key-wasm">WASM</span></div>
+          </div>
+
+          <div class="counters">
+            <div><span>engine runs</span><b id="race-runs">0</b></div>
+            <div><span>JS fallbacks</span><b id="race-fallbacks">0</b></div>
+            <div><span>shared filters</span><b id="race-cache">0</b></div>
+          </div>
+
+          <div class="phases">
+            <span class="micro">where WASM spent its time</span>
+            <div class="phase-row"><span>prepare</span><div class="phase-track"><i id="race-phase-prepare"></i></div></div>
+            <div class="phase-row"><span>strings</span><div class="phase-track"><i id="race-phase-tables"></i></div></div>
+            <div class="phase-row"><span>start</span><div class="phase-track"><i id="race-phase-start"></i></div></div>
+            <div class="phase-row"><span>steps</span><div class="phase-track"><i id="race-phase-steps"></i></div></div>
+            <div class="phase-row"><span>read</span><div class="phase-track"><i id="race-phase-read"></i></div></div>
+          </div>
+          <p class="race-detail" id="race-detail">Waiting for the engine module.</p>
+        </aside>
+
+        <article class="panel chart-panel networks">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">concentration</p>
+              <h2>Networks announcing the most routes</h2>
+            </div>
+            <span class="ms" id="ms-networks"></span>
+          </div>
+          <svg id="chart-top" class="chart"></svg>
+        </article>
+
+        <article class="panel chart-panel prefix">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">distribution</p>
+              <h2>Prefix length</h2>
+            </div>
+            <span class="ms" id="ms-prefixLen"></span>
+          </div>
+          <p class="hint">Drag to select; double-click to clear.</p>
+          <svg id="chart-prefixLen" class="chart brushable"></svg>
+        </article>
+
+        <article class="panel chart-panel path">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">distance</p>
+              <h2>AS path length</h2>
+            </div>
+            <span class="ms" id="ms-pathLen"></span>
+          </div>
+          <p class="hint">Hops from the collector. Drag to select.</p>
+          <svg id="chart-pathLen" class="chart brushable"></svg>
+        </article>
+
+        <article class="panel chart-panel regions">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">registry</p>
+              <h2>Regional distribution</h2>
+            </div>
+            <span class="ms" id="ms-regions"></span>
+          </div>
+          <p class="hint">Click a region to filter it.</p>
+          <svg id="chart-regions" class="chart"></svg>
+        </article>
+
+        <article class="panel chart-panel live">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">RIS live overlay</p>
+              <h2>Announcements and withdrawals</h2>
+            </div>
+            <span class="ms" id="ms-live"></span>
+          </div>
+          <p class="hint" id="live-status">Starting…</p>
+          <div class="live-totals">
+            <span><b id="live-announce">0</b> announcements</span>
+            <span><b id="live-withdraw">0</b> withdrawals</span>
+            <span class="hint">last 5 min · <span id="live-kept">0</span> kept in window</span>
+          </div>
+          <svg id="chart-activity" class="chart"></svg>
+          <h3>Most active networks</h3>
+          <ol id="live-active"></ol>
+        </article>
+      </main>
+
+      <footer>
+        Every chart is a compiled zamda plan. The JS result drives the picture; the WASM result
+        runs the same plan over the same columns in a worker and is checked against it. Timings
+        are measured on this page, not quoted from a benchmark.
+      </footer>
+    </div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
