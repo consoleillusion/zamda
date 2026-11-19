@@ -12,15 +12,20 @@ pub mod sort;
 pub mod eval;
 pub mod ir;
 pub mod kernels;
+pub mod memory;
 pub mod signatures;
 pub mod session;
 pub mod store;
 pub mod store_abi;
+pub mod time;
 pub mod types;
 pub mod validate;
 pub mod vector;
 
 use std::sync::atomic::{AtomicU32, Ordering};
+
+#[global_allocator]
+static ALLOCATOR: memory::Counting = memory::Counting;
 
 use error::Error;
 use ir::Plan;

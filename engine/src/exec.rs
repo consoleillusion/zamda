@@ -537,6 +537,10 @@ impl Run {
                 return Ok(true);
             }
         }
+        // A run that has taken most of the memory budget stops with a typed error before it can trap (memory.rs).
+        if crate::memory::soft_exceeded() {
+            return Err(EvalError::OutOfMemory);
+        }
         if self.phase_done || self.exhausted() {
             self.end_phase()?;
             return Ok(self.result.is_some());

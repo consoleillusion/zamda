@@ -47,8 +47,11 @@ const FLOAT_POOL = [0, -0, 1, -1, 0.5, -0.5, 2.5, -2.5, 3, 1e10, -1e10, NaN, Inf
 export function dataValue(rng: Rng, type: TypeName, wild: boolean): LiteralValue {
   // Purpose: a value of a type: small ones mostly, and with `wild` also the extremes that overflow
   if (type === 'bool') return rng() < 0.5;
-  if (type === 'date32') return pick(rng, [-1000, -1, 0, 1, 19000, 50000]);
-  if (type === 'timestamp') return pick(rng, [-86400000, -1, 0, 1, 1700000000000]);
+  // Days and milliseconds across eras: before 1900 and 1 CE, leap days, century years, and far past a JS Date's range.
+  if (type === 'date32') return pick(rng, [-1000, -1, 0, 1, 19000, 50000, 11016, 10957, -25508, -25509, -719528, 2932896, 99999999, -99999999, 60, 59]);
+  if (type === 'timestamp') {
+    return pick(rng, [-86400000, -1, 0, 1, 1700000000000, 951782400000, 951868799999, 4102444799999, -62135596800000, 253402300799999, -2208988800001, 1000, 3599999, 86399999, 8_000_000_000_000_000, -8_000_000_000_000_000]);
+  }
   if (type === 'float32' || type === 'float64') {
     return wild || rng() < 0.3 ? pick(rng, FLOAT_POOL) : Math.round((rng() - 0.5) * 40) / 4;
   }
@@ -86,6 +89,12 @@ function dt(name: TypeName): DataType {
 function call(fn: string, args: IrExpr[]): IrExpr {
   // Purpose: a call node whose type comes from the registry, so a bad combination fails here
   return { kind: 'call', fn, args, type: lookup(fn).returns(args.map(a => a.type)) };
+}
+
+function unit(rng: Rng, type: 'date32' | 'timestamp'): IrExpr {
+  // Purpose: the unit literal of a date_trunc or extract call, one that applies to the type
+  const units = type === 'date32' ? ['year', 'month', 'day'] : ['year', 'month', 'day', 'hour', 'minute', 'second'];
+  return { kind: 'literal', value: pick(rng, units), type: t.utf8 };
 }
 
 function leaf(ctx: Ctx, type: TypeName): IrExpr {
@@ -139,6 +148,8 @@ export function gen(ctx: Ctx, type: TypeName, depth: number): IrExpr {
       () => call('not', [sub('bool')]),
       () => listFor(ctx, sub(any)),
     );
+  } else if (type === 'date32' || type === 'timestamp') {
+    choices.push(() => call('date_trunc', [unit(rng, type), sub(type)]));
   } else if (NUMERIC.includes(type)) {
     const isInt = INTEGERS.includes(type);
     choices.push(same('add'), same('sub'), same('mul'), same('add'));
@@ -151,6 +162,10 @@ export function gen(ctx: Ctx, type: TypeName, depth: number): IrExpr {
       choices.push(() => call('floor', [sub(type)]), () => call('ceil', [sub(type)]), () => call('round', [sub(type)]));
     }
     if (!type.startsWith('uint')) choices.push(() => call('neg', [sub(type)]));
+    if (type === 'int32') {
+      const dateType = pick(rng, ['date32', 'timestamp'] as const);
+      choices.push(() => call('extract', [unit(rng, dateType), sub(dateType)]), () => call('extract', [unit(rng, dateType), sub(dateType)]));
+    }
     if (type === 'float64') {
       const i = pick(rng, INTEGERS);
       choices.push(() => call('div', [sub(i), sub(i)]));

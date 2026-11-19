@@ -21,6 +21,11 @@ export interface EngineRunHost extends EngineHost {
   runNew(plan: number, params: number, snapshot: number, chunkRows: number): number;
   runStep(run: number): number;
   runScanned(run: number): number;
+  // Memory accounting (engine/src/memory.rs): set the byte limit (0 = none), bytes held now, the peak since the last call, and whether an allocation was refused for the limit.
+  memoryLimit(bytes: number): void;
+  memoryLive(): number;
+  memoryPeak(): number;
+  memoryRefused(): boolean;
   runFinish(run: number): number;
   runColumn(index: number): number;
   runFree(run: number): number;

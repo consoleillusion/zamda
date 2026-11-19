@@ -8,7 +8,8 @@ export type ErrorCode =
   | 'execution'
   | 'memory'
   | 'handle'
-  | 'abort';
+  | 'abort'
+  | 'crash';
 
 export class ZamdaError extends Error {
   readonly code: ErrorCode;
@@ -75,5 +76,12 @@ export class AbortError extends ZamdaError {
   constructor(message = 'The run was aborted') {
     // Purpose: a run was cancelled through its AbortSignal
     super('abort', message);
+  }
+}
+
+export class EngineCrashError extends ZamdaError {
+  constructor(message: string) {
+    // Purpose: the engine module trapped (a bug, or an allocation past the byte limit that could not be refused cleanly); the run produced nothing and the module is replaced
+    super('crash', message);
   }
 }

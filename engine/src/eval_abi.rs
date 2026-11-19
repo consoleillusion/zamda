@@ -75,6 +75,7 @@ pub(crate) fn eval_error(e: &EvalError) -> u32 {
         EvalError::MissingParam(_) => set_error(MISSING_PARAM, 0, 0),
         EvalError::Internal(_) => set_error(INTERNAL, 0, 0),
         EvalError::NeedsMap(_) => set_error(NEEDS_MAP, 0, 0),
+        EvalError::OutOfMemory => set_error(210, 0, 0),
     }
 }
 

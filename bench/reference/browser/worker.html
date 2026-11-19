@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>zamda worker check (browser)</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 24px; max-width: 900px; }
+      pre { background: #f4f4f2; padding: 12px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>zamda worker check</h1>
+    <p id="status">Loading…</p>
+    <p>Options in the address: <code>?rows=1000000&amp;runs=5</code>. Runs start automatically; keep this tab in the foreground. The engine runs in a Web Worker; each check below prints its measured value and its limit.</p>
+    <pre id="log"></pre>
+    <pre id="report"></pre>
+    <script type="module" src="./worker-check.ts"></script>
+  </body>
+</html>

@@ -24,6 +24,8 @@ pub enum EvalError {
     Internal(&'static str),
     // A utf8 or dictionary column the plan reads came without a usable map to canonical ids.
     NeedsMap(&'static str),
+    // The run's memory passed the limit the host set (T-410).
+    OutOfMemory,
 }
 
 // ---------------------------------------------------------------------------

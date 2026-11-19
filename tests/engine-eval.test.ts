@@ -179,7 +179,7 @@ maybe('engine evaluator against the JS executor', () => {
 const ENGINE_FUNCTIONS = [
   'eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'is_null', 'is_nan', 'coalesce', 'if_else', 'and', 'or', 'not',
   'add', 'sub', 'mul', 'wrapping_add', 'wrapping_sub', 'wrapping_mul', 'div', 'int_div', 'mod', 'neg', 'abs',
-  'floor', 'ceil', 'round',
+  'floor', 'ceil', 'round', 'date_trunc', 'extract',
 ];
 
 test('the random expressions reach every function, cast pair, and expression kind', () => {
@@ -188,7 +188,7 @@ test('the random expressions reach every function, cast pair, and expression kin
   const bump = (key: string) => seen.set(key, (seen.get(key) ?? 0) + 1);
   for (let seed = 1; seed <= 100; seed++) {
     const rng = seeded(seed * 7919);
-    for (let k = 0; k < 40; k++) {
+    for (let k = 0; k < 60; k++) {
       const c = makeCase(rng, seed % 2 === 0, INDEXES, ALL[Math.floor(rng() * ALL.length)]!);
       walkExpr(c.expr, e => {
         if (e.kind === 'call') bump(e.fn);

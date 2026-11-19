@@ -44,6 +44,7 @@ export { IR_VERSION } from './ir';
 
 export {
   AbortError,
+  EngineCrashError,
   ExecutionError,
   ExpressionError,
   HandleError,

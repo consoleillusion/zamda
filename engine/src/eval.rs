@@ -190,7 +190,15 @@ pub fn simplify(expr: &Expr, params: &Params) -> Expr {
     Expr { ty: expr.ty, kind }
 }
 
-const UNSUPPORTED_CALLS: [&str; 8] = ["lower", "upper", "length", "starts_with", "ends_with", "contains", "date_trunc", "extract"];
+const UNSUPPORTED_CALLS: [&str; 6] = ["lower", "upper", "length", "starts_with", "ends_with", "contains"];
+
+fn date_unit(args: &[Expr]) -> Option<crate::time::Unit> {
+    // Purpose: the unit of a date_trunc or extract call when it is a literal the engine knows for the date argument's type
+    match (args.first().map(|a| &a.kind), args.get(1)) {
+        (Some(ExprKind::Literal(Literal::Str(name))), Some(x)) => crate::time::unit_of(name, x.ty),
+        _ => None,
+    }
+}
 
 pub fn supported(expr: &Expr) -> Result<(), &'static str> {
     // Purpose: whether the engine can evaluate this expression; the host runs a plan that fails this on the JS backend
@@ -205,6 +213,13 @@ pub fn supported(expr: &Expr) -> Result<(), &'static str> {
         ExprKind::In { arg, .. } => {
             supported(arg)?;
             if strings(arg.ty) { Err("in on strings") } else { Ok(()) }
+        }
+        ExprKind::Call { func, args } if func == "date_trunc" || func == "extract" => {
+            // The unit is a string literal that names no column; only the date argument is evaluated.
+            if date_unit(args).is_none() || args.len() != 2 {
+                return Err("a date unit the engine does not know");
+            }
+            supported(&args[1])
         }
         ExprKind::Call { func, args } => {
             if let Some(name) = UNSUPPORTED_CALLS.iter().find(|n| **n == func.as_str()) {
@@ -352,8 +367,16 @@ fn call<'a>(func: &str, args: &[Expr], ty: Type, batch: &Batch<'a>, params: &Par
             }
         }
     }
+    if func == "date_trunc" || func == "extract" {
+        let unit = date_unit(args).ok_or(EvalError::Unsupported("a date unit the engine does not know"))?;
+        let x = eval(&args[1], batch, params)?;
+        if n == 0 {
+            return Ok(empty(ty));
+        }
+        return fold(&x, n, |v, rows| crate::time::date_op(func, unit, ty, v, rows));
+    }
     if UNSUPPORTED_CALLS.contains(&func) {
-        return Err(EvalError::Unsupported("a string or date function"));
+        return Err(EvalError::Unsupported("a string function"));
     }
     let mut v: Vec<Vector<'a>> = Vec::with_capacity(args.len());
     for a in args {
