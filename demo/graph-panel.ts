@@ -7,6 +7,7 @@ import type { GraphArrays, GraphHeader } from '../scripts/bgp/graph-file';
 import {
   OVERVIEW_EDGES,
   OVERVIEW_NODES,
+  allEdges,
   buildViewData,
   compileGraphPlans,
   neighbourhoodEdges,
@@ -21,12 +22,14 @@ export interface GraphPanel {
 }
 
 export interface GraphProbe {
-  mode: 'overview' | 'neighbourhood';
+  mode: 'overview' | 'neighbourhood' | 'all';
   nodes: number;
   edges: number;
   lastMs: number;
+  camera(): { x: number; y: number; ratio: number };
   select(asn: number): Promise<void>;
   overview(): Promise<void>;
+  all(): Promise<void>;
 }
 
 declare global {
@@ -84,6 +87,28 @@ async function showOverview(
   return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms };
 }
 
+async function showAll(
+  edges: EdgeTable,
+  arrays: GraphArrays,
+  plans: GraphPlans,
+  view: GraphView,
+  hot: ReadonlyMap<string, number>,
+  current: () => boolean,
+): Promise<GraphDraw | null> {
+  // Purpose: draw every node and edge, with no LOD budget, for explicit inspection
+  const began = performance.now();
+  const rows = await allEdges(edges, plans.all);
+  if (!current()) return null;
+  const data = buildViewData(arrays, rows, { nodeLimit: arrays.rowCount });
+  view.show(data);
+  view.setLive(hot);
+  byId<HTMLElement>('graph-detail').textContent =
+    `All ${data.edges.length.toLocaleString()} directed edges · ${data.nodes.length.toLocaleString()} ASes · pan and zoom to inspect`;
+  const ms = Math.round(performance.now() - began);
+  byId<HTMLElement>('ms-graph').textContent = `${ms} ms`;
+  return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms };
+}
+
 async function showNeighbourhood(
   edges: EdgeTable,
   arrays: GraphArrays,
@@ -130,8 +155,13 @@ export async function startGraph(): Promise<GraphPanel> {
     nodes: 0,
     edges: 0,
     lastMs: 0,
+    camera: function () {
+      // Purpose: expose the renderer's camera state to the browser harness
+      return view.camera();
+    },
     select: runNeighbourhood,
     overview: runOverview,
+    all: runAll,
   };
   window.__zamdaGraph = probe;
 
@@ -144,6 +174,20 @@ export async function startGraph(): Promise<GraphPanel> {
     });
     if (!draw) return;
     probe.mode = 'overview';
+    probe.nodes = draw.nodes;
+    probe.edges = draw.edges;
+    probe.lastMs = draw.ms;
+  }
+
+  async function runAll(): Promise<void> {
+    // Purpose: show every edge and publish its counts and timing
+    const mine = ++generation;
+    const draw = await showAll(edges, arrays, plans, view, hot, function () {
+      // Purpose: suppress an all-data view that a later action has replaced
+      return mine === generation;
+    });
+    if (!draw) return;
+    probe.mode = 'all';
     probe.nodes = draw.nodes;
     probe.edges = draw.edges;
     probe.lastMs = draw.ms;
@@ -178,6 +222,10 @@ export async function startGraph(): Promise<GraphPanel> {
   byId<HTMLButtonElement>('graph-overview').addEventListener('click', function onOverview() {
     // Purpose: return to the bounded overview
     void runOverview().catch(fail('overview'));
+  });
+  byId<HTMLButtonElement>('graph-all').addEventListener('click', function onAll() {
+    // Purpose: show the full graph, at the cost of a denser picture
+    void runAll().catch(fail('all-data view'));
   });
 
   await runOverview();

@@ -374,6 +374,13 @@ describe('AS adjacency graph', () => {
     expect(arrays.rir[byAsn.get(64512)!]).toBeNull();
     expect(arrays.x.every(Number.isFinite) && arrays.y.every(Number.isFinite)).toBe(true);
     expect(arrays.x.every(v => Math.abs(v) <= 1) && arrays.y.every(v => Math.abs(v) <= 1)).toBe(true);
+    let closest = Infinity;
+    for (let i = 0; i < arrays.x.length; i++) {
+      for (let j = i + 1; j < arrays.x.length; j++) {
+        closest = Math.min(closest, Math.hypot(arrays.x[i]! - arrays.x[j]!, arrays.y[i]! - arrays.y[j]!));
+      }
+    }
+    expect(closest).toBeGreaterThan(0.2);
     expect(decodeGraph(encodeGraph(builder.finish(), labels, { collector: 'fixture' })).arrays.x).toEqual(arrays.x);
 
     const loaded = loadGraph(encoded);

@@ -433,3 +433,25 @@ ARIN and "cloud": 295 engine runs and no fallbacks. Raw result and table:
 These are headless-browser numbers on the development machine, not the owner's machine, and
 they use the saved RIPE file rather than the live RIS feed. They close T-210's gap of having no
 browser numbers for the reference queries; T-217's Firefox acceptance still needs the real feed.
+
+## AS graph load, drill-down and all-data mode (T-506)
+
+Measured on 2026-11-20 on this machine with headless Chromium 156 and Firefox 158 against the
+real `data/graph.bin` from RIPE RIS rrc00 (80,226 ASes, 122,862 directed edges, 6.4 MB). Each
+browser did three cold page loads, five alternating AS13335/AS15169 neighbourhood clicks, one
+All data redraw, and 90 animation frames of wheel zoom plus pointer pan after the full graph was
+on screen. Raw results are `bench/results/t506-graph-chrome.json` and
+`bench/results/t506-graph-firefox.json`. No console errors were captured in either browser.
+
+| Browser | Load + first overview (ms) | Warm overview (ms) | Neighbourhood (ms) | All data (ms) | Zoom/pan frame median, p95 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Chrome | 108 + 145 | 84 + 116, 88 + 107 | 69, 63, 63, 75, 61 | 1,419 | 16.7, 16.7 |
+| Firefox | 92 + 567 | 82 + 133, 72 + 138 | 137, 110, 119, 117, 109 | 1,634 | 17.1, 17.1 |
+
+The first Firefox overview includes shader start-up; its two warm redraws are 133 and 138 ms.
+All data draws 79,882 nodes rather than all 80,226 because 344 ASes have no edge in this dump;
+the status line still reports the file's full node count. The bounded overview draws 3,881 of
+the 10,000 strongest edges because 6,119 of those edges touch an AS outside the 2,000-node
+budget; the panel says so instead of implying all 10,000 are visible. Wheel and pointer events
+move the camera in both browsers, and the full graph stays at a 60 fps frame cadence while
+panning in this headless run. These are development-machine numbers, not the owner's machine.

@@ -1,0 +1,59 @@
+{
+  "browser": "chrome",
+  "data": "\"80,226 ASes · 122,862 directed edges from local file data/rrc00-bview.20261118.0000.gz · loaded in 88 ms\"",
+  "loads": [
+    {
+      "loadMs": 108,
+      "overviewMs": 145,
+      "nodes": 2000,
+      "edges": 3881
+    },
+    {
+      "loadMs": 84,
+      "overviewMs": 116,
+      "nodes": 2000,
+      "edges": 3881
+    },
+    {
+      "loadMs": 88,
+      "overviewMs": 107,
+      "nodes": 2000,
+      "edges": 3881
+    }
+  ],
+  "snippetsMs": [
+    69,
+    63,
+    63,
+    75,
+    61
+  ],
+  "all": {
+    "ms": 1419,
+    "nodes": 79882,
+    "edges": 122862,
+    "detail": "All 122,862 directed edges · 79,882 ASes · pan and zoom to inspect"
+  },
+  "interaction": {
+    "before": {
+      "x": 0.5,
+      "y": 0.5,
+      "ratio": 1
+    },
+    "afterWheel": {
+      "x": 0.43386866615994824,
+      "y": 1.6639115611765094,
+      "ratio": 0.2
+    },
+    "after": {
+      "x": 0.2259019666199264,
+      "y": 1.7886915974865405,
+      "ratio": 0.2
+    },
+    "median": 16.700000000000728,
+    "p95": 16.700000000000728,
+    "max": 16.799999999999272,
+    "samples": 79
+  },
+  "errors": []
+}

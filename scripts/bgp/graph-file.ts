@@ -76,27 +76,27 @@ function align4(n: number): number {
 }
 
 function layoutNodes(asn: Uint32Array, rirCodes: Uint8Array, groupCount: number): Coordinates {
-  // Purpose: place every node on a fixed radial arc for its region, ordered by AS number
-  const groups: number[][] = Array.from({ length: groupCount }, function () {
-    // Purpose: one empty bucket for each region, the last one holding unlabelled nodes
-    return [];
+  // Purpose: spread every node evenly over one frozen disc, with regions mixed rather than stacked in arcs
+  const order = Array.from({ length: asn.length }, function (_, i): number {
+    // Purpose: index each node before sorting it into the layout
+    return i;
+  }).sort(function (a, b): number {
+    // Purpose: keep the placement stable by region, then AS number
+    const ra = rirCodes[a]! === NO_RIR ? groupCount - 1 : rirCodes[a]!;
+    const rb = rirCodes[b]! === NO_RIR ? groupCount - 1 : rirCodes[b]!;
+    return ra - rb || asn[a]! - asn[b]! || a - b;
   });
-  for (let i = 0; i < asn.length; i++) {
-    const code = rirCodes[i]!;
-    groups[code === NO_RIR ? groupCount - 1 : code]!.push(i);
-  }
   const x = new Float32Array(asn.length);
   const y = new Float32Array(asn.length);
-  groups.forEach(function (group, groupIndex) {
-    // Purpose: spread one region's nodes around its own arc
-    group.sort((a, b) => asn[a]! - asn[b]! || a - b);
-    for (let j = 0; j < group.length; j++) {
-      const angle = (2 * Math.PI * (groupIndex + (j + 0.5) / group.length)) / groupCount;
-      const radius = 0.35 + 0.65 * Math.sqrt((j + 1) / group.length);
-      x[group[j]!] = Math.cos(angle) * radius;
-      y[group[j]!] = Math.sin(angle) * radius;
-    }
-  });
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  for (let j = 0; j < order.length; j++) {
+    // Purpose: a sunflower spiral gives near-uniform spacing without a layout pass in the browser
+    const index = order[j]!;
+    const angle = j * goldenAngle;
+    const radius = Math.sqrt((j + 0.5) / order.length);
+    x[index] = Math.cos(angle) * radius;
+    y[index] = Math.sin(angle) * radius;
+  }
   return { x, y };
 }
 

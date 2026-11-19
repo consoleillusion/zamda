@@ -9,6 +9,7 @@ import type { GraphEdgeView, GraphViewData } from './graph-data';
 export interface GraphView {
   show(data: GraphViewData): void;
   setLive(hot: ReadonlyMap<string, number>): void;
+  camera(): { x: number; y: number; ratio: number };
   destroy(): void;
 }
 
@@ -21,17 +22,18 @@ const RIR_COLORS: Readonly<Record<string, string>> = {
 };
 const FALLBACK_COLOR = '#8a8a82';
 const LIVE_COLOR = '#e83e3e';
-const EDGE_COLOR = '#aab4c4';
-const LIVE_EDGE_COLOR = '#e83e3e';
+const EDGE_COLOR = 'rgba(113, 128, 150, 0.28)';
+const LIVE_EDGE_COLOR = 'rgba(232, 62, 62, 0.95)';
+const LABEL_LIMIT = 8;
 
 function nodeColor(rir: string | null): string {
   // Purpose: one stable colour per regional registry
   return rir === null ? FALLBACK_COLOR : (RIR_COLORS[rir] ?? FALLBACK_COLOR);
 }
 
-function edgeWidth(weight: number): number {
-  // Purpose: a log scale keeps a few very heavy edges from hiding the rest
-  return 0.5 + Math.min(4, Math.log2(weight + 1) / 2);
+function edgeWidth(weight: number, density: number): number {
+  // Purpose: a log scale keeps a few very heavy edges from hiding the rest, and a dense view keeps them hairline
+  return (0.18 + Math.min(1.4, Math.log2(weight + 1) / 3)) * density;
 }
 
 function buildGraph(data: GraphViewData): Graph {
@@ -39,17 +41,18 @@ function buildGraph(data: GraphViewData): Graph {
   const graph = new Graph({ type: 'directed', multi: false });
   let maxPaths = 1;
   for (const node of data.nodes) maxPaths = Math.max(maxPaths, node.paths);
+  const density = Math.min(1, Math.sqrt(1500 / Math.max(1, data.nodes.length)));
   const labelled = new Set(
     [...data.nodes]
       .sort((a, b) => b.paths - a.paths || a.asn - b.asn)
-      .slice(0, 12)
+      .slice(0, LABEL_LIMIT)
       .map(node => node.asn),
   );
   for (const node of data.nodes) {
     graph.addNode(String(node.asn), {
       x: node.x,
       y: node.y,
-      size: 3 + 9 * Math.sqrt(node.paths / maxPaths),
+      size: (1.1 + 2.4 * Math.sqrt(node.paths / maxPaths)) * density,
       color: nodeColor(node.rir),
       label: labelled.has(node.asn) ? node.label : '',
       asn: node.asn,
@@ -61,7 +64,7 @@ function buildGraph(data: GraphViewData): Graph {
     if (!graph.hasNode(String(edge.from)) || !graph.hasNode(String(edge.to))) continue;
     if (graph.hasEdge(String(edge.from), String(edge.to))) continue;
     graph.addEdge(String(edge.from), String(edge.to), {
-      size: edgeWidth(edge.weight),
+      size: edgeWidth(edge.weight, density),
       color: EDGE_COLOR,
       weight: edge.weight,
       key: edge.key,
@@ -90,8 +93,9 @@ export function createGraphView(container: HTMLElement, onSelect: (asn: number) 
       graph = buildGraph(data);
       renderer = new Sigma(graph, container, {
         settings: {
+          itemSizesReference: 'screen',
           renderEdgeLabels: false,
-          labelRenderedSizeThreshold: 9,
+          labelRenderedSizeThreshold: 2.4,
           labelDensity: 0.02,
           labelGridCellSize: 90,
           minCameraRatio: 0.2,
@@ -103,6 +107,12 @@ export function createGraphView(container: HTMLElement, onSelect: (asn: number) 
         // Purpose: drill into the network the user clicked
         onSelect(Number(event.node));
       });
+    },
+    camera() {
+      // Purpose: the current camera state, for checking that a browser interaction really moved it
+      return renderer
+        ? (({ x, y, ratio }) => ({ x, y, ratio }))(renderer.getCamera().getState())
+        : { x: 0.5, y: 0.5, ratio: 1 };
     },
     setLive(hot) {
       // Purpose: colour the edges and nodes currently active in RIS Live, without moving anything

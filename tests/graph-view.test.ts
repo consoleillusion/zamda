@@ -7,6 +7,7 @@ import type { JsTable } from '../src';
 import type { GraphArrays } from '../scripts/bgp/graph-file';
 import { GraphEdges } from '../scripts/bgp/graph-file';
 import {
+  allEdges,
   buildViewData,
   compileGraphPlans,
   neighbourhoodEdges,
@@ -44,6 +45,17 @@ describe('graph data selection', () => {
       { from_as: 2, to_as: 3, prefixes: 9 },
       { from_as: 3, to_as: 4, prefixes: 8 },
     ]);
+  });
+
+  test('all-data mode returns every edge in file order', async () => {
+    const { edges } = sample();
+    const rows = await allEdges(edges, compileGraphPlans().all);
+    expect(rows.map(r => [r.from_as, r.to_as])).toEqual([
+      [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [1, 6],
+    ]);
+    const view = buildViewData(sample().arrays, rows, { nodeLimit: 6 });
+    expect(view.truncated).toBe(0);
+    expect(view.edges.length).toBe(6);
   });
 
   test('a neighbourhood expands two hops and keeps the strongest edges', async () => {

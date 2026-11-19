@@ -69,10 +69,18 @@ export function compileNeighbourhoodPlans(edgeLimit: number = NEIGHBOURHOOD_EDGE
   };
 }
 
+export function compileAllPlan() {
+  // Purpose: the all-data mode's plan: every weighted edge, in file order
+  return pipe(GraphEdges)
+    .select(c => ({ from_as: c.from_as, to_as: c.to_as, prefixes: c.prefixes }))
+    .compile();
+}
+
 export function compileGraphPlans() {
-  // Purpose: compile the graph's three plans once at start-up
+  // Purpose: compile the graph's plans once at start-up
   return {
     overview: compileOverviewPlan(),
+    all: compileAllPlan(),
     ...compileNeighbourhoodPlans(),
   };
 }
@@ -85,6 +93,14 @@ export async function overviewEdges(
   plan = compileOverviewPlan(limit),
 ): Promise<readonly GraphEdgeRow[]> {
   // Purpose: the strongest edges in the graph, within the given budget
+  return (await plan.execute(edges)).toArray() as GraphEdgeRow[];
+}
+
+export async function allEdges(
+  edges: EdgeTable,
+  plan = compileAllPlan(),
+): Promise<readonly GraphEdgeRow[]> {
+  // Purpose: every edge in the graph, for the explicit all-data mode
   return (await plan.execute(edges)).toArray() as GraphEdgeRow[];
 }
 
