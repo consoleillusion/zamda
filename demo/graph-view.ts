@@ -6,7 +6,8 @@
 
 import Graph from 'graphology';
 import Sigma from 'sigma';
-import type { GraphEdgeView, GraphViewData } from './graph-data';
+import { FOCUS_RATIO, frameCamera } from './graph-data';
+import type { CameraView, GraphEdgeView, GraphViewData } from './graph-data';
 
 export interface GraphView {
   show(data: GraphViewData): void;
@@ -31,14 +32,7 @@ const EDGE_COLOR = 'rgba(113, 128, 150, 0.28)';
 const LIVE_EDGE_COLOR = 'rgba(232, 62, 62, 0.95)';
 const LABEL_LIMIT = 8;
 const ZOOM_DURATION = 450;
-const FOCUS_RATIO = 2.8;
 const WHEEL_RATIO = 1.35;
-
-interface CameraView {
-  x: number;
-  y: number;
-  ratio: number;
-}
 
 type Camera = ReturnType<Sigma['getCamera']>;
 
@@ -87,25 +81,6 @@ function populateGraph(graph: Graph, data: GraphViewData): void {
       key: edge.key,
     });
   }
-}
-
-function targetCamera(data: GraphViewData): CameraView {
-  // Purpose: frame the nodes of a view without moving their frozen positions
-  if (data.nodes.length === 0) return { x: 0.5, y: 0.5, ratio: 1 };
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const node of data.nodes) {
-    minX = Math.min(minX, node.x);
-    maxX = Math.max(maxX, node.x);
-    minY = Math.min(minY, node.y);
-    maxY = Math.max(maxY, node.y);
-  }
-  const x = (minX + maxX + 2) / 4;
-  const y = (minY + maxY + 2) / 4;
-  const span = Math.max(maxX - minX, maxY - minY, 0.05);
-  return { x, y, ratio: Math.min(4, Math.max(0.8, 2 / span)) };
 }
 
 function focusTarget(graph: Graph, asn: number): CameraView | null {
@@ -179,14 +154,14 @@ export function createGraphView(container: HTMLElement, onSelect: (asn: number) 
       // Purpose: draw the first snapshot and frame it without animating
       ensureRenderer();
       renderer!.getCamera().cancelAnimation();
-      renderer!.getCamera().setState(targetCamera(data));
+      renderer!.getCamera().setState(frameCamera(data));
       populateGraph(graph!, data);
       renderer!.refresh();
     },
     frame(data) {
       // Purpose: ease the camera out to a view before its nodes are shown
       ensureRenderer();
-      return animateTo(renderer!.getCamera(), targetCamera(data));
+      return animateTo(renderer!.getCamera(), frameCamera(data));
     },
     focus(asn) {
       // Purpose: ease the camera onto a clicked AS before its neighbourhood is shown

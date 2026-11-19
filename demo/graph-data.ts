@@ -1,6 +1,6 @@
 // The graph view's data selection: compiled zamda plans over the edge table,
-// and the pure conversion from rows to the nodes and edges the renderer draws.
-// Nothing in this module needs a DOM, so it is tested directly.
+// the pure conversion from rows to drawn nodes and edges, and the camera targets
+// derived from those positions. Nothing in this module needs a DOM, so it is tested directly.
 
 import { list, pipe, t } from '../src';
 import type { JsTable } from '../src';
@@ -14,6 +14,15 @@ export const OVERVIEW_NODES = 2_000;
 export const NEIGHBOURHOOD_EDGES = 2_000;
 export const NEIGHBOURHOOD_NODES = 2_000;
 export const NEIGHBOURHOOD_HOPS = 2;
+// Sigma's camera ratio is the fraction of the graph's square shown: smaller is closer.
+export const FRAME_SPAN = 1.1;
+export const FOCUS_RATIO = 0.42;
+
+export interface CameraView {
+  readonly x: number;
+  readonly y: number;
+  readonly ratio: number;
+}
 
 export interface GraphEdgeRow {
   readonly from_as: number;
@@ -192,4 +201,23 @@ export function buildViewData(
     edges.push({ key: edgeKey(row.from_as, row.to_as), from: row.from_as, to: row.to_as, weight: row.prefixes });
   }
   return { nodes, edges, truncated: rows.length - edges.length };
+}
+
+export function frameCamera(data: GraphViewData): CameraView {
+  // Purpose: frame the drawn nodes with a closer default than sigma's whole-graph fit
+  if (data.nodes.length === 0) return { x: 0.5, y: 0.5, ratio: 1 };
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const node of data.nodes) {
+    minX = Math.min(minX, node.x);
+    maxX = Math.max(maxX, node.x);
+    minY = Math.min(minY, node.y);
+    maxY = Math.max(maxY, node.y);
+  }
+  const x = (minX + maxX + 2) / 4;
+  const y = (minY + maxY + 2) / 4;
+  const span = Math.max(maxX - minX, maxY - minY, 0.05);
+  return { x, y, ratio: Math.min(1, Math.max(0.45, FRAME_SPAN / span)) };
 }

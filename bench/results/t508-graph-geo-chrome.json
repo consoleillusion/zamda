@@ -7,36 +7,36 @@
     "hotNodes": 229,
     "detail": "200 hot edges · 229 hot ASes in the last 60 s",
     "status": "simulated feed, about 400 updates per second",
-    "graphStatus": "80,226 ASes · 122,862 directed edges from local file data/rrc00-bview.20261118.0000.gz · loaded in 103 ms",
+    "graphStatus": "80,226 ASes · 122,862 directed edges from local file data/rrc00-bview.20261118.0000.gz · loaded in 110 ms",
     "camera": {
       "x": 0.5469688028097153,
       "y": 0.5634869039058685,
-      "ratio": 1.2699350919907655
+      "ratio": 0.698464300594921
     }
   },
   "samples": [
     {
       "ms": 40,
       "camera": {
-        "x": 0.546920036890183,
-        "y": 0.5635087408224742,
-        "ratio": 1.2701768800256115
+        "x": 0.5466000105432522,
+        "y": 0.5636520455876987,
+        "ratio": 0.6981315185665558
       }
     },
     {
       "ms": 160,
       "camera": {
-        "x": 0.4629816978952031,
-        "y": 0.6010955335299174,
-        "ratio": 1.6863545350041231
+        "x": 0.45148208449549143,
+        "y": 0.6062449514269829,
+        "ratio": 0.6123012578952837
       }
     },
     {
       "ms": 320,
       "camera": {
-        "x": 0.24898160363759525,
-        "y": 0.6969227476318678,
-        "ratio": 2.7473959906688377
+        "x": 0.24661340867030768,
+        "y": 0.6979832028945288,
+        "ratio": 0.42743671574132014
       }
     },
     {
@@ -44,7 +44,7 @@
       "camera": {
         "x": 0.23837196826934814,
         "y": 0.7016736418008804,
-        "ratio": 2.8
+        "ratio": 0.42
       }
     },
     {
@@ -52,7 +52,7 @@
       "camera": {
         "x": 0.23837196826934814,
         "y": 0.7016736418008804,
-        "ratio": 2.8
+        "ratio": 0.42
       }
     }
   ],
@@ -64,36 +64,36 @@
     "hotNodes": 203,
     "detail": "200 hot edges · 203 hot ASes in the last 60 s",
     "status": "simulated feed, about 400 updates per second",
-    "graphStatus": "80,226 ASes · 122,862 directed edges from local file data/rrc00-bview.20261118.0000.gz · loaded in 103 ms",
+    "graphStatus": "80,226 ASes · 122,862 directed edges from local file data/rrc00-bview.20261118.0000.gz · loaded in 110 ms",
     "camera": {
       "x": 0.23837196826934814,
       "y": 0.7016736418008804,
-      "ratio": 2.8
+      "ratio": 0.42
     }
   },
   "backSamples": [
     {
       "ms": 40,
       "camera": {
-        "x": 0.2383750161393189,
-        "y": 0.7016722769935926,
-        "ratio": 2.7999848882478218
+        "x": 0.23837196826934814,
+        "y": 0.7016736418008804,
+        "ratio": 0.42
       }
     },
     {
       "ms": 160,
       "camera": {
-        "x": 0.3033403645662614,
-        "y": 0.6725814096530278,
-        "ratio": 2.477877890576545
+        "x": 0.30971955641508103,
+        "y": 0.6697248679995537,
+        "ratio": 0.48438094629754574
       }
     },
     {
       "ms": 320,
       "camera": {
-        "x": 0.5094159968998697,
-        "y": 0.5803026944994927,
-        "ratio": 1.4561269905742893
+        "x": 0.5194617763235245,
+        "y": 0.5758042896787325,
+        "ratio": 0.6736431617023861
       }
     },
     {
@@ -101,7 +101,7 @@
       "camera": {
         "x": 0.5469688028097153,
         "y": 0.5634869039058685,
-        "ratio": 1.2699350919907655
+        "ratio": 0.698464300594921
       }
     },
     {
@@ -109,7 +109,7 @@
       "camera": {
         "x": 0.5469688028097153,
         "y": 0.5634869039058685,
-        "ratio": 1.2699350919907655
+        "ratio": 0.698464300594921
       }
     }
   ],
@@ -121,11 +121,11 @@
     "hotNodes": 200,
     "detail": "200 hot edges · 200 hot ASes in the last 60 s",
     "status": "simulated feed, about 400 updates per second",
-    "graphStatus": "80,226 ASes · 122,862 directed edges from local file data/rrc00-bview.20261118.0000.gz · loaded in 103 ms",
+    "graphStatus": "80,226 ASes · 122,862 directed edges from local file data/rrc00-bview.20261118.0000.gz · loaded in 110 ms",
     "camera": {
       "x": 0.5469688028097153,
       "y": 0.5634869039058685,
-      "ratio": 1.2699350919907655
+      "ratio": 0.698464300594921
     }
   },
   "errors": []

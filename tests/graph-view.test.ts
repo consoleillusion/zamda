@@ -11,6 +11,8 @@ import {
   buildViewData,
   compileGraphPlans,
   edgeKey,
+  FOCUS_RATIO,
+  frameCamera,
   hotKeys,
   neighbourhoodEdges,
   overviewEdges,
@@ -99,5 +101,19 @@ describe('graph data selection', () => {
       [3, 4, 8],
     ]);
     expect(view.truncated).toBe(3);
+  });
+
+  test('the default view frames closer, and a click focus zooms in further', async () => {
+    const { arrays, edges } = sample();
+    const world = {
+      ...arrays,
+      x: Float32Array.from([-0.8, 0.8, -0.8, 0.8, -0.8, 0.8]),
+      y: Float32Array.from([-0.8, -0.8, 0.8, 0.8, -0.8, 0.8]),
+    };
+    const rows = await allEdges(edges);
+    const frame = frameCamera(buildViewData(world, rows, { nodeLimit: 6 }));
+    expect(frame.ratio).toBeLessThan(1);
+    expect(FOCUS_RATIO).toBeLessThan(frame.ratio);
+    expect(FOCUS_RATIO).toBeLessThan(1);
   });
 });

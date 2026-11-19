@@ -478,19 +478,22 @@ real RIS Live socket.
 
 Measured on 2026-11-20 after regenerating `data/graph.bin` from the same rrc00 dump with country
 codes from the current `asn.txt` and pinned country centroids. The file now stores 241 country
-codes and country-centred positions, and loads in 103 ms in Chrome. The panel states that nodes
+codes and country-centred positions, and loads in 110 ms in Chrome. The panel states that nodes
 are grouped by registered country. All positions are still fixed in the file; only the camera
 moves.
 
+Sigma's camera ratio is the fraction of the graph shown, so a smaller number is closer. The
+overview now starts at 0.698 instead of 1.270, and a click eases in to 0.42, not out to 2.8.
+
 | Browser | Ratio at 40 / 160 / 320 / 540 ms into click zoom | Ratio at 40 / 160 / 320 / 540 ms back out | Errors |
 | --- | --- | --- | --- |
-| Chrome 156 | 1.270, 1.686, 2.747, 2.800 | 2.800, 2.478, 1.456, 1.270 | 0 |
-| Firefox 158 | 1.290, 1.619, 2.541, 2.800 | 2.797, 2.537, 1.610, 1.270 | 0 |
+| Chrome 156 | 0.698, 0.612, 0.427, 0.420 | 0.420, 0.484, 0.674, 0.698 | 0 |
+| Firefox 158 | 0.695, 0.635, 0.469, 0.420 | 0.421, 0.479, 0.635, 0.698 | 0 |
 
-The focus now ends at ratio 2.8 in 450 ms, and the clicked AS's screen position is kept centred
-while the overview moves from `(0.547, 0.563)` to `(0.238, 0.702)`. One wheel notch in Chrome
-changes the camera ratio by exactly 1.35 in both directions (1.270 to 0.941 and back), up from
-1.12. The simulator still fills the live query to 200 hot edges with no console error. Raw
-samples are `bench/results/t508-graph-geo-chrome.json`,
-`bench/results/t508-graph-geo-firefox.json` and `bench/results/t508-graph-wheel-chrome.json`.
-These are development-machine numbers; the country centres are approximate, not city locations.
+The clicked AS's screen position moves with the camera from `(0.547, 0.563)` to `(0.238, 0.702)`
+while the neighbourhood data is swapped in. One wheel notch in Chrome changes the camera ratio
+by exactly 1.35 in both directions (0.698 to 0.517 and back). The simulator still fills the live
+query to 200 hot edges with no console error. Raw samples are
+`bench/results/t508-graph-geo-chrome.json`, `bench/results/t508-graph-geo-firefox.json` and
+`bench/results/t508-graph-wheel-chrome.json`. These are development-machine numbers; the country
+centres are approximate, not city locations.
