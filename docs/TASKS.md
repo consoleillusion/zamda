@@ -50,7 +50,7 @@ T-215 needs someone with network access to RIPE. T-203 changes `src/optimize.ts`
 | T-206 | Reference dashboard under `demo/`: four linked charts, controls as parameters, live panel on RIPE RIS Live. **Done** (`bun run demo`); checked in headless Chrome on synthetic data with the simulated feed, not yet on real data or the real feed. | T-202, T-204, T-205 |
 | T-207 | Benchmark harness under `bench/reference/`: seven reference queries, zamda vs Arquero at 10k, 100k and 1M rows, every answer checked against the other engine before timing, results written to `bench/results/` as JSON and markdown. **Done** (`bun run bench:ref`); sandbox results in `bench/results/sandbox.md`. | T-205 |
 | T-208 (done: type-aware ESLint rule and API reference, D-073; `bun run lint` clean, `bun run check` green) | ESLint rule flagging `&&`, `\|\|`, `!` and `===` in accessor callbacks; API reference docs | T-112 |
-| T-209 | Build and publish: ESM output with `.d.ts`, npm alpha | T-206, T-208 |
+| T-209 (build done: ESM + `.d.ts`, `bun run build`; npm alpha blocked: no npm auth here) | Build and publish: ESM output with `.d.ts`, npm alpha | T-206, T-208 |
 | T-210 | Measure the reference queries in Chrome and Firefox, not only Bun (the dashboard part is T-217) | T-207 |
 | T-211 | Allow `utf8` and `dictionary` expressions to be mixed in one operation | T-112 |
 | T-215 | Run `bun run prep-bgp` against a real RIS dump; record row count, skipped prefixes and timings in `docs/BENCHMARKS.md`. **Done** (`docs/BENCHMARKS.md`). | T-205 |

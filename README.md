@@ -72,6 +72,8 @@ bun run check     # typecheck + tests + size budget
 | `bun test` | Unit, slice and golden contract tests |
 | `bun run lint` | ESLint over the repo with the zamda accessor-callback rule |
 | `bun run typecheck` | `tsc --noEmit`, including the type-inference tests |
+| `bun run build` | ESM bundle and `.d.ts` files in `dist/` for publishing |
+| `bun run publish:alpha` | Build and publish the package to npm under the `alpha` tag |
 | `bun run size` | Fails if the core exceeds 40 KB gzipped |
 | `bun run bench` | Group-by benchmark against plain JS and Arquero |
 | `bun run wasm:build` | Builds the engine as WebAssembly (`dist/zamda-engine.wasm`), runs `wasm-opt` if installed, prints the size and fails above 400 KB gzipped. Needs `rustup target add wasm32-unknown-unknown` once |

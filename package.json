@@ -4,11 +4,16 @@
   "description": "Typed, declarative columnar pipelines for JavaScript, with pluggable execution backends.",
   "license": "MIT",
   "type": "module",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
-    "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
@@ -17,6 +22,9 @@
     "typecheck": "tsc --noEmit",
     "size": "bun run scripts/size.ts",
     "check": "bun run typecheck && bun test && bun run size",
+    "build": "bun run scripts/build.ts",
+    "prepublishOnly": "bun run check && bun run build",
+    "publish:alpha": "bun run build && npm publish --tag alpha",
     "bench": "bun run bench/groupby.ts",
     "prep-bgp": "bun run scripts/prep-bgp.ts",
     "demo": "bun demo/server.ts",
