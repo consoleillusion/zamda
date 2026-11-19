@@ -35,8 +35,11 @@ export type { LatestRun } from './latest';
 export { Result } from './result';
 export type { ColumnValues } from './column';
 
-export { table } from './backends/js';
+export { table, keyedTable } from './backends/js';
 export type { ColumnInput, DictionaryInput, JsTable, RowInput, TableInput, TableOptions } from './backends/js';
+
+export { KeyedTable } from './keyed';
+export type { Key, KeyComponent, KeyedTableFactory, KeyFields } from './keyed';
 
 export type { Backend, BackendOptions, ResultData, RunSession, Table } from './backend';
 export type { IrAggregate, IrExpr, IrNode, IrParam, IrPlan, IrSortKey } from './ir';

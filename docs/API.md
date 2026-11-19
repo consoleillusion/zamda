@@ -143,6 +143,19 @@ const t2 = table(Users, {
 `RowInput<F>` is what `table()` accepts for rows: `Partial<RowOf<F>>` — each
 property of another type is checked against the column.
 
+### `keyedTable(schema, keyFields, data, options?)`
+
+Creates a `KeyedTable<F>`: a live table with at most one row per key. `keyFields`
+is a list of column names. Row objects or one array per column are accepted, as
+for `table()`. `upsert(rows)` inserts new keys and replaces whole rows for
+existing keys in place; `delete(keys)` returns the number of rows removed;
+`get(key)` and `has(key)` read the current rows; `current()` returns the backend
+table snapshot; `rowCount` and `rowsDropped` report its size and how many rows
+have been removed over its life; `dispose()` frees backend memory. Mutation is
+atomic and a started run sees the table as it stood when it started
+(C-LIVE-KEY). `Key`, `KeyComponent`, `KeyedTableFactory` and `KeyFields` are the
+corresponding types. `createWasmBackend(host).keyedTable` is the WASM-bound factory.
+
 ## Pipelines
 
 ```ts

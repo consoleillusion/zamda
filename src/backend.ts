@@ -47,4 +47,12 @@ export interface Backend {
   // Rejects with PlanError if the table is not this backend's, or the plan
   // uses something the backend does not implement yet.
   execute(plan: IrPlan, table: Table, options: BackendOptions): Promise<ResultData>;
+  // Optional wrapper support (C-LIVE-KEY). unwrap() gives back the backend's own
+  // table from a wrapper such as a KeyedTable. retain() and release() bracket
+  // one execute call, so a wrapper can keep the table a run started on alive
+  // until that run is over even if a mutation replaces it meanwhile. A backend
+  // with no wrappers leaves all three out; ordinary tables are unaffected.
+  unwrap?(table: Table): Table;
+  retain?(table: Table): void;
+  release?(table: Table): void;
 }

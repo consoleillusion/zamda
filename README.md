@@ -47,6 +47,15 @@ const top = pipe(Routes, { minLen: t.uint8, maxLen: t.uint8, regions: list(t.dic
 await top.execute(routes, { params: { minLen: 2, maxLen: 6, regions: ['APNIC'] } });
 ```
 
+### Keyed live tables
+
+`keyedTable(schema, keyFields, data)` creates a live table with at most one row
+per key. `upsert(rows)` inserts new keys and replaces whole rows for existing
+keys in place; `delete(keys)` returns how many rows it removed. A key with a null
+component, or bad row data, is rejected without changing the table. A run sees
+the table exactly as it stood when it started (C-LIVE-KEY). The WASM backend
+provides its own bound factory on the object returned by `createWasmBackend(host)`.
+
 | Area | Available |
 | --- | --- |
 | Pipeline | `filter`, `select`, `withColumns`, `rename`, `groupBy().agg()`, `agg()`, `distinct`, `sort`, `limit` |
@@ -57,6 +66,7 @@ await top.execute(routes, { params: { minLen: 2, maxLen: 6, regions: ['APNIC'] }
 | Aggregates | `count`, `countDistinct`, `sum`, `avg`, `min`, `max` |
 | Input | row objects, or one array per column (typed arrays are used without copying) |
 | Live tables | `table.append(rows)`, with an optional `retain: { rows }` rolling window; each run sees the table as it was when the run started |
+| Keyed live tables | `keyedTable(schema, keyFields, data)`: `upsert(rows)` replaces whole rows by key in place, `delete(keys)` removes them, and mutation is atomic |
 | Output | `toArray()` rows, `columns()`, `column(name)` |
 | Running | Chunked and cooperative: `signal` to cancel, `onProgress`, and `latest(plan)` so a new run cancels the previous one |
 

@@ -12,6 +12,8 @@ import { slice } from '../../column';
 import { PlanError, SchemaError } from '../../errors';
 import type { IrPlan } from '../../ir';
 import type { Fields, RowOf, Schema } from '../../schema';
+import { KeyedTable } from '../../keyed';
+import type { KeyFields } from '../../keyed';
 import type { Segment } from './exec';
 import { executeJs } from './exec';
 import { loadColumns, loadRows } from './load';
@@ -44,6 +46,10 @@ export const jsBackend: Backend = {
       throw new PlanError('The JS backend can only run plans on tables created with table()');
     }
     return executeJs(plan, table.snapshot(), options);
+  },
+  unwrap(table: Table): Table {
+    // Purpose: hand back the JS table behind a keyed wrapper (C-LIVE-KEY)
+    return table instanceof KeyedTable ? table.current() : table;
   },
 };
 
@@ -137,4 +143,17 @@ export function table<F extends Fields>(
 ): JsTable<F> {
   // Purpose: create a JS-backend table from row objects or from one array per column
   return new JsTable(schema, loadSegment(schema, data), options);
+}
+
+export function keyedTable<F extends Fields>(
+  schema: Schema<F>,
+  keyFields: KeyFields<F>,
+  data: TableInput<F>,
+  options: TableOptions = {},
+): KeyedTable<F> {
+  // Purpose: create a keyed live table whose snapshots are JS-backend tables
+  return new KeyedTable(schema, keyFields, data, options, function (rows) {
+    // Purpose: build a fresh JS table from the keyed table's whole current row list
+    return table(schema, rows);
+  });
 }

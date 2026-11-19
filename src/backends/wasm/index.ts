@@ -10,6 +10,8 @@ import { AbortError, ExecutionError, MemoryError, PlanError } from '../../errors
 import type { IrPlan } from '../../ir';
 import { encodeParams, encodePlan, TYPE_NAMES } from '../../ir-binary';
 import type { Fields, Schema } from '../../schema';
+import { KeyedTable } from '../../keyed';
+import type { KeyFields } from '../../keyed';
 import type { Column } from '../../column';
 import type { IrExpr, LiteralValue } from '../../ir';
 import { nodeExprs, walkExpr } from '../../ir';
@@ -48,6 +50,18 @@ export interface WasmBackend extends Backend {
   readonly stats: WasmStats;
   // Open a session: runs started with it as their `session` option share the engine's cache of boolean subexpressions (T-416). Closing drops the cache and folds the hit and miss counts into `stats.cache`.
   session(): WasmSession;
+}
+
+// What a host gets back: the backend and the table factories bound to its engine instance.
+export interface WasmFactory {
+  readonly backend: WasmBackend;
+  table<F extends Fields>(schema: Schema<F>, data: TableInput<F>, options?: TableOptions): WasmTable<F>;
+  keyedTable<F extends Fields>(
+    schema: Schema<F>,
+    keyFields: KeyFields<F>,
+    data: TableInput<F>,
+    options?: TableOptions,
+  ): KeyedTable<F>;
 }
 
 export interface WasmSession extends RunSession {
@@ -141,8 +155,8 @@ export class WasmTable<F extends Fields = Fields> implements Table<F> {
   }
 }
 
-export function createWasmBackend(host: EngineRunHost): { backend: WasmBackend; table: <F extends Fields>(schema: Schema<F>, data: TableInput<F>, options?: TableOptions) => WasmTable<F> } {
-  // Purpose: a backend over one engine instance, and the function that creates its tables
+export function createWasmBackend(host: EngineRunHost): WasmFactory {
+  // Purpose: a backend over one engine instance, and the functions that create its ordinary and keyed tables
   const stats: WasmStats = { engine: 0, fallback: 0, phasesMs: { prepare: 0, tables: 0, start: 0, steps: 0, read: 0 }, cache: { hits: 0, misses: 0 } };
   // The sessions this backend has handed out and not closed (foreign sessions are rejected when a plan runs with one).
   const liveSessions = new Set<SessionHandle>();
@@ -203,12 +217,36 @@ export function createWasmBackend(host: EngineRunHost): { backend: WasmBackend; 
         snapshot.release();
       }
     },
+    unwrap(table: Table): Table {
+      // Purpose: hand back the engine table behind a keyed wrapper (C-LIVE-KEY)
+      return table instanceof KeyedTable ? table.current() : table;
+    },
+    retain(table: Table): void {
+      // Purpose: pin the table a run starts on, so a replacement cannot free it mid-run (C-LIVE-KEY)
+      if (table instanceof KeyedTable) table.acquire();
+    },
+    release(table: Table): void {
+      // Purpose: unpin a finished run's table, disposing it if it was replaced while it ran (C-LIVE-KEY)
+      if (table instanceof KeyedTable) table.releaseRun();
+    },
   };
   function table<F extends Fields>(schema: Schema<F>, data: TableInput<F>, options: TableOptions = {}): WasmTable<F> {
     // Purpose: create a table in this engine from rows or columns
     return new WasmTable(backend, host, schema, data, options);
   }
-  return { backend, table };
+  function keyedTable<F extends Fields>(
+    schema: Schema<F>,
+    keyFields: KeyFields<F>,
+    data: TableInput<F>,
+    options: TableOptions = {},
+  ): KeyedTable<F> {
+    // Purpose: create a keyed live table whose snapshots are engine tables on this host
+    return new KeyedTable(schema, keyFields, data, options, function (rows) {
+      // Purpose: build a fresh engine table from the keyed table's whole current row list
+      return new WasmTable(backend, host, schema, rows, options);
+    });
+  }
+  return { backend, table, keyedTable };
 }
 
 function hasMixedStringTypes(plan: IrPlan): boolean {

@@ -106,5 +106,5 @@ hard-coded mask pass, so T-413 is the real test of the 50 ms target.
 | ID | Task |
 | --- | --- |
 | T-501 (done; `src/substrait.ts`, pinned Substrait 0.108.0, 14 tests) | Substrait export and import; verify the registry's Substrait names against a pinned spec version |
-| T-502 | Keyed live tables |
+| T-502 (done, C-LIVE-KEY, D-075) | Keyed live tables |
 | T-503 | Joins, then window functions |

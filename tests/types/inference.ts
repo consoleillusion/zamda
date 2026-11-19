@@ -4,8 +4,8 @@
 // Add a case here whenever the DSL's types change. A wrong inference must fail
 // the typecheck, and a call that should be rejected is marked @ts-expect-error.
 
-import { count, ifElse, list, pipe, schema, t, table } from '../../src';
-import type { Plan, RowOf } from '../../src';
+import { count, ifElse, keyedTable, list, pipe, schema, t, table } from '../../src';
+import type { KeyedTable, Plan, RowOf, Table } from '../../src';
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
@@ -189,3 +189,24 @@ pipe(Users).rename({ nope: 'x' });
 void projected.execute(users, { session: { kind: 'zamda/wasm-session' } });
 // @ts-expect-error a session is a RunSession (an object with a kind), not a number
 void projected.execute(users, { session: 42 });
+
+// Keyed live tables (C-LIVE-KEY): the factory, its methods and their types.
+const keyed = keyedTable(Users, ['name', 'age'], []);
+assertType<Same<typeof keyed, KeyedTable<typeof Users.fields>>>();
+const current: Table<typeof Users.fields> = keyed.current();
+void current;
+const found: RowOf<typeof Users.fields> | undefined = keyed.get(['nobody', 0]);
+void found;
+assertType<Same<ReturnType<typeof keyed.has>, boolean>>();
+assertType<Same<ReturnType<typeof keyed.delete>, number>>();
+keyed.upsert([{ name: 'new', age: 20 }]);
+keyed.delete([['new', 20]]);
+keyed.dispose();
+// @ts-expect-error key fields must be columns of the schema
+keyedTable(Users, ['nope'], []);
+// @ts-expect-error a key is an array of components, not a bare value
+keyed.get('nobody');
+// @ts-expect-error delete takes a list of keys, not one key component
+keyed.delete([1]);
+// @ts-expect-error rows must match the schema
+keyed.upsert([{ nope: 1 }]);

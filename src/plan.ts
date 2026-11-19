@@ -1,4 +1,4 @@
-import type { RunSession, Table } from './backend';
+import type { ResultData, RunSession, Table } from './backend';
 import { AbortError, PlanError, TypeCheckError } from './errors';
 import { literalValue } from './expr';
 import type { IrExpr, IrNode, IrPlan, LiteralValue } from './ir';
@@ -120,14 +120,21 @@ export class Plan<In extends Fields, Out extends Fields, P extends ParamDecls = 
       throw new PlanError(`sliceMs must be zero or more, got ${sliceMs}`);
     }
     if (options.signal?.aborted) throw new AbortError();
-    const data = await table.backend.execute(this.ir, table, {
-      params,
-      signal: options.signal,
-      chunkRows,
-      sliceMs,
-      onProgress: options.onProgress,
-      session: options.session,
-    });
+    table.backend.retain?.(table);
+    let data: ResultData;
+    try {
+      const target = table.backend.unwrap?.(table) ?? table;
+      data = await table.backend.execute(this.ir, target, {
+        params,
+        signal: options.signal,
+        chunkRows,
+        sliceMs,
+        onProgress: options.onProgress,
+        session: options.session,
+      });
+    } finally {
+      table.backend.release?.(table);
+    }
     return new Result<Out>(data);
   }
 
