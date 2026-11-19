@@ -90,12 +90,13 @@ export function inThreadLink(load: () => Promise<EngineRunHost>): EngineLink {
       return await f();
     } catch (e) {
       if (e instanceof ZamdaError) throw e;
-      let refused = false;
-      try {
-        refused = host.memoryRefused();
-      } catch {
-        refused = false;
-      }
+      const refused = (() => {
+        try {
+          return host.memoryRefused();
+        } catch {
+          return false;
+        }
+      })();
       host = null;
       backend = null;
       tables.clear();

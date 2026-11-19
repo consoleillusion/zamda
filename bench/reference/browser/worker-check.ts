@@ -118,9 +118,8 @@ async function main(): Promise<void> {
   };
   const gapWorker = await maxGapWhile(() => runAll(wasm));
   record('page thread gap while the worker runs plans', gapWorker < 50, `${gapWorker.toFixed(1)} ms longest gap between 4 ms timer ticks`, 'under 50 ms (a 4 ms tick that is 50 ms late is visible jank)');
-  let inThread: ReturnType<typeof createWasmBackend> | null = null;
   const bytes = await (await fetch(engineUrl)).arrayBuffer();
-  inThread = createWasmBackend(await loadEngine(bytes));
+  const inThread = createWasmBackend(await loadEngine(bytes));
   const local = inThread.table(Routes, input as never);
   const gapLocal = await maxGapWhile(() => runAll(local));
   info.push(`control: the same plans on this thread leave a gap of ${gapLocal.toFixed(1)} ms (no limit; it shows what the worker saves)`);

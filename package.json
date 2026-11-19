@@ -34,11 +34,15 @@
     "spike:test": "cargo test --release --manifest-path spike/Cargo.toml",
     "gen:engine": "bun scripts/engine-fixtures.ts",
     "engine:build": "cargo build --release --manifest-path engine/Cargo.toml",
-    "engine:test": "bun run engine:build && bun test tests/engine-store.test.ts tests/engine-eval.test.ts tests/engine-run.test.ts tests/wasm-backend.test.ts tests/wasm-memory.test.ts tests/wasm-managed.test.ts tests/wasm-worker.test.ts tests/wasm-session-mixing.test.ts tests/wasm-dates.test.ts && cargo test --release --manifest-path engine/Cargo.toml"
+    "engine:test": "bun run engine:build && bun test tests/engine-store.test.ts tests/engine-eval.test.ts tests/engine-run.test.ts tests/wasm-backend.test.ts tests/wasm-memory.test.ts tests/wasm-managed.test.ts tests/wasm-worker.test.ts tests/wasm-session-mixing.test.ts tests/wasm-dates.test.ts && cargo test --release --manifest-path engine/Cargo.toml",
+    "lint": "eslint ."
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/bun": "latest",
     "arquero": "^8.0.3",
-    "typescript": "^5.6.0"
+    "eslint": "^10.15.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.73.0"
   }
 }

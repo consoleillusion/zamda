@@ -421,6 +421,7 @@ class CollectSink implements Sink {
     this.collector.add(dense(stage));
   }
 
+  // eslint-disable-next-line require-yield -- kept a generator so every Sink finishes the same way (the sort sink yields rows)
   *finish(): Generator<void, Stage> {
     // Purpose: the joined result
     const batch = this.collector.finish();
@@ -459,6 +460,7 @@ class AggregateSink implements Sink {
     this.aggregator.consume(keys, args, { count: stage.rowCount, sel: through ? stage.selection : null });
   }
 
+  // eslint-disable-next-line require-yield -- kept a generator so every Sink finishes the same way (the sort sink yields rows)
   *finish(): Generator<void, Stage> {
     // Purpose: the groups and their aggregates
     const batch = this.aggregator.finish();

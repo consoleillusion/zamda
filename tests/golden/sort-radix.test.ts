@@ -139,7 +139,7 @@ describe('radix sort matches the comparison order', () => {
     ];
     const gen = sortSteps(keys, n, null);
     let yields = 0;
-    let result: number[] = [];
+    let result: number[] | undefined;
     for (;;) {
       const step = gen.next();
       if (step.done) {
@@ -148,6 +148,8 @@ describe('radix sort matches the comparison order', () => {
       }
       yields++;
     }
+    // The generator always produces a value here; this narrows the type for the assertion.
+    if (result === undefined) throw new Error('the generator finished without producing a permutation');
     expect(yields).toBeGreaterThan(2);
     expect(result).toEqual(referenceOrder(keys, n));
   });
