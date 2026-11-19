@@ -8,3 +8,4 @@ spike/target-wrapping/
 spike/Cargo.lock
 engine/target/
 engine/Cargo.lock
+project.zip
