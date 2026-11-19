@@ -179,6 +179,10 @@ struct StagedColumn {
     dict_len: Option<u32>,
 }
 
+thread_local! {
+    static NEXT_SEGMENT_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
+}
+
 struct Staging {
     rows: u32,
     columns: Vec<StagedColumn>,
@@ -319,8 +323,13 @@ impl Table {
         if rows == 0 {
             return Ok(());
         }
-        let id = self.next_id;
-        self.next_id += 1;
+        // Segment ids are unique across every table of the module (not only this one), because the session cache keys its entries by segment id.
+        let id = NEXT_SEGMENT_ID.with(|n| {
+            let id = n.get();
+            n.set(id + 1);
+            id
+        });
+        self.next_id = id + 1;
         self.segments.push(View { id, data: Rc::new(SegmentData { columns }), offset: 0, rows: staging.rows });
         self.rows += rows as u64;
         self.enforce_retain();

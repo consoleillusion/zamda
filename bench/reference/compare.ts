@@ -140,6 +140,24 @@ export async function runComparison(
         session?.close();
       }
     };
+    if (wt !== undefined) {
+      // Before timing, each chart's answer on the WASM backend (in a session, as timed) must equal the JS backend's.
+      const rowsOf = async (id: (typeof charts)[number], on: typeof zt, session?: WasmSession): Promise<string> => {
+        // Purpose: one chart's result as sorted text lines
+        const result = await (plans[id] as { execute(t: typeof zt, o: unknown): Promise<{ toArray(): unknown[] }> }).execute(on, { params: paramsFor(selection, id), ...(session === undefined ? {} : { session }) });
+        return result.toArray().map(r => JSON.stringify(r, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v))).sort().join('\n');
+      };
+      const session = wasm?.session?.();
+      try {
+        const got = await Promise.all(charts.map(id => rowsOf(id, wt as unknown as typeof zt, session)));
+        const want = await Promise.all(charts.map(id => rowsOf(id, zt)));
+        charts.forEach((id, i) => {
+          if (got[i] !== want[i]) throw new Error(`${label}: chart ${id} differs between the WASM backend (with a session) and the JS backend in ${runtime}`);
+        });
+      } finally {
+        session?.close();
+      }
+    }
     const row: InteractionRow = {
       label,
       together: await measure(() => Promise.all(charts.map(id => start(id))), runs),
