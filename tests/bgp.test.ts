@@ -10,6 +10,7 @@ import { count, pipe } from '../src';
 import { Routes, encodeRoutes, formatPrefix, loadRoutes } from '../scripts/bgp/file';
 import type { RibGraphRecord, RibRecord } from '../scripts/bgp/mrt';
 import { MrtFormatError, MrtReader } from '../scripts/bgp/mrt';
+import { parseFacilities, parseNetFacilities } from '../scripts/bgp/peeringdb';
 import { parseAsCountries, parseAsNames, parseCountryCentres, parseRirRanges, rirLookup } from '../scripts/bgp/registry';
 import { GraphBuilder } from '../scripts/bgp/graph';
 import { GraphEdges, decodeGraph, encodeGraph, loadGraph } from '../scripts/bgp/graph-file';
@@ -368,7 +369,7 @@ describe('AS adjacency graph', () => {
     const centres = parseCountryCentres(COUNTRIES_JSON);
     const encoded = encodeGraph(builder.finish(), labels, centres, { collector: 'fixture' });
     const { arrays, header } = decodeGraph(encoded);
-    expect(header.version).toBe(3);
+    expect(header.version).toBe(4);
     expect(header.nodeCount).toBe(7);
     expect(header.edgeCount).toBe(3);
     expect(header.source).toEqual({ collector: 'fixture' });
@@ -405,6 +406,44 @@ describe('AS adjacency graph', () => {
       { from: 4200000000, to: 4200000001, weight: 1 },
     ]);
   });
+
+  test('graph.bin stores point precision and measures spans between mapped points', () => {
+    // Purpose: a PeeringDB point and a country-fallback point keep their source and drive the span filter
+    const graph = {
+      nodes: {
+        asn: Uint32Array.from([1, 2]),
+        paths: Uint32Array.from([1, 1]),
+        origins: Uint32Array.from([0, 0]),
+        rowCount: 2,
+      },
+      edges: {
+        from_as: Uint32Array.from([1]),
+        to_as: Uint32Array.from([2]),
+        prefixes: Uint32Array.from([1]),
+        rowCount: 1,
+      },
+    };
+    const labels = {
+      asName: (_asn: number) => null,
+      country: (_asn: number) => null,
+      rir: (_asn: number) => null,
+      location: function (asn: number) {
+        // Purpose: one facility point and one country point at one degree of longitude apart
+        return asn === 1
+          ? { lat: 0, lon: 0, precision: 2 as const }
+          : { lat: 0, lon: 1, precision: 1 as const };
+      },
+    };
+    const { arrays, header } = decodeGraph(
+      encodeGraph(graph, labels, parseCountryCentres(COUNTRIES_JSON), { collector: 'fixture' }),
+    );
+    expect(header.version).toBe(4);
+    expect([...arrays.location]).toEqual([2, 1]);
+    expect(arrays.x[0]).toBe(0);
+    expect(arrays.x[1]).toBeCloseTo(0.88 / 180, 5);
+    expect(arrays.span_km[0]).toBeGreaterThan(100);
+    expect(arrays.span_km[0]).toBeLessThan(120);
+  });
 });
 
 const ASN_TXT = [
@@ -425,6 +464,32 @@ const COUNTRIES_JSON = JSON.stringify([
   { cca2: 'BAD', latlng: 'wrong' },
   { cca2: 'NONE' },
 ]);
+
+const FACILITIES_JSON = JSON.stringify({
+  data: [
+    { id: 1, latitude: 39, longitude: -77, status: 'ok' },
+    { id: 2, latitude: 37, longitude: -122, status: 'ok' },
+    { id: 3, latitude: 51, longitude: 179, status: 'ok' },
+    { id: 4, latitude: 50, longitude: -179, status: 'ok' },
+    { id: 5, latitude: 999, longitude: 0, status: 'ok' },
+    { id: 6, latitude: 1, longitude: 2, status: 'closed' },
+  ],
+  meta: {},
+});
+
+const NETFAC_JSON = JSON.stringify({
+  data: [
+    { local_asn: 13335, fac_id: 1, status: 'ok' },
+    { local_asn: 13335, fac_id: 2, status: 'ok' },
+    { local_asn: 13335, fac_id: 1, status: 'ok' },
+    { local_asn: 15169, fac_id: 3, status: 'ok' },
+    { local_asn: 15169, fac_id: 4, status: 'ok' },
+    { local_asn: 3356, fac_id: 99, status: 'ok' },
+    { local_asn: 'bad', fac_id: 1, status: 'ok' },
+    { local_asn: 64512, fac_id: 1, status: 'closed' },
+  ],
+  meta: {},
+});
 
 const NRO_STATS = [
   '2.3|nro|20261116|999|19830705|20261116|+0000',
@@ -461,6 +526,29 @@ describe('registry files', () => {
     expect(centres.get('NZ')).toEqual({ lat: -41, lon: 174 });
     expect(centres.has('BAD')).toBe(false);
     expect(centres.has('NONE')).toBe(false);
+  });
+
+  test('PeeringDB facilities: only valid, open points are kept', () => {
+    // Purpose: bad coordinates and closed facilities must never become AS points
+    const facilities = parseFacilities(FACILITIES_JSON);
+    expect(facilities.size).toBe(4);
+    expect(facilities.get(1)).toEqual({ lat: 39, lon: -77 });
+    expect(facilities.has(5)).toBe(false);
+    expect(facilities.has(6)).toBe(false);
+  });
+
+  test('PeeringDB memberships: one mean point per ASN, deduplicated and safe across the dateline', () => {
+    // Purpose: an AS with several facilities gets one point, without averaging 179 and -179 to zero
+    const facilities = parseFacilities(FACILITIES_JSON);
+    const locations = parseNetFacilities(NETFAC_JSON, facilities);
+    expect([...locations.keys()]).toEqual([13335, 15169]);
+    expect(locations.get(13335)!.facilities).toBe(2);
+    expect(locations.get(13335)!.lat).toBeGreaterThan(37);
+    expect(locations.get(13335)!.lat).toBeLessThan(41);
+    expect(locations.get(13335)!.lon).toBeLessThan(-77);
+    expect(locations.get(13335)!.lon).toBeGreaterThan(-122);
+    expect(Math.abs(locations.get(15169)!.lon)).toBeGreaterThan(179);
+    expect(locations.get(15169)!.lat).toBeCloseTo(50.5, 0);
   });
 
   test('NRO stats: AS ranges by registry, IANA and summary lines skipped', () => {
@@ -532,6 +620,8 @@ describe('prep-bgp', () => {
     await writeFile(join(dir, 'asn.txt'), ASN_TXT);
     await writeFile(join(dir, 'stats'), NRO_STATS);
     await writeFile(join(dir, 'countries.json'), COUNTRIES_JSON);
+    await writeFile(join(dir, 'facilities.json'), FACILITIES_JSON);
+    await writeFile(join(dir, 'netfac.json'), NETFAC_JSON);
     const out = join(dir, 'out', 'routes.bin');
     const graphOut = join(dir, 'out', 'graph.bin');
     const log = console.log;
@@ -543,6 +633,8 @@ describe('prep-bgp', () => {
           '--names', join(dir, 'asn.txt'),
           '--stats', join(dir, 'stats'),
           '--countries', join(dir, 'countries.json'),
+          '--facilities', join(dir, 'facilities.json'),
+          '--netfac', join(dir, 'netfac.json'),
           '--out', out,
           '--graph-out', graphOut,
         ]),
@@ -556,6 +648,9 @@ describe('prep-bgp', () => {
     const graph = decodeGraph(new Uint8Array(await Bun.file(graphOut).arrayBuffer()));
     expect(graph.header.edgeCount).toBe(3);
     expect(graph.header.nodeCount).toBe(7);
+    const cloudflare = graph.arrays.asn.indexOf(13335);
+    expect(graph.arrays.location[cloudflare]).toBe(2);
+    expect(String(graph.header.source.locations)).toContain('peeringdb');
   });
 
   test('options and URLs', () => {
@@ -566,6 +661,8 @@ describe('prep-bgp', () => {
     expect(parseArgs([]).out).toBe('data/routes.bin');
     expect(parseArgs([]).graphOut).toBe('data/graph.bin');
     expect(parseArgs([]).countries).toBeNull();
+    expect(parseArgs([]).facilities).toBeNull();
+    expect(parseArgs([]).netfac).toBeNull();
   });
 });
 
@@ -582,11 +679,15 @@ describe('prep-bgp download', () => {
     await writeFile(join(dir, 'asn.txt'), ASN_TXT);
     await writeFile(join(dir, 'stats'), NRO_STATS);
     await writeFile(join(dir, 'countries.json'), COUNTRIES_JSON);
+    await writeFile(join(dir, 'facilities.json'), FACILITIES_JSON);
+    await writeFile(join(dir, 'netfac.json'), NETFAC_JSON);
     const args = [
       '--date', '20261116',
       '--names', join(dir, 'asn.txt'),
       '--stats', join(dir, 'stats'),
       '--countries', join(dir, 'countries.json'),
+      '--facilities', join(dir, 'facilities.json'),
+      '--netfac', join(dir, 'netfac.json'),
       '--out', join(dir, 'routes.bin'),
       '--graph-out', join(dir, 'graph.bin'),
     ];

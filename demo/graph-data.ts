@@ -18,7 +18,6 @@ export const NEIGHBOURHOOD_HOPS = 2;
 // Sigma's camera ratio is the fraction of the graph's square shown: smaller is closer.
 export const FRAME_SPAN = 0.9;
 export const FRAME_RATIO_MAX = 0.78;
-export const FOCUS_RATIO = 0.42;
 
 export interface CameraView {
   readonly x: number;
@@ -39,6 +38,7 @@ export interface GraphNodeView {
   readonly label: string;
   readonly rir: string | null;
   readonly country: string | null;
+  readonly location: number;
   readonly x: number;
   readonly y: number;
   readonly paths: number;
@@ -194,6 +194,7 @@ export function buildViewData(
       label: arrays.name[i] ?? `AS${asn}`,
       rir: arrays.rir[i] ?? null,
       country: arrays.country[i] ?? null,
+      location: arrays.location[i] ?? 0,
       x: arrays.x[i]!,
       y: arrays.y[i]!,
       paths: arrays.paths[i]!,
@@ -212,6 +213,11 @@ export function buildViewData(
     });
   }
   return { nodes, edges, truncated: rows.length - edges.length };
+}
+
+export function selectionCamera(current: CameraView): CameraView {
+  // Purpose: clicking a point changes the selection, not the camera or zoom level
+  return { x: current.x, y: current.y, ratio: current.ratio };
 }
 
 export function frameCamera(data: GraphViewData): CameraView {

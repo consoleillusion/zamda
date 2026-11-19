@@ -1,0 +1,67 @@
+{
+  "browser": "Firefox",
+  "before": {
+    "mode": "overview",
+    "nodes": 800,
+    "edges": 858,
+    "camera": {
+      "x": 0.5644387453794479,
+      "y": 0.5931579992175102,
+      "ratio": 0.6234507669010879
+    },
+    "status": "80,226 ASes · 122,862 directed edges from local file data/rrc00-bview.20261118.0000.gz · peeringdb facility points for 12,859 ASes, 66,899 at country centres, 468 unmapped · loaded in 117 ms",
+    "detail": "Map overview · paths up to 3,000 km apart · 858 edges from the 2,000 strongest local · 800 ASes · hover for meaning, click to expand",
+    "source": "1,163,624 IPv4 routes from RIPE RIS    · loaded in 179 ms",
+    "map": {
+      "width": 977,
+      "height": 558,
+      "painted": 262730
+    },
+    "tooltip": {
+      "hidden": true,
+      "text": ""
+    }
+  },
+  "point": {
+    "asn": 15169,
+    "x": 369.288688480945,
+    "y": 627.8488136892942,
+    "d": 270.73000418070086
+  },
+  "hover": {
+    "hidden": false,
+    "text": "AS15169\nUS · ARIN · 1 route\nMapped from PeeringDB facilities; click to expand its neighbourhood"
+  },
+  "moved": {
+    "x": 0.5236944955071909,
+    "y": 0.6190721550453249,
+    "ratio": 0.4618153828896947
+  },
+  "beforeClick": {
+    "x": 0.5236944955071909,
+    "y": 0.6190721550453249,
+    "ratio": 0.4618153828896947
+  },
+  "clicked": {
+    "asn": 13335,
+    "x": 154.36091453647498,
+    "y": 631.9060030952995
+  },
+  "afterClick": {
+    "mode": "neighbourhood",
+    "nodes": 800,
+    "edges": 1232,
+    "camera": {
+      "x": 0.5236944955071909,
+      "y": 0.6190721550453249,
+      "ratio": 0.4618153828896947
+    },
+    "detail": "Neighbourhood of AS13335: 800 ASes, 1,232 edges · click Overview to return"
+  },
+  "afterOverview": {
+    "x": 0.5644387453794479,
+    "y": 0.5931579992175102,
+    "ratio": 0.6234507669010879
+  },
+  "errors": []
+}

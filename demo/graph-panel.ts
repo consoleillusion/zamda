@@ -1,6 +1,6 @@
 // Wires the AS graph card: loads graph.bin, runs a compiled plan to choose the
-// simplified overview, and draws it on fixed positions. A click eases the camera
-// onto the clicked AS before replacing the view with its neighbourhood.
+// simplified overview, and draws it on fixed positions. A click keeps the current
+// camera while replacing the view with the clicked AS's neighbourhood.
 
 import { loadGraph } from '../scripts/bgp/graph-file';
 import type { GraphArrays, GraphHeader } from '../scripts/bgp/graph-file';
@@ -31,6 +31,7 @@ export interface GraphProbe {
   hotNodes: number;
   hotEdges: number;
   camera(): { x: number; y: number; ratio: number };
+  cameraObject(): unknown;
   nodeScreen(asn: number): { x: number; y: number } | null;
   select(asn: number): Promise<void>;
   overview(): Promise<void>;
@@ -90,9 +91,11 @@ async function drawWithCamera(
 }
 
 function sourceText(header: GraphHeader): string {
-  // Purpose: name the collector and dump behind the graph file
+  // Purpose: name the collector, dump and location source behind the graph file
   const source = header.source;
-  return `${String(source.collector ?? 'unknown collector')} ${String(source.dump ?? '')}`.trim();
+  const dump = `${String(source.collector ?? 'unknown collector')} ${String(source.dump ?? '')}`.trim();
+  const locations = String(source.locations ?? 'registered country centres');
+  return `${dump} · ${locations}`;
 }
 
 async function showOverview(
@@ -138,7 +141,7 @@ async function showAll(
   view.setLive(hot);
   byId<HTMLElement>('graph-detail').textContent =
     `All ${data.edges.length.toLocaleString()} directed edges · ${data.nodes.length.toLocaleString()} ASes · ` +
-    'grouped by registered country; pan and zoom to inspect';
+    'at mapped network points; pan and zoom to inspect';
   const ms = Math.round(performance.now() - began);
   byId<HTMLElement>('ms-graph').textContent = `${ms} ms`;
   return { rows: rows.length, nodes: data.nodes.length, edges: data.edges.length, ms, edgeRows: rows };
@@ -198,6 +201,10 @@ export async function startGraph(): Promise<GraphPanel> {
       // Purpose: expose the renderer's camera state to the browser harness
       return view.camera();
     },
+    cameraObject: function () {
+      // Purpose: expose the live camera so a browser harness can set a known panned and zoomed view
+      return view.cameraObject();
+    },
     nodeScreen: function (asn: number) {
       // Purpose: expose a node's screen point so a browser check can hover it
       return view.screen(asn);
@@ -242,7 +249,7 @@ export async function startGraph(): Promise<GraphPanel> {
     // Purpose: show one AS's neighbourhood and publish its counts and timing
     const mine = ++generation;
     if (animate) {
-      await view.focus(asn);
+      await view.focus();
       if (mine !== generation) return;
     }
     const draw = await showNeighbourhood(edges, arrays, plans, view, hot, asn, function () {

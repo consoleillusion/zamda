@@ -27,6 +27,7 @@
     "publish:alpha": "bun run build && npm publish --tag alpha",
     "bench": "bun run bench/groupby.ts",
     "prep-bgp": "bun run scripts/prep-bgp.ts",
+    "gen:map": "bun run scripts/build-world-map.ts",
     "demo": "bun demo/server.ts",
     "fake-routes": "bun scripts/fake-routes.ts",
     "bench:ref": "bun bench/reference/run.ts",

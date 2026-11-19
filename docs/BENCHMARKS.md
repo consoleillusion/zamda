@@ -518,6 +518,32 @@ still produced 200 hot edges. Raw samples are `bench/results/t509-graph-map-chro
 `bench/results/t509-graph-map-firefox.json`. These are development-machine numbers; country
 centres, and therefore the span filter, are approximate rather than measured router locations.
 
+## Map points and camera-preserving clicks (T-511)
+
+Measured on 2026-11-20 after regenerating `data/graph.bin` from the same rrc00 dump. The `ZGR4`
+file is 6.8 MB. Of its 80,226 AS nodes, 12,859 sit at a PeeringDB facility centroid, 66,899 at a
+registered-country centre and 468 have no mapped point. Each of the 122,862 edges stores the
+haversine distance between its endpoints' stored points: 55,105 are at most 1,000 km, 31,858 are
+1,000–3,000 km, 26,313 are 3,000–8,000 km and 9,586 are over 8,000 km (maximum 19,760 km). The
+overview keeps paths up to 3,000 km apart, picks the 2,000 strongest and draws the 858 whose
+endpoints fit the 800-AS node budget. The land layer is generated from Natural Earth 1:50m land
+(1,421 rings, 46,136 points, 664 KB).
+
+| Browser | Graph load | Map pixels | Overview | Click camera before → after | Neighbourhood | Errors |
+| --- | --- | --- | --- | --- | --- | --- |
+| Chrome 156 | 147 ms | 262,345 | 800 ASes, 858 edges | 0.5641, 0.5936, 0.4618 → unchanged | AS6830, 800 ASes, 1,007 edges | 0 |
+| Firefox 158 | 117 ms | 262,730 | 800 ASes, 858 edges | 0.5237, 0.6191, 0.4618 → unchanged | AS13335, 800 ASes, 1,232 edges | 0 |
+
+The harness wheel-zoomed and dragged the graph away from the default overview camera (0.564, 0.593,
+0.623) before clicking, so an unchanged state proves the click did not reset the view. Both browsers
+showed the clicked network's tooltip (`AS6830 · NL · RIPE NCC · 1 route` in Chrome,
+`AS13335 · US · ARIN · 1 route` in Firefox) with `Mapped from PeeringDB facilities`, then kept the
+camera exactly while replacing the graph with that AS's neighbourhood. Overview returned the camera
+to the default frame. The map canvas painted about 262,000 pixels in both browsers. Raw samples are
+`bench/results/t511-map-camera-chrome.json` and `bench/results/t511-map-camera-firefox.json`. These
+are development-machine numbers; PeeringDB points are self-reported facility centroids, not router
+or user locations, and edges are BGP path adjacency, not physical circuits.
+
 ## Signal deck's live engine comparison (T-510)
 
 Measured on 2026-11-20 in the production demo server at 1,163,624 routes. The four chart plans

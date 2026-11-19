@@ -7,11 +7,11 @@
 //   bytes 8..   header, UTF-8 JSON (GraphHeader), padded to a multiple of 4
 //   then        one buffer per column, each starting on a multiple of 4
 //
-// Node positions are stored, not recomputed in the browser: a deterministic
-// country-centred layout with small sunflowers per country, fixed for a given
-// file. Unknown countries fall back to an approximate regional centre. Each
-// edge also stores the great-circle distance between its endpoints' registered
-// country centres, so the browser can select local paths without recomputing it.
+// Node positions are stored, not recomputed in the browser: a PeeringDB facility
+// centroid for ASes that publish one, otherwise the registered country's centre,
+// otherwise an approximate regional centre. A per-node precision code says which
+// was used. Each edge stores the great-circle distance between its endpoints'
+// mapped points, so the browser can select local paths without recomputing it.
 
 import { schema, table, t } from '../../src';
 import type { JsTable } from '../../src';
@@ -27,22 +27,26 @@ export const GraphEdges = schema({
 
 export type GraphEdgesTable = JsTable<typeof GraphEdges.fields>;
 
-const MAGIC = 'ZGR3';
+const MAGIC = 'ZGR4';
 const NO_NAME = 0xffffffff;
 const NO_RIR = 255;
 const NO_COUNTRY = 255;
-// Leave margin around the world so country groups near the edges stay on screen.
+// Leave margin around the world so points near the edges stay on screen.
 const PROJECTION_SCALE = 0.88;
-const MIN_GROUP_RADIUS = 0.018;
-const GROUP_RADIUS_RANGE = 0.14;
 
 interface ColumnRef {
   readonly offset: number;
   readonly bytes: number;
 }
 
+export type LocationPrecision = 0 | 1 | 2;
+
+export interface NodePoint extends CountryCentre {
+  readonly precision: LocationPrecision;
+}
+
 export interface GraphHeader {
-  readonly version: 3;
+  readonly version: 4;
   readonly nodeCount: number;
   readonly edgeCount: number;
   readonly source: Readonly<Record<string, string | number>>;
@@ -50,7 +54,8 @@ export interface GraphHeader {
   readonly rirs: readonly string[];
   readonly countries: readonly string[];
   readonly columns: Readonly<Record<
-    'node_asn' | 'node_paths' | 'node_origins' | 'node_name' | 'node_rir' | 'node_country' | 'node_x' | 'node_y' |
+    'node_asn' | 'node_paths' | 'node_origins' | 'node_name' | 'node_rir' | 'node_country' |
+    'node_location' | 'node_x' | 'node_y' |
     'edge_from' | 'edge_to' | 'edge_prefixes' | 'edge_span',
     ColumnRef
   >>;
@@ -60,6 +65,7 @@ export interface Labels {
   readonly asName: (asn: number) => string | null;
   readonly rir: (asn: number) => string | null;
   readonly country: (asn: number) => string | null;
+  readonly location?: (asn: number) => NodePoint | null;
 }
 
 export interface Coordinates {
@@ -76,6 +82,7 @@ export interface GraphArrays {
   readonly name: (string | null)[];
   readonly rir: (string | null)[];
   readonly country: (string | null)[];
+  readonly location: Uint8Array;
   readonly x: Float32Array;
   readonly y: Float32Array;
   readonly from_as: Uint32Array;
@@ -102,28 +109,26 @@ function countryKey(code: number, countries: readonly string[]): string | null {
   return code === NO_COUNTRY ? null : (countries[code] ?? null);
 }
 
-function centreFor(
+function pointFor(
   country: string | null,
   rirCode: number,
   rirs: readonly string[],
   centres: ReadonlyMap<string, CountryCentre>,
-): CountryCentre {
-  // Purpose: use a country centroid, then an approximate RIR centre, then the world centre
+  named: NodePoint | null | undefined,
+): NodePoint {
+  // Purpose: prefer a named PeeringDB point, then a country centre, then an RIR centre
+  if (named) return named;
   if (country !== null) {
     const found = centres.get(country);
-    if (found) return found;
+    if (found) return { lat: found.lat, lon: found.lon, precision: 1 };
   }
   const rir = rirCode === NO_RIR ? null : (rirs[rirCode] ?? null);
-  return (rir === null ? undefined : RIR_CENTRES[rir]) ?? { lat: 0, lon: 0 };
-}
-
-function groupKey(centre: CountryCentre): string {
-  // Purpose: one stable key for every AS that shares an approximate point
-  return `${centre.lat},${centre.lon}`;
+  const fallback = (rir === null ? undefined : RIR_CENTRES[rir]) ?? { lat: 0, lon: 0 };
+  return { lat: fallback.lat, lon: fallback.lon, precision: 0 };
 }
 
 function haversineKm(a: CountryCentre, b: CountryCentre): number {
-  // Purpose: the great-circle distance between two approximate country points
+  // Purpose: the great-circle distance between two mapped points
   const toRad = Math.PI / 180;
   const lat1 = a.lat * toRad;
   const lat2 = b.lat * toRad;
@@ -135,15 +140,11 @@ function haversineKm(a: CountryCentre, b: CountryCentre): number {
 
 function edgeSpans(
   asn: Uint32Array,
-  countryCodes: Uint8Array,
-  countries: readonly string[],
-  rirCodes: Uint8Array,
-  rirs: readonly string[],
-  centres: ReadonlyMap<string, CountryCentre>,
+  points: readonly NodePoint[],
   from: Uint32Array,
   to: Uint32Array,
 ): Uint16Array {
-  // Purpose: estimate each edge's length from its endpoints' registered-country centroids
+  // Purpose: estimate each edge's length from its endpoints' mapped points
   const index = new Map<number, number>();
   for (let i = 0; i < asn.length; i++) index.set(asn[i]!, i);
   const spans = new Uint16Array(from.length);
@@ -154,58 +155,23 @@ function edgeSpans(
       spans[i] = 65535;
       continue;
     }
-    const fromCentre = centreFor(countryKey(countryCodes[a]!, countries), rirCodes[a]!, rirs, centres);
-    const toCentre = centreFor(countryKey(countryCodes[b]!, countries), rirCodes[b]!, rirs, centres);
-    spans[i] = Math.min(65535, Math.round(haversineKm(fromCentre, toCentre)));
+    spans[i] = Math.min(65535, Math.round(haversineKm(points[a]!, points[b]!)));
   }
   return spans;
 }
 
 function clampToCanvas(value: number): number {
-  // Purpose: keep a country group's outer nodes inside the renderer's -1..1 square
+  // Purpose: keep a mapped point inside the renderer's -1..1 square
   return Math.max(-0.995, Math.min(0.995, value));
 }
 
-function layoutNodes(
-  asn: Uint32Array,
-  countryCodes: Uint8Array,
-  countries: readonly string[],
-  rirCodes: Uint8Array,
-  rirs: readonly string[],
-  centres: ReadonlyMap<string, CountryCentre>,
-): Coordinates {
-  // Purpose: place each AS in a small deterministic sunflower around its country's centroid
-  const groups = new Map<string, { centre: CountryCentre; indexes: number[] }>();
-  for (let i = 0; i < asn.length; i++) {
-    const centre = centreFor(countryKey(countryCodes[i]!, countries), rirCodes[i]!, rirs, centres);
-    const key = groupKey(centre);
-    let group = groups.get(key);
-    if (!group) {
-      group = { centre, indexes: [] };
-      groups.set(key, group);
-    }
-    group.indexes.push(i);
-  }
-  let largest = 1;
-  for (const group of groups.values()) largest = Math.max(largest, group.indexes.length);
-  const x = new Float32Array(asn.length);
-  const y = new Float32Array(asn.length);
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-  for (const group of groups.values()) {
-    // Purpose: larger countries get a wider group so zooming in reveals their ASes
-    group.indexes.sort(function (a, b): number {
-      return asn[a]! - asn[b]! || a - b;
-    });
-    const centreX = (group.centre.lon / 180) * PROJECTION_SCALE;
-    const centreY = (group.centre.lat / 90) * PROJECTION_SCALE;
-    const radius = MIN_GROUP_RADIUS + GROUP_RADIUS_RANGE * Math.sqrt(group.indexes.length / largest);
-    for (let j = 0; j < group.indexes.length; j++) {
-      // Purpose: golden-angle spacing is stable and needs no browser layout pass
-      const angle = j * goldenAngle;
-      const distance = radius * Math.sqrt((j + 0.5) / group.indexes.length);
-      x[group.indexes[j]!] = clampToCanvas(centreX + Math.cos(angle) * distance);
-      y[group.indexes[j]!] = clampToCanvas(centreY + Math.sin(angle) * distance);
-    }
+function layoutNodes(points: readonly NodePoint[]): Coordinates {
+  // Purpose: project each stored point once into the renderer's equirectangular square
+  const x = new Float32Array(points.length);
+  const y = new Float32Array(points.length);
+  for (let i = 0; i < points.length; i++) {
+    x[i] = clampToCanvas((points[i]!.lon / 180) * PROJECTION_SCALE);
+    y[i] = clampToCanvas((points[i]!.lat / 90) * PROJECTION_SCALE);
   }
   return { x, y };
 }
@@ -228,6 +194,8 @@ export function encodeGraph(
   const nodeName = new Uint32Array(n);
   const nodeRir = new Uint8Array(n);
   const nodeCountry = new Uint8Array(n);
+  const nodeLocation = new Uint8Array(n);
+  const points: NodePoint[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const asn = graph.nodes.asn[i]!;
     const name = labels.asName(asn);
@@ -264,18 +232,18 @@ export function encodeGraph(
       }
       nodeCountry[i] = code;
     }
+    const point = pointFor(
+      countryKey(nodeCountry[i]!, countries),
+      nodeRir[i]!,
+      rirs,
+      centres,
+      labels.location?.(asn),
+    );
+    points[i] = point;
+    nodeLocation[i] = point.precision;
   }
-  const { x, y } = layoutNodes(graph.nodes.asn, nodeCountry, countries, nodeRir, rirs, centres);
-  const spanKm = edgeSpans(
-    graph.nodes.asn,
-    nodeCountry,
-    countries,
-    nodeRir,
-    rirs,
-    centres,
-    graph.edges.from_as,
-    graph.edges.to_as,
-  );
+  const { x, y } = layoutNodes(points);
+  const spanKm = edgeSpans(graph.nodes.asn, points, graph.edges.from_as, graph.edges.to_as);
 
   const buffers: [keyof GraphHeader['columns'], Uint8Array][] = [
     ['node_asn', new Uint8Array(graph.nodes.asn.buffer, graph.nodes.asn.byteOffset, n * 4)],
@@ -284,6 +252,7 @@ export function encodeGraph(
     ['node_name', new Uint8Array(nodeName.buffer, nodeName.byteOffset, n * 4)],
     ['node_rir', nodeRir],
     ['node_country', nodeCountry],
+    ['node_location', nodeLocation],
     ['node_x', new Uint8Array(x.buffer, x.byteOffset, n * 4)],
     ['node_y', new Uint8Array(y.buffer, y.byteOffset, n * 4)],
     ['edge_from', new Uint8Array(graph.edges.from_as.buffer, graph.edges.from_as.byteOffset, m * 4)],
@@ -302,7 +271,7 @@ export function encodeGraph(
       at = align4(at + bytes.length);
     }
     const header: GraphHeader = {
-      version: 3,
+      version: 4,
       nodeCount: n,
       edgeCount: m,
       source,
@@ -335,7 +304,7 @@ export function readGraphHeader(bytes: Uint8Array): GraphHeader {
   }
   const length = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(4, true);
   const header = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + length))) as GraphHeader;
-  if (header.version !== 3) throw new Error(`Unsupported graph file version ${String(header.version)}`);
+  if (header.version !== 4) throw new Error(`Unsupported graph file version ${String(header.version)}`);
   return header;
 }
 
@@ -387,6 +356,7 @@ export function decodeGraph(input: Uint8Array): { arrays: GraphArrays; header: G
       name,
       rir,
       country,
+      location: u8(col.node_location, n),
       x: f32(col.node_x, n),
       y: f32(col.node_y, n),
       from_as: u32(col.edge_from, m),

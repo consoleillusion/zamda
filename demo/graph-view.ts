@@ -1,12 +1,12 @@
 // The graph panel's WebGL renderer. Graphology holds the simplified graph;
 // sigma.js draws it on a canvas over a synced world outline. Positions come from
 // graph.bin, so there is no layout pass in the browser and live updates never move
-// a node. One renderer stays alive across views: a click eases the camera onto the
-// chosen AS before the data is replaced, and Overview or All data eases back out first.
+// a node. One renderer stays alive across views: a click keeps the current camera
+// while the data is replaced, and Overview or All data eases back out first.
 
 import Graph from 'graphology';
 import Sigma from 'sigma';
-import { FOCUS_RATIO, frameCamera } from './graph-data';
+import { frameCamera, selectionCamera } from './graph-data';
 import type { CameraView, GraphEdgeView, GraphViewData } from './graph-data';
 import { WORLD_LAND } from './world-map';
 
@@ -14,9 +14,10 @@ export interface GraphView {
   show(data: GraphViewData): void;
   jump(data: GraphViewData): void;
   frame(data: GraphViewData): Promise<void>;
-  focus(asn: number): Promise<void>;
+  focus(): Promise<void>;
   setLive(hot: ReadonlyMap<string, number>): void;
   camera(): { x: number; y: number; ratio: number };
+  cameraObject(): Camera | null;
   screen(asn: number): Point | null;
   destroy(): void;
 }
@@ -79,6 +80,7 @@ function populateGraph(graph: Graph, data: GraphViewData): void {
       paths: node.paths,
       rir: node.rir,
       country: node.country,
+      location: node.location,
     });
   }
   for (const edge of data.edges) {
@@ -92,13 +94,6 @@ function populateGraph(graph: Graph, data: GraphViewData): void {
       key: edge.key,
     });
   }
-}
-
-function focusTarget(graph: Graph, asn: number): CameraView | null {
-  // Purpose: centre the camera on a clicked AS so the zoom keeps that node in view
-  if (!graph.hasNode(String(asn))) return null;
-  const attributes = graph.getNodeAttributes(String(asn));
-  return { x: (Number(attributes.x) + 1) / 2, y: (Number(attributes.y) + 1) / 2, ratio: FOCUS_RATIO };
 }
 
 function reduceMotion(): boolean {
@@ -180,8 +175,15 @@ function nodeTooltip(graph: Graph, node: string): string {
   const title = label === '' || label === asn ? asn : `${label} · ${asn}`;
   const place = attributes.country === null || attributes.country === undefined ? 'unknown country' : String(attributes.country);
   const rir = attributes.rir === null || attributes.rir === undefined ? 'unknown registry' : String(attributes.rir);
+  const precision = Number(attributes.location);
+  const mapped =
+    precision === 2
+      ? 'Mapped from PeeringDB facilities'
+      : precision === 1
+        ? 'Mapped from the registered country centre'
+        : 'No mapped point; shown at a regional fallback';
   const routes = Number(attributes.paths);
-  return `${title}\n${place} · ${rir} · ${routes.toLocaleString()} ${routes === 1 ? 'route' : 'routes'}\nClick to expand its neighbourhood`;
+  return `${title}\n${place} · ${rir} · ${routes.toLocaleString()} ${routes === 1 ? 'route' : 'routes'}\n${mapped}; click to expand its neighbourhood`;
 }
 
 function edgeTooltip(graph: Graph, edge: string): string {
@@ -191,7 +193,7 @@ function edgeTooltip(graph: Graph, edge: string): string {
   const to = String(attributes.key).split(':')[1]!;
   const fromLabel = graph.hasNode(from) ? String(graph.getNodeAttributes(from).label || `AS${from}`) : `AS${from}`;
   const toLabel = graph.hasNode(to) ? String(graph.getNodeAttributes(to).label || `AS${to}`) : `AS${to}`;
-  return `${fromLabel} → ${toLabel}\n${Number(attributes.weight).toLocaleString()} prefixes on this hop · country centres about ${Number(attributes.span).toLocaleString()} km apart\nConsecutive hops in observed BGP paths, not physical circuits`;
+  return `${fromLabel} → ${toLabel}\n${Number(attributes.weight).toLocaleString()} prefixes on this hop · mapped points about ${Number(attributes.span).toLocaleString()} km apart\nConsecutive hops in observed BGP paths, not physical circuits`;
 }
 
 export function createGraphView(container: HTMLElement, onSelect: (asn: number) => void): GraphView {
@@ -310,17 +312,23 @@ export function createGraphView(container: HTMLElement, onSelect: (asn: number) 
       ensureRenderer();
       return animateTo(renderer!.getCamera(), frameCamera(data));
     },
-    focus(asn) {
-      // Purpose: ease the camera onto a clicked AS before its neighbourhood is shown
+    focus() {
+      // Purpose: freeze the current view before a clicked AS's neighbourhood replaces the data
       ensureRenderer();
-      const target = focusTarget(graph!, asn);
-      return target ? animateTo(renderer!.getCamera(), target) : Promise.resolve();
+      const camera = renderer!.getCamera();
+      camera.cancelAnimation();
+      camera.setState(selectionCamera(camera.getState()));
+      return Promise.resolve();
     },
     camera() {
       // Purpose: the current camera state, for checking that a browser interaction really moved it
       return renderer
         ? (({ x, y, ratio }) => ({ x, y, ratio }))(renderer.getCamera().getState())
         : { x: 0.5, y: 0.5, ratio: 1 };
+    },
+    cameraObject() {
+      // Purpose: the live camera, so a browser check can start from a panned and zoomed view
+      return renderer?.getCamera() ?? null;
     },
     screen(asn) {
       // Purpose: a node's viewport point, for checking hover and camera behaviour in a browser

@@ -7,6 +7,7 @@
 //   bun run prep-bgp --date 20261101         a given day
 //   bun run prep-bgp --rrc rrc01 --time 0800 another collector and dump time (0000, 0800, 1600)
 //   bun run prep-bgp --mrt dump.gz --names asn.txt --stats nro-delegated-stats --countries countries.json
+//                     --facilities facilities.json --netfac netfac.json
 //                                            local files instead of downloads
 //   bun run prep-bgp --graph-out data/x.bin  write the graph somewhere else
 //
@@ -22,7 +23,9 @@ import { createGunzip } from 'node:zlib';
 import { encodeRoutes } from './bgp/file';
 import { GraphBuilder } from './bgp/graph';
 import { encodeGraph } from './bgp/graph-file';
+import type { NodePoint } from './bgp/graph-file';
 import { MrtReader } from './bgp/mrt';
+import { parseFacilities, parseNetFacilities } from './bgp/peeringdb';
 import { parseAsCountries, parseAsNames, parseCountryCentres, parseRirRanges, rirLookup } from './bgp/registry';
 import { RouteBuilder } from './bgp/routes';
 
@@ -30,6 +33,8 @@ const ASN_NAMES_URL = 'https://ftp.ripe.net/ripe/asnames/asn.txt';
 const NRO_STATS_URL = 'https://ftp.ripe.net/pub/stats/ripencc/nro-stats/latest/nro-delegated-stats';
 const COUNTRIES_URL =
   'https://raw.githubusercontent.com/mledoze/countries/5d15c0ff8c87ef2f1f8e944093522d4b2de2dd5b/countries.json';
+const FACILITIES_URL = 'https://www.peeringdb.com/api/fac?fields=id,latitude,longitude,status&limit=0&sourceapp=zamda-demo';
+const NETFAC_URL = 'https://www.peeringdb.com/api/netfac?fields=local_asn,fac_id,status&limit=0&sourceapp=zamda-demo';
 
 export interface Options {
   rrc: string;
@@ -39,6 +44,8 @@ export interface Options {
   names: string | null;
   stats: string | null;
   countries: string | null;
+  facilities: string | null;
+  netfac: string | null;
   out: string;
   graphOut: string;
 }
@@ -59,6 +66,8 @@ export function parseArgs(argv: readonly string[]): Options {
     names: null,
     stats: null,
     countries: null,
+    facilities: null,
+    netfac: null,
     out: 'data/routes.bin',
     graphOut: 'data/graph.bin',
   };
@@ -73,6 +82,8 @@ export function parseArgs(argv: readonly string[]): Options {
     else if (flag === '--names') options.names = value;
     else if (flag === '--stats') options.stats = value;
     else if (flag === '--countries') options.countries = value;
+    else if (flag === '--facilities') options.facilities = value;
+    else if (flag === '--netfac') options.netfac = value;
     else if (flag === '--out') options.out = value;
     else if (flag === '--graph-out') options.graphOut = value;
     else throw new Error(`Unknown option ${flag}`);
@@ -149,14 +160,18 @@ async function* dumpBytes(options: Options): AsyncGenerator<Uint8Array> {
 export async function prepare(options: Options): Promise<void> {
   // Purpose: read the dump and registry files, build one route and one graph per prefix, and write both files
   const started = performance.now();
-  const [namesText, statsText, countriesText] = await Promise.all([
+  const [namesText, statsText, countriesText, facilitiesText, netfacText] = await Promise.all([
     text(options.names, ASN_NAMES_URL),
     text(options.stats, NRO_STATS_URL),
     text(options.countries, COUNTRIES_URL),
+    text(options.facilities, FACILITIES_URL),
+    text(options.netfac, NETFAC_URL),
   ]);
   const names = parseAsNames(namesText);
   const countries = parseAsCountries(namesText);
   const centres = parseCountryCentres(countriesText);
+  const facilities = parseFacilities(facilitiesText);
+  const peering = parseNetFacilities(netfacText, facilities);
   const rir = rirLookup(parseRirRanges(statsText));
   const labels = {
     asName: function (asn: number): string | null {
@@ -166,6 +181,14 @@ export async function prepare(options: Options): Promise<void> {
     country: function (asn: number): string | null {
       // Purpose: the registered country, if asn.txt has it
       return countries.get(asn) ?? null;
+    },
+    location: function (asn: number): NodePoint | null {
+      // Purpose: a PeeringDB facility centroid, then the registered country's centre
+      const found = peering.get(asn);
+      if (found) return { lat: found.lat, lon: found.lon, precision: 2 };
+      const country = countries.get(asn);
+      const centre = country === undefined ? undefined : centres.get(country);
+      return centre ? { lat: centre.lat, lon: centre.lon, precision: 1 } : null;
     },
     rir,
   };
@@ -211,6 +234,15 @@ export async function prepare(options: Options): Promise<void> {
 
   const routes = builder.finish();
   const graph = graphBuilder.finish();
+  let peeringNodes = 0;
+  let countryNodes = 0;
+  let unmappedNodes = 0;
+  for (let i = 0; i < graph.nodes.rowCount; i++) {
+    const point = labels.location(graph.nodes.asn[i]!);
+    if (point === null) unmappedNodes++;
+    else if (point.precision === 2) peeringNodes++;
+    else countryNodes++;
+  }
   const source = {
     collector: options.mrt ? 'local file' : options.rrc,
     dump: options.mrt ?? dumpUrl(options.rrc, options.date, options.time),
@@ -220,8 +252,11 @@ export async function prepare(options: Options): Promise<void> {
   const file = encodeRoutes(routes, labels, source);
   const graphFile = encodeGraph(graph, labels, centres, {
     ...source,
-    layout: 'country-centroid-v1',
-    span: 'country-centroid-haversine-v1',
+    layout: 'peeringdb-facility-v1',
+    span: 'mapped-point-haversine-v1',
+    locations: `peeringdb facility points for ${peeringNodes.toLocaleString()} ${peeringNodes === 1 ? 'AS' : 'ASes'}, ${countryNodes.toLocaleString()} at country centres, ${unmappedNodes.toLocaleString()} unmapped`,
+    facilities: FACILITIES_URL,
+    netfac: NETFAC_URL,
     centres: COUNTRIES_URL,
   });
   const directory = dirname(options.out);
@@ -254,7 +289,7 @@ if (import.meta.main) {
     await prepare(parseArgs(process.argv.slice(2)));
   } catch (error) {
     console.error(`prep-bgp: ${(error as Error).message}`);
-    console.error('If downloads are blocked, fetch the files yourself and pass --mrt, --names and --stats.');
+    console.error('If downloads are blocked, fetch the files yourself and pass --mrt, --names, --stats, --countries, --facilities and --netfac.');
     process.exit(1);
   }
 }

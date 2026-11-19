@@ -107,9 +107,10 @@ bun run check     # typecheck + tests + size budget
 | `bun run gen:engine` | Regenerate `engine/src/signatures.rs` and the plan corpus the Rust tests read; `cd engine && cargo test --release` runs them |
 | `bun run engine:test` | Build the engine natively, run the JS tests that load tables, evaluate expressions and run plans in it through bun:ffi, then the Rust tests |
 | `bun run bench:ref` | Reference benchmark: seven queries at 10k, 100k and 1M routes, zamda vs Arquero, answers checked first; writes `bench/results/` |
-| `bun run prep-bgp` | Download a RIPE RIS routing table dump and build `data/routes.bin` and `data/graph.bin` for the demo |
+| `bun run prep-bgp` | Download a RIPE RIS routing table dump, the registry files and PeeringDB's public facility data, then build `data/routes.bin` and `data/graph.bin` for the demo |
+| `bun run gen:map` | Regenerate the demo's committed Natural Earth 1:50m land outline (`demo/world-map.ts`) |
 | `bun run fake-routes` | Write a synthetic `data/routes.bin` (a million routes) for trying the demo offline |
-| `bun run demo` | The dark routing signal deck on http://localhost:3000. The same compiled chart plans run on the JS table and, after `bun run wasm:build`, in a WASM worker; WASM is timed first, JS second, and the page shows the measured times, speedup, answer check and engine counters. It keeps the map-first AS graph from `data/graph.bin` and the RIS Live overlay; add `?live=sim` for a simulated feed, `?live=off` for none. Without the engine module the page says so and stays on JS. |
+| `bun run demo` | The dark routing signal deck on http://localhost:3000. The same compiled chart plans run on the JS table and, after `bun run wasm:build`, in a WASM worker; WASM is timed first, JS second, and the page shows the measured times, speedup, answer check and engine counters. It keeps the map-first AS graph from `data/graph.bin` and the RIS Live overlay; add `?live=sim` for a simulated feed, `?live=off` for none. Nodes sit at PeeringDB facility centroids where an AS publishes one, otherwise at its registered country's centre; clicking one expands its neighbourhood without moving the camera. Without the engine module the page says so and stays on JS. |
 | `bun run scripts/inspect-routes.ts` | Run the dashboard's queries on `data/routes.bin` and time them |
 | `bun run scripts/check-dump.ts <dump.gz>` | Check the MRT reader gives the same answer however a dump is split |
 

@@ -11,11 +11,11 @@ import {
   buildViewData,
   compileGraphPlans,
   edgeKey,
-  FOCUS_RATIO,
   frameCamera,
   hotKeys,
   neighbourhoodEdges,
   overviewEdges,
+  selectionCamera,
 } from '../demo/graph-data';
 
 function sample(): { arrays: GraphArrays; edges: JsTable<typeof GraphEdges.fields> } {
@@ -29,6 +29,7 @@ function sample(): { arrays: GraphArrays; edges: JsTable<typeof GraphEdges.field
     name: ['ONE', null, 'THREE', 'FOUR', 'FIVE', 'SIX'],
     rir: ['ARIN', 'RIPE', 'APNIC', 'ARIN', 'LACNIC', null],
     country: ['US', 'DE', 'JP', 'US', 'BR', null],
+    location: Uint8Array.from([2, 1, 1, 2, 0, 0]),
     x: Float32Array.from([0, 0.1, 0.2, 0.3, 0.4, 0.5]),
     y: Float32Array.from([0, 0.1, 0.2, 0.3, 0.4, 0.5]),
     from_as: Uint32Array.from([1, 2, 3, 4, 5, 1]),
@@ -98,7 +99,7 @@ describe('graph data selection', () => {
     const rows = await overviewEdges(edges, 6);
     const view = buildViewData(arrays, rows, { nodeLimit: 4 });
     expect(view.nodes.map(n => n.asn)).toEqual([1, 2, 3, 4]);
-    expect(view.nodes[1]).toMatchObject({ asn: 2, name: null, label: 'AS2', rir: 'RIPE', country: 'DE' });
+    expect(view.nodes[1]).toMatchObject({ asn: 2, name: null, label: 'AS2', rir: 'RIPE', country: 'DE', location: 1 });
     expect(view.edges.map(e => [e.from, e.to, e.weight, e.spanKm])).toEqual([
       [1, 2, 10, 100],
       [2, 3, 9, 200],
@@ -107,7 +108,7 @@ describe('graph data selection', () => {
     expect(view.truncated).toBe(2);
   });
 
-  test('the default view frames closer, and a click focus zooms in further', async () => {
+  test('the default view frames closer, and a click keeps the camera exactly where it is', async () => {
     const { arrays, edges } = sample();
     const world = {
       ...arrays,
@@ -117,7 +118,8 @@ describe('graph data selection', () => {
     const rows = await allEdges(edges);
     const frame = frameCamera(buildViewData(world, rows, { nodeLimit: 6 }));
     expect(frame.ratio).toBeLessThan(1);
-    expect(FOCUS_RATIO).toBeLessThan(frame.ratio);
-    expect(FOCUS_RATIO).toBeLessThan(1);
+    const held = { x: 0.37, y: 0.62, ratio: 0.19 };
+    expect(selectionCamera(held)).toEqual(held);
+    expect(selectionCamera(frame)).toEqual(frame);
   });
 });
