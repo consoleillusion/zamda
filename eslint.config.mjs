@@ -8,7 +8,7 @@ import ts from 'typescript-eslint';
 import noJsBooleanOpsInAccessorCallbacks from './scripts/lint/no-js-boolean-ops-in-accessor-callbacks.mjs';
 
 export default [
-  { ignores: ['node_modules', 'dist', 'data', 'spike', 'bench/results', 'engine/target'] },
+  { ignores: ['node_modules', 'dist', 'data', 'spike', 'bench/results', 'engine/target', 'tests/lint'] },
   js.configs.recommended,
   {
     files: ['**/*.ts'],

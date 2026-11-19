@@ -70,6 +70,7 @@ bun run check     # typecheck + tests + size budget
 | Command | What it does |
 | --- | --- |
 | `bun test` | Unit, slice and golden contract tests |
+| `bun run lint` | ESLint over the repo with the zamda accessor-callback rule |
 | `bun run typecheck` | `tsc --noEmit`, including the type-inference tests |
 | `bun run size` | Fails if the core exceeds 40 KB gzipped |
 | `bun run bench` | Group-by benchmark against plain JS and Arquero |
@@ -93,6 +94,7 @@ bun run check     # typecheck + tests + size budget
 | Read | For |
 | --- | --- |
 | [AGENTS.md](AGENTS.md) | Rules for anyone, human or agent, changing this repo |
+| [docs/API.md](docs/API.md) | The public API reference |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, modules and how to extend them |
 | [docs/CONTRACT.md](docs/CONTRACT.md) | The semantics every backend must implement |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Milestones and their gates |

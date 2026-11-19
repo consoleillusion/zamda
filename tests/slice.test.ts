@@ -128,6 +128,8 @@ describe('guards against JavaScript operators', () => {
   });
 
   test('using && drops a column and is caught', () => {
+    // The DSL must reject this at runtime; the linter rejects it at build time too.
+    // eslint-disable-next-line zamda/no-js-boolean-ops-in-accessor-callbacks
     expect(() => pipe(Users).filter(c => c.active && c.age.gte(18))).toThrow(ExpressionError);
   });
 
