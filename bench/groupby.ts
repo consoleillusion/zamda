@@ -6,7 +6,7 @@
 // is timed separately from the queries, because it is paid once per table.
 
 import { desc, from, op } from 'arquero';
-import { count, pipe, schema, t, table } from '../src';
+import { count, pipe, schema, t, table } from 'zamda';
 
 const ROWS = Number(process.argv[2] ?? 1_000_000);
 const NETWORKS = 75_000;

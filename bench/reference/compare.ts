@@ -9,17 +9,17 @@
 // (it yields to the event loop about every 8 ms) and with slicing off, to
 // separate the engine's speed from the cost of yielding.
 
-import { compilePlans, EMPTY_SELECTION, paramsFor } from '../../demo/dashboard';
-import type { Selection } from '../../demo/dashboard';
-import { count, pipe } from '../../src';
-import type { Table } from '../../src';
-import { Routes } from '../../scripts/bgp/file';
+import { compilePlans, EMPTY_SELECTION, paramsFor } from './crossfilter';
+import type { Selection } from './crossfilter';
+import { count, pipe } from 'zamda';
+import type { Table } from 'zamda';
+import { Routes } from '@zamda/bgp-data/file';
 import { arqueroFromColumns, sample, zamdaFromColumns } from './data';
 import type { RouteArrays } from './data';
 import { measure } from './measure';
 import type { Timing } from './measure';
 import { QUERIES } from './queries';
-import type { WasmSession } from '../../src/backends/wasm';
+import type { WasmSession } from 'zamda/internal/backends/wasm/index';
 
 export interface QueryRow {
   readonly id: string;

@@ -1,0 +1,22 @@
+{
+  "name": "@zamda/bgp-data",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BGP routing data for zamda's benchmarks and demo: MRT reader, dataset files, prep scripts. Not part of the library.",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "bun test --conditions=zamda-source",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun run test",
+    "prep": "bun --conditions=zamda-source scripts/prep-bgp.ts",
+    "fake": "bun --conditions=zamda-source scripts/fake-routes.ts",
+    "check-dump": "bun --conditions=zamda-source scripts/check-dump.ts",
+    "prep:globe": "bun --conditions=zamda-source scripts/prep-globe.ts"
+  },
+  "dependencies": {
+    "zamda": "workspace:*"
+  }
+}

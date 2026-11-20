@@ -1,0 +1,5 @@
+public/data
+public/engine
+public/countries.geojson
+.astro
+dist

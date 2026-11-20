@@ -1,68 +1,28 @@
 {
-  "name": "zamda",
-  "version": "0.0.0",
-  "description": "Typed, declarative columnar pipelines for JavaScript, with pluggable execution backends.",
-  "license": "MIT",
+  "name": "zamda-workspace",
+  "private": true,
   "type": "module",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    },
-    "./wasm": {
-      "types": "./dist/wasm.d.ts",
-      "import": "./dist/wasm.js",
-      "default": "./dist/wasm.js"
-    },
-    "./zamda-engine.wasm": "./dist/zamda-engine.wasm",
-    "./zamda-worker.js": "./dist/zamda-worker.js"
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
+  "workspaces": [
+    "packages/*",
+    "bench",
+    "apps/*"
   ],
   "scripts": {
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "size": "bun run scripts/size.ts",
-    "check": "bun run typecheck && bun test && bun run size",
-    "build": "bun run scripts/build.ts",
-    "prepublishOnly": "bun run check && bun run build:all",
-    "publish:alpha": "bun run build:all && npm publish --tag alpha",
-    "bench": "bun run bench/groupby.ts",
-    "prep-bgp": "bun run scripts/prep-bgp.ts",
-    "gen:map": "bun run scripts/build-world-map.ts",
-    "demo": "bun atlas/server.ts",
-    "demo:legacy": "bun demo/server.ts",
-    "fake-routes": "bun scripts/fake-routes.ts",
-    "bench:ref": "bun bench/reference/run.ts",
-    "bench:compare": "bun bench/reference/compare-bun.ts",
-    "bench:native": "bun bench/reference/compare-wasm-native.ts",
-    "bench:wasm": "bun bench/reference/compare-wasm-native.ts --wasm dist/zamda-engine.wasm",
-    "wasm:build": "bun scripts/engine-wasm.ts",
-    "wasm:measure": "bun run wasm:build && bun run bench:wasm",
-    "bench:browser": "bun bench/reference/browser/server.ts",
-    "spike:build": "cargo build --release --manifest-path spike/Cargo.toml --target wasm32-unknown-unknown && cargo build --release --manifest-path spike/Cargo.toml",
-    "spike": "bun spike/run.ts",
-    "spike:browser": "bun spike/browser/server.ts",
-    "spike:test": "cargo test --release --manifest-path spike/Cargo.toml",
-    "gen:engine": "bun scripts/engine-fixtures.ts",
-    "engine:build": "cargo build --release --manifest-path engine/Cargo.toml",
-    "engine:test": "bun run engine:build && bun test tests/engine-store.test.ts tests/engine-eval.test.ts tests/engine-run.test.ts tests/wasm-backend.test.ts tests/wasm-memory.test.ts tests/wasm-managed.test.ts tests/wasm-worker.test.ts tests/wasm-session-mixing.test.ts tests/wasm-dates.test.ts && cargo test --release --manifest-path engine/Cargo.toml",
+    "check": "bun run --cwd packages/zamda check && bun run --cwd packages/bgp-data check && bun run --cwd bench check && bun run --cwd apps/bgp-globe check",
     "lint": "eslint .",
-    "build:all": "bun run wasm:build && bun run build"
+    "test": "bun run --cwd packages/zamda test && bun run --cwd packages/bgp-data test && bun run --cwd bench test",
+    "build": "bun run --cwd packages/zamda build:all",
+    "prep-bgp": "bun run --cwd packages/bgp-data prep",
+    "fake-routes": "bun run --cwd packages/bgp-data fake",
+    "demo": "bun run --cwd apps/bgp-globe dev",
+    "bench": "bun run --cwd bench ref",
+    "prep-globe": "bun run --cwd packages/bgp-data prep:globe"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/bun": "latest",
     "@typescript-eslint/utils": "^8.73.0",
-    "arquero": "^8.0.3",
     "eslint": "^10.15.0",
-    "graphology": "^0.26.0",
-    "sigma": "^4.0.6",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.73.0"
   }

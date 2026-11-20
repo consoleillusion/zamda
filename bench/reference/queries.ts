@@ -10,9 +10,9 @@
 
 import { op, desc } from 'arquero';
 import type { ColumnTable } from 'arquero';
-import { count, pipe } from '../../src';
-import type { ExecuteOptions, Result, Table } from '../../src';
-import { Routes } from '../../scripts/bgp/file';
+import { count, pipe } from 'zamda';
+import type { ExecuteOptions, Result, Table } from 'zamda';
+import { Routes } from '@zamda/bgp-data/file';
 
 type ZTable = Table<typeof Routes.fields>;
 

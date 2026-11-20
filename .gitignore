@@ -1,11 +1,10 @@
+# Dependencies and build output (Rust target/ can appear in any workspace)
 node_modules/
 dist/
+target/
+
+# Generated data only at the repo root; engine/test data is tracked
 /data/
+
 *.log
 .DS_Store
-spike/target/
-spike/target-wrapping/
-spike/Cargo.lock
-engine/target/
-engine/Cargo.lock
-project.zip

@@ -1,0 +1,22 @@
+---
+// One page: the Svelte app does everything in the browser.
+import '@fontsource-variable/inter';
+import '@fontsource-variable/jetbrains-mono';
+import '../styles/global.css';
+import App from '../components/App.svelte';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="description" content="The global BGP routing table and an hour of its updates, on a globe, computed in your browser by zamda on JS or WebAssembly." />
+    <title>Live Internet · zamda</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='none' stroke='%2338e0d6' stroke-width='3'/><path d='M3 16h26M16 3c-6 7-6 19 0 26M16 3c6 7 6 19 0 26' stroke='%2338e0d6' stroke-width='2' fill='none'/></svg>" />
+  </head>
+  <body>
+    <App client:only="svelte" />
+  </body>
+</html>

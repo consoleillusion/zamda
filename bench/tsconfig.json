@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // Bun's HTML bundler (the browser benchmark pages) does not take export conditions, so the library's
+    // source is named here as well; runtime, bundler and type checker all read tsconfig paths.
+    "paths": {
+      "zamda": ["../packages/zamda/src/index.ts"],
+      "zamda/wasm": ["../packages/zamda/src/wasm.ts"],
+      "zamda/internal/*": ["../packages/zamda/src/*"],
+      "zamda/testing/engine-host": ["../packages/zamda/tests/engine-host.ts"]
+    }
+  },
+  "include": ["*.ts", "reference"]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@zamda/bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "zamda benchmarks: JS vs WASM vs Arquero on the BGP reference dataset.",
+  "scripts": {
+    "test": "bun test --conditions=zamda-source",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun run test",
+    "groupby": "bun --conditions=zamda-source groupby.ts",
+    "ref": "bun --conditions=zamda-source reference/run.ts",
+    "compare": "bun --conditions=zamda-source reference/compare-bun.ts",
+    "native": "bun --conditions=zamda-source reference/compare-wasm-native.ts",
+    "wasm": "bun --conditions=zamda-source reference/compare-wasm-native.ts --wasm ../packages/zamda/dist/zamda-engine.wasm",
+    "browser": "bun --conditions=zamda-source reference/browser/server.ts"
+  },
+  "dependencies": {
+    "zamda": "workspace:*",
+    "@zamda/bgp-data": "workspace:*"
+  },
+  "devDependencies": {
+    "arquero": "^8.0.3"
+  }
+}

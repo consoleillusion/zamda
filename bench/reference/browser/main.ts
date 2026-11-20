@@ -2,10 +2,10 @@
 // the same measurements as `bun run bench:compare`, shows a markdown report and
 // exposes the result as window.__benchResult for scripted runs.
 
-import { decodeRoutes } from '../../../scripts/bgp/file';
-import { createWasmBackend } from '../../../src/backends/wasm';
-import { loadEngine } from '../../../src/backends/wasm/load';
-import { Routes } from '../../../scripts/bgp/file';
+import { decodeRoutes } from '@zamda/bgp-data/file';
+import { createWasmBackend } from 'zamda/internal/backends/wasm/index';
+import { loadEngine } from 'zamda/internal/backends/wasm/load';
+import { Routes } from '@zamda/bgp-data/file';
 import { columnInput } from '../data';
 import { comparisonMarkdown, runComparison } from '../compare';
 import type { WasmTarget } from '../compare';

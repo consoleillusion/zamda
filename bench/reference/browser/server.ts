@@ -1,14 +1,15 @@
+import { dataFile } from '@zamda/bgp-data/paths';
 // Serves the browser benchmark: `bun run bench:browser`, then open http://localhost:3001
 // (or set PORT); the worker check (T-409/T-410) is at /worker.html. Uses data/routes.bin, or ROUTES=path.
 
 import page from './index.html';
 import workerPage from './worker.html';
 
-const ROUTES = process.env.ROUTES ?? 'data/routes.bin';
-const ENGINE = process.env.ENGINE ?? 'dist/zamda-engine.wasm';
+const ROUTES = process.env.ROUTES ?? dataFile('routes.bin');
+const ENGINE = process.env.ENGINE ?? new URL('../../../packages/zamda/dist/zamda-engine.wasm', import.meta.url).pathname;
 // Bun's bundler does not bundle `new Worker(...)` (checked on Bun 1.4.4), so the engine's worker is built here
 // and served as a module the page can start by URL.
-const built = await Bun.build({ entrypoints: ['src/backends/wasm/worker-entry.ts'], target: 'browser', format: 'esm' });
+const built = await Bun.build({ entrypoints: [new URL('../../../packages/zamda/src/backends/wasm/worker-entry.ts', import.meta.url).pathname], target: 'browser', format: 'esm' });
 if (!built.success) throw new Error(`The engine worker did not build:\n${built.logs.join('\n')}`);
 const workerSource = await built.outputs[0]!.text();
 const server = Bun.serve({

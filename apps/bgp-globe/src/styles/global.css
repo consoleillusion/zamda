@@ -1,0 +1,54 @@
+/* One dark theme for the page. Colours: announce teal, withdraw pink, highlight amber. */
+:root {
+  --bg: #04070f;
+  --panel: rgba(10, 18, 34, 0.72);
+  --panel-solid: #0b1426;
+  --line: rgba(120, 160, 220, 0.16);
+  --line-strong: rgba(120, 160, 220, 0.32);
+  --text: #e6eefc;
+  --muted: #8b9bb8;
+  --faint: #56657f;
+  --announce: #38e0d6;
+  --withdraw: #ff5c8a;
+  --amber: #ffd666;
+  --wasm: #a78bfa;
+  --js: #f7c948;
+  --radius: 14px;
+  --sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; -webkit-font-smoothing: antialiased; overflow: hidden; }
+body { background: radial-gradient(1200px 800px at 30% 40%, #0b1a33 0%, #050a15 55%, #03060c 100%); }
+button { font: inherit; color: inherit; }
+.num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.glass {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
+.seg { display: inline-flex; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 7px; cursor: pointer; color: var(--muted); font-weight: 550; letter-spacing: 0.01em; transition: background 0.15s, color 0.15s; }
+.seg button:hover { color: var(--text); }
+.seg button.on { background: rgba(255, 255, 255, 0.1); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.seg button:disabled { opacity: 0.4; cursor: not-allowed; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-strong); font-size: 12px; background: rgba(255, 255, 255, 0.05); }
+.chip button { border: 0; background: none; cursor: pointer; padding: 0; color: var(--muted); }
+h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 8px; }
+.deck-tooltip.tip, .tip {
+  background: rgba(8, 14, 28, 0.94) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 10px 12px !important;
+  font: 12.5px/1.5 var(--sans) !important;
+  max-width: 340px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+.tip b { color: #fff; }

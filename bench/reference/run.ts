@@ -1,3 +1,4 @@
+import { dataFile } from '@zamda/bgp-data/paths';
 // The reference benchmark: zamda's JS backend against Arquero on the routing
 // table, at several sizes, with every answer checked against the other engine
 // before any timing is kept.
@@ -12,7 +13,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
-import { decodeRoutes } from '../../scripts/bgp/file';
+import { decodeRoutes } from '@zamda/bgp-data/file';
 import {
   arqueroFromColumns,
   arqueroFromRows,
@@ -51,7 +52,7 @@ function parseArgs(argv: readonly string[]): { rows: number[]; data: string; out
   };
   const rows = get('rows', '1000000,100000,10000').split(',').map(Number);
   if (rows.some(n => !Number.isInteger(n) || n < 1)) throw new Error('--rows takes a comma-separated list of positive integers');
-  return { rows, data: get('data', 'data/routes.bin'), out: get('out', 'latest'), runs: Number(get('runs', '7')) };
+  return { rows, data: get('data', dataFile('routes.bin')), out: get('out', 'latest'), runs: Number(get('runs', '7')) };
 }
 
 async function benchmarkSize(arrays: ReturnType<typeof sample>, runs: number): Promise<SizeResult> {

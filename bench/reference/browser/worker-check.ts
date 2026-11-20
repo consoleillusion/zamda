@@ -2,12 +2,12 @@
 // Worker, a page thread that stays free, abort, transfer, a byte limit. Open /worker.html (bench:browser serves it).
 // Every check records a measured value and the limit it is held to, and the result is in window.__workerResult.
 
-import { decodeRoutes, Routes } from '../../../scripts/bgp/file';
-import { AbortError, MemoryError, ZamdaError } from '../../../src';
-import { createWasmBackend } from '../../../src/backends/wasm';
-import { loadEngine } from '../../../src/backends/wasm/load';
-import { createWorkerBackend } from '../../../src/backends/wasm/worker-link';
-import type { WorkerLike } from '../../../src/backends/wasm/worker-link';
+import { decodeRoutes, Routes } from '@zamda/bgp-data/file';
+import { AbortError, MemoryError, ZamdaError } from 'zamda';
+import { createWasmBackend } from 'zamda/internal/backends/wasm/index';
+import { loadEngine } from 'zamda/internal/backends/wasm/load';
+import { createWorkerBackend } from 'zamda/internal/backends/wasm/worker-link';
+import type { WorkerLike } from 'zamda/internal/backends/wasm/worker-link';
 import { columnInput, sample, zamdaFromColumns } from '../data';
 import { QUERIES } from '../queries';
 

@@ -1,0 +1,57 @@
+{
+  "name": "zamda",
+  "version": "0.0.0",
+  "description": "Typed, declarative columnar pipelines for JavaScript, with pluggable execution backends.",
+  "license": "MIT",
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "zamda-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./wasm": {
+      "zamda-source": "./src/wasm.ts",
+      "types": "./dist/wasm.d.ts",
+      "import": "./dist/wasm.js",
+      "default": "./dist/wasm.js"
+    },
+    "./worker-entry": {
+      "zamda-source": "./src/backends/wasm/worker-entry.ts",
+      "default": "./dist/zamda-worker.js"
+    },
+    "./zamda-engine.wasm": "./dist/zamda-engine.wasm",
+    "./zamda-worker.js": "./dist/zamda-worker.js",
+    "./internal/*": {
+      "zamda-source": "./src/*.ts"
+    },
+    "./testing/engine-host": {
+      "zamda-source": "./tests/engine-host.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bun test --conditions=zamda-source",
+    "typecheck": "tsc --noEmit",
+    "size": "bun run scripts/size.ts",
+    "check": "bun run typecheck && bun run test && bun run size",
+    "build": "bun run scripts/build.ts",
+    "build:all": "bun run wasm:build && bun run build",
+    "prepublishOnly": "bun run check && bun run build:all",
+    "publish:alpha": "bun run build:all && npm publish --tag alpha",
+    "wasm:build": "bun scripts/engine-wasm.ts",
+    "test:wasm": "bun run wasm:build && ZAMDA_ENGINE=wasm bun test --conditions=zamda-source",
+    "gen:engine": "bun scripts/engine-fixtures.ts",
+    "engine:build": "cargo build --release --manifest-path engine/Cargo.toml",
+    "engine:test": "cargo test --release --manifest-path engine/Cargo.toml"
+  },
+  "devDependencies": {
+    "binaryen": "^124.0.0"
+  }
+}

@@ -9,10 +9,10 @@
 
 import * as aq from 'arquero';
 import type { ColumnTable } from 'arquero';
-import { table } from '../../src';
-import type { JsTable } from '../../src';
-import { Routes } from '../../scripts/bgp/file';
-import type { RouteArrays } from '../../scripts/bgp/file';
+import { table } from 'zamda';
+import type { JsTable } from 'zamda';
+import { Routes } from '@zamda/bgp-data/file';
+import type { RouteArrays } from '@zamda/bgp-data/file';
 
 export type { RouteArrays };
 
