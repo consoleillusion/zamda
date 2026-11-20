@@ -31,10 +31,10 @@ const RIR_COLORS: Readonly<Record<string, string>> = {
 };
 const FALLBACK_COLOR = '#8799b1';
 const LIVE_COLOR = '#ff4d5e';
-const EDGE_COLOR = 'rgba(142, 162, 186, 0.28)';
-const LIVE_EDGE_COLOR = 'rgba(255, 77, 94, 0.95)';
-const LABEL_LIMIT = 8;
-const COUNTRY_LABEL_LIMIT = 10;
+const EDGE_COLOR = 'rgba(122, 150, 183, 0.17)';
+const LIVE_EDGE_COLOR = 'rgba(255, 105, 115, 0.85)';
+const LABEL_LIMIT = 5;
+const COUNTRY_LABEL_LIMIT = 6;
 const COUNTRY_LABEL_RATIO = 0.5;
 const ZOOM_DURATION = 450;
 const WHEEL_RATIO = 1.35;
@@ -53,7 +53,7 @@ function nodeColor(rir: string | null): string {
 
 function edgeWidth(weight: number, density: number): number {
   // Purpose: a log scale keeps a few very heavy edges from hiding the rest, and a dense view keeps them hairline
-  return (0.25 + Math.min(1.6, Math.log2(weight + 1) / 3)) * density;
+  return (0.18 + Math.min(1.1, Math.log2(weight + 1) / 4)) * density;
 }
 
 function populateGraph(graph: Graph, data: GraphViewData): void {
@@ -72,7 +72,7 @@ function populateGraph(graph: Graph, data: GraphViewData): void {
     graph.addNode(String(node.asn), {
       x: node.x,
       y: node.y,
-      size: (2.6 + 3.2 * Math.sqrt(node.paths / maxPaths)) * density,
+      size: (2.2 + 2.0 * Math.sqrt(node.paths / maxPaths)) * density,
       color: nodeColor(node.rir),
       label: labelled.has(node.asn) ? node.label : '',
       asn: node.asn,
@@ -130,6 +130,30 @@ function drawMap(
     (typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   context.clearRect(0, 0, width, height);
+  const project = function (lon: number, lat: number): Point {
+    // Purpose: share the graph.bin equirectangular projection for the graticule
+    return renderer.graphToViewport({ x: (lon / 180) * 0.88, y: (lat / 90) * 0.88 });
+  };
+  context.beginPath();
+  for (let lon = -150; lon <= 150; lon += 30) {
+    // Purpose: one faint meridian, so empty ocean still has cartographic structure
+    for (let lat = -90; lat <= 90; lat += 10) {
+      const point = project(lon, lat);
+      if (lat === -90) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    }
+  }
+  for (let lat = -60; lat <= 60; lat += 30) {
+    // Purpose: one faint parallel across the whole square
+    for (let lon = -180; lon <= 180; lon += 10) {
+      const point = project(lon, lat);
+      if (lon === -180) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    }
+  }
+  context.strokeStyle = dark ? 'rgba(150, 175, 200, 0.055)' : 'rgba(70, 90, 115, 0.07)';
+  context.lineWidth = 0.5;
+  context.stroke();
   context.beginPath();
   for (const ring of WORLD_LAND) {
     for (let i = 0; i < ring.length; i += 2) {
@@ -139,8 +163,8 @@ function drawMap(
     }
     context.closePath();
   }
-  context.fillStyle = dark ? 'rgba(255, 255, 255, 0.035)' : 'rgba(41, 62, 84, 0.055)';
-  context.strokeStyle = dark ? 'rgba(190, 205, 220, 0.22)' : 'rgba(80, 95, 115, 0.26)';
+  context.fillStyle = dark ? 'rgba(255, 255, 255, 0.022)' : 'rgba(41, 62, 84, 0.04)';
+  context.strokeStyle = dark ? 'rgba(190, 205, 220, 0.16)' : 'rgba(80, 95, 115, 0.20)';
   context.lineWidth = 0.7;
   context.fill('evenodd');
   context.stroke();

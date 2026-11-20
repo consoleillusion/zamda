@@ -568,6 +568,16 @@ A separate Chrome run with `ENGINE=dist/no-such-engine.wasm` showed the explicit
 no speedup, and still drew 20 top-network bars and 32 prefix bars from the JS engine
 (`bench/results/t510-no-engine-chrome.json`; the browser logs one expected 404 resource error).
 
+## Atlas visual pass (follow-up to T-511)
+
+A presentation-only pass made the BGP path atlas the full-width lead panel (a 1,491 px canvas in
+Chrome at a 1,600 px viewport, up from the 8-column layout), raised it to 640 px tall, added a faint
+graticule under the same equirectangular projection as `graph.bin`, softened the land outline and
+non-live edges, capped node size and label counts, and retitled the panel. The drawn data is
+unchanged: 800 nodes and 858 overview edges in both browsers, 0 console errors, and no change to the
+compiled plans or camera behaviour. Layout and console-error checks were run in headless Chrome 156
+and Firefox 158 against `?live=sim`; these are development-machine samples, not a fixed claim.
+
 ## Linked inspector and path river (T-512)
 
 Measured on 2026-11-20 with the production demo server, real `data/routes.bin` (1,163,624 routes)
