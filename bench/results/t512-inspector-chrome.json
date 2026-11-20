@@ -1,0 +1,55 @@
+{
+  "browser": "Chrome",
+  "before": {
+    "inspector": {
+      "rows": 400,
+      "rendered": 11,
+      "first": "0.0.0.0/0",
+      "ribbons": 6,
+      "nodes": 9,
+      "concept": "How to read this deck"
+    },
+    "camera": {
+      "x": 0.5644387453794479,
+      "y": 0.5931579992175102,
+      "ratio": 0.6234507669010879
+    },
+    "graphMode": "overview",
+    "ms": {
+      "table": "271 ms",
+      "flow": "373 ms"
+    },
+    "race": {
+      "match": "yes",
+      "runs": "6",
+      "fallbacks": "0"
+    },
+    "riverText": "Ribbon width = matching routes. Shape only: this snapshot has no AS_PATH sequence. Click an origin to trace it.",
+    "card": "Every chart, table and river is a compiled zamda plan. The JS result drives the picture; WASM runs the same plan in a wo",
+    "routeRows": 11,
+    "riverBands": 6
+  },
+  "origin": 9,
+  "afterRoute": {
+    "camera": {
+      "x": 0.5644387453794479,
+      "y": 0.5931579992175102,
+      "ratio": 0.6234507669010879
+    },
+    "graphMode": "neighbourhood",
+    "concept": "Observed adjacency for AS50628",
+    "selection": "Showing: inside 0.0.0.0/0",
+    "first": "0.0.0.0/0"
+  },
+  "afterTrace": {
+    "camera": {
+      "x": 0.5644387453794479,
+      "y": 0.5931579992175102,
+      "ratio": 0.6234507669010879
+    },
+    "graphMode": "neighbourhood",
+    "concept": "Observed adjacency for AS13335",
+    "card": "The map expands consecutive AS hops seen in one observed BGP path. Edges are adjacency, not physical circuits, and the c"
+  },
+  "errors": []
+}

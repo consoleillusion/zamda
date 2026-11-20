@@ -21,6 +21,7 @@ import type { GraphView } from './graph-view';
 export interface GraphPanel {
   setLive(hot: ReadonlyMap<string, number>): void;
   visiblePairs(): readonly (readonly [number, number])[];
+  select(asn: number): Promise<void>;
 }
 
 export interface GraphProbe {
@@ -53,6 +54,10 @@ const NOOP_PANEL: GraphPanel = {
   visiblePairs() {
     // Purpose: no graph means no pairs for the live simulator to borrow
     return [];
+  },
+  select() {
+    // Purpose: no graph means a trace has nothing to expand
+    return Promise.resolve();
   },
 };
 
@@ -307,6 +312,10 @@ export async function startGraph(): Promise<GraphPanel> {
     visiblePairs() {
       // Purpose: let the live simulator borrow pairs that are actually on screen
       return visibleRows.slice(0, 5000).map(row => [row.from_as, row.to_as] as const);
+    },
+    select(asn: number) {
+      // Purpose: let the inspector trace an AS without moving the camera
+      return runNeighbourhood(asn);
     },
   };
 }

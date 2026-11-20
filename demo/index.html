@@ -149,6 +149,46 @@
           <p class="race-detail" id="race-detail">Waiting for the engine module.</p>
         </aside>
 
+        <article class="panel routes">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">route inspector</p>
+              <h2>Living route table</h2>
+            </div>
+            <span class="ms" id="ms-table"></span>
+          </div>
+          <p class="hint">First 400 matching routes by address · click a prefix to focus that block.</p>
+          <div id="route-table" class="route-table"></div>
+        </article>
+
+        <article class="panel flow">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">path river</p>
+              <h2>Origins by observed hop count</h2>
+            </div>
+            <span class="ms" id="ms-flow"></span>
+          </div>
+          <p class="hint">Ribbon width = matching routes. Shape only: this snapshot has no AS_PATH sequence. Click an origin to trace it.</p>
+          <div id="path-river" class="path-river"></div>
+        </article>
+
+        <article class="panel concept">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">field notes</p>
+              <h2>What am I seeing?</h2>
+            </div>
+          </div>
+          <div class="concept-tabs" aria-label="Concept cards">
+            <button type="button" data-concept="overview">Deck</button>
+            <button type="button" data-concept="table">Table</button>
+            <button type="button" data-concept="river">River</button>
+          </div>
+          <h3 id="concept-title">How to read this deck</h3>
+          <p id="concept-body"></p>
+        </article>
+
         <article class="panel chart-panel networks">
           <div class="panel-head">
             <div>

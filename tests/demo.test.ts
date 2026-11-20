@@ -85,9 +85,33 @@ describe('linked filters', () => {
     expect(two.networks).toBe(4);
   });
 
+  test('the inspector table plan returns address order, not an arbitrary slice', async () => {
+    const rows = (await plans.table.execute(routes, { params: paramsFor(EMPTY_SELECTION, 'table') })).toArray();
+    expect(rows.map(r => r.prefix_addr)).toEqual([0x01000000, 0x01010100, 0x08080800, 0x0a000000, 0xc0000200]);
+  });
+
+  test('the flow plan groups origins by observed hop count', async () => {
+    const rows = (await plans.flow.execute(routes, { params: paramsFor(EMPTY_SELECTION, 'flow') })).toArray();
+    expect(rows).toEqual([
+      { origin_as: 3356, as_name: 'LEVEL3', path_len: 4, routes: 1 },
+      { origin_as: 13335, as_name: 'CLOUDFLARENET', path_len: 2, routes: 1 },
+      { origin_as: 13335, as_name: 'CLOUDFLARENET', path_len: 3, routes: 1 },
+      { origin_as: 15169, as_name: 'GOOGLE', path_len: 2, routes: 1 },
+      { origin_as: 64512, as_name: null, path_len: 5, routes: 1 },
+    ]);
+  });
+
+  test('the path brush filters the table but not the river', () => {
+    const selection = { ...EMPTY_SELECTION, pathLen: [3, 5] as const };
+    expect(paramsFor(selection, 'table').pathLo).toBe(3);
+    expect(paramsFor(selection, 'flow').pathLo).toBe(0);
+    expect(paramsFor(selection, 'flow').pathHi).toBe(255);
+  });
+
   test('touching a chart re-runs every chart except that one', () => {
-    expect(affectedBy('prefixLen')).toEqual(['networks', 'pathLen', 'regions']);
-    expect(affectedBy('search')).toEqual(['networks', 'prefixLen', 'pathLen', 'regions']);
+    expect(affectedBy('prefixLen')).toEqual(['networks', 'pathLen', 'regions', 'table', 'flow']);
+    expect(affectedBy('pathLen')).toEqual(['networks', 'prefixLen', 'regions', 'table']);
+    expect(affectedBy('search')).toEqual(['networks', 'prefixLen', 'pathLen', 'regions', 'table', 'flow']);
   });
 
   test('network names for the live panel', async () => {

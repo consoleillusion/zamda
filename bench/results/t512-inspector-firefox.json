@@ -1,0 +1,53 @@
+{
+  "browser": "Firefox",
+  "before": {
+    "inspector": {
+      "rows": 400,
+      "rendered": 11,
+      "first": "0.0.0.0/0",
+      "ribbons": 6,
+      "nodes": 9,
+      "concept": "How to read this deck"
+    },
+    "camera": {
+      "x": 0.5644387453794479,
+      "y": 0.5931579992175102,
+      "ratio": 0.6234507669010879
+    },
+    "graphMode": "overview",
+    "ms": {
+      "table": "74 ms",
+      "flow": "191 ms"
+    },
+    "race": {
+      "match": "yes",
+      "runs": "6",
+      "fallbacks": "0"
+    },
+    "riverText": "Ribbon width = matching routes. Shape only: this snapshot has no AS_PATH sequence. Click an origin to trace it.",
+    "routeRows": 11,
+    "riverBands": 6
+  },
+  "afterRoute": {
+    "camera": {
+      "x": 0.5644387453794479,
+      "y": 0.5931579992175102,
+      "ratio": 0.6234507669010879
+    },
+    "graphMode": "neighbourhood",
+    "concept": "Observed adjacency for AS50628",
+    "selection": "Showing: inside 0.0.0.0/0",
+    "first": "0.0.0.0/0"
+  },
+  "afterTrace": {
+    "camera": {
+      "x": 0.5644387453794479,
+      "y": 0.5931579992175102,
+      "ratio": 0.6234507669010879
+    },
+    "graphMode": "neighbourhood",
+    "concept": "Observed adjacency for AS13335",
+    "card": "The map expands consecutive AS hops seen in one observed BGP path. Edges are adjacency, not physical circuits, and the c"
+  },
+  "errors": []
+}

@@ -9,6 +9,7 @@
 import { count, list, pipe, t } from '../src';
 import type { JsTable, ParamValues, Result } from '../src';
 import { Routes } from '../scripts/bgp/file';
+import { FLOW_GROUPS, TABLE_ROWS } from './inspector';
 
 export type RoutesTable = JsTable<typeof Routes.fields>;
 
@@ -43,7 +44,7 @@ export const EMPTY_SELECTION: Selection = { prefixLen: null, pathLen: null, regi
 
 // 'networks' is one query that feeds both the top-20 chart and the totals line:
 // they apply exactly the same filters, so one grouping by network answers both.
-export type ChartId = 'networks' | 'prefixLen' | 'pathLen' | 'regions';
+export type ChartId = 'networks' | 'prefixLen' | 'pathLen' | 'regions' | 'table' | 'flow';
 
 function filtered() {
   // Purpose: a pipeline over the routes with every dashboard filter applied
@@ -80,6 +81,17 @@ export function compilePlans() {
       .groupBy(c => ({ rir: c.rir }))
       .agg(c => ({ routes: count(), networks: c.origin_as.countDistinct() }))
       .compile(),
+    // The table and river are bounded, sorted views over the same filtered routes.
+    table: filtered()
+      .sort(c => c.prefix_addr.asc())
+      .limit(TABLE_ROWS)
+      .compile(),
+    flow: filtered()
+      .groupBy(c => ({ origin_as: c.origin_as, as_name: c.as_name, path_len: c.path_len }))
+      .agg(() => ({ routes: count() }))
+      .sort(c => [c.routes.desc(), c.origin_as.asc()])
+      .limit(FLOW_GROUPS)
+      .compile(),
   };
 }
 
@@ -89,7 +101,7 @@ export function paramsFor(selection: Selection, chart: ChartId): Params {
   // Purpose: the parameter values for one chart: every selection except the chart's own
   const own = function (id: ChartId): boolean {
     // Purpose: true if this selection belongs to the chart being run, so it is ignored
-    return chart === id;
+    return chart === id || (id === 'pathLen' && chart === 'flow');
   };
   const prefix = !own('prefixLen') && selection.prefixLen ? selection.prefixLen : [0, 255];
   const path = !own('pathLen') && selection.pathLen ? selection.pathLen : [0, 255];
@@ -114,10 +126,11 @@ export function paramsFor(selection: Selection, chart: ChartId): Params {
 // selection does not change that chart, so it is left out.
 export function affectedBy(control: keyof Selection): ChartId[] {
   // Purpose: the charts that depend on one control
-  const all: ChartId[] = ['networks', 'prefixLen', 'pathLen', 'regions'];
+  const all: ChartId[] = ['networks', 'prefixLen', 'pathLen', 'regions', 'table', 'flow'];
   if (control === 'prefixLen' || control === 'pathLen' || control === 'regions') {
     return all.filter(function (id) {
-      return id !== control;
+      // The river ignores a path-length brush just like the path chart does.
+      return id !== control && !(control === 'pathLen' && id === 'flow');
     });
   }
   return all;

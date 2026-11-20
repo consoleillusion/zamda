@@ -19,6 +19,8 @@ import type { RacePanel } from './race-panel';
 import { startGraph } from './graph-panel';
 import type { GraphPanel } from './graph-panel';
 import { hotKeys } from './graph-data';
+import { flowRows, routeRows } from './inspector';
+import { createInspector } from './inspector-view';
 import type { ManagedSession } from '../src/backends/wasm/managed';
 import {
   ACTIVITY_BUCKET,
@@ -158,7 +160,12 @@ async function start(): Promise<void> {
   // The live panel labels networks with names the first unfiltered chart run fills in.
   const names = new Map<number, string>();
   const panel = createRacePanel();
-  const dashboard = createDashboard(routes, names, panel, arrays);
+  let graph: GraphPanel | null = null;
+  const graphNow = function (): GraphPanel | null {
+    // Purpose: read the graph panel after its file has loaded
+    return graph;
+  };
+  const dashboard = createDashboard(routes, names, panel, arrays, graphNow);
   dashboard.runAll();
   void startEngine(arrays, function onEngineStatus(message: string): void {
     // Purpose: show the worker's progress before the first measured comparison
@@ -167,19 +174,15 @@ async function start(): Promise<void> {
     // Purpose: a missing engine is a visible state, not a hidden fallback
     dashboard.noWasm(describeError(error));
   });
-  let graph: GraphPanel | null = null;
   void startGraph().then(function (loaded: GraphPanel): void {
-    // Purpose: hand the loaded graph to the live panel for the overlay and simulator
+    // Purpose: hand the loaded graph to the live panel and the inspector's trace gesture
     graph = loaded;
   }, function (error: unknown): void {
     // Purpose: a graph failure must not take the route charts down with it
     byId<HTMLElement>('graph-status').textContent = `Graph failed: ${String(error)}`;
     console.error('graph failed', error);
   });
-  startLive(names, function (): GraphPanel | null {
-    // Purpose: read the graph panel after its file has loaded
-    return graph;
-  });
+  startLive(names, graphNow);
 }
 
 function createDashboard(
@@ -187,19 +190,52 @@ function createDashboard(
   names: Map<number, string>,
   panel: RacePanel,
   arrays: RouteArrays,
+  graphNow: () => GraphPanel | null,
 ): Dashboard {
-  // Purpose: the linked charts, the engine race, the totals line and the controls
+  // Purpose: the linked charts, the inspector, the engine race, the totals line and the controls
   const plans: Plans = compilePlans();
   const runs = {
     networks: latest(plans.networks),
     prefixLen: latest(plans.prefixLen),
     pathLen: latest(plans.pathLen),
     regions: latest(plans.regions),
+    table: latest(plans.table),
+    flow: latest(plans.flow),
   };
   let wasmRuns: typeof runs | null = null;
   let engineSession: EngineSession | null = null;
   let raceGeneration = 0;
   let selection: Selection = EMPTY_SELECTION;
+
+  const trace = function (asn: number): void {
+    // Purpose: explain and expand the observed adjacency for one AS without moving the camera
+    inspector.concept('trace', asn);
+    void graphNow()?.select(asn).catch(function (error: unknown): void {
+      // Purpose: a failed trace must not take the route dashboard down
+      console.error('graph trace failed', error);
+    });
+  };
+  const inspector = createInspector({
+    onPrefix(row) {
+      // Purpose: focus the prefix in every linked plan and explain the row
+      const range = parseAddressRange(row.prefix);
+      if (range && range !== 'invalid') set('addr', range);
+      trace(row.origin);
+    },
+    onOrigin(origin) {
+      // Purpose: a ribbon's origin traces its adjacency on the frozen map
+      trace(origin);
+    },
+  });
+  inspector.concept('overview');
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-concept]')) {
+    // Purpose: let the reader pick a concept card directly
+    button.addEventListener('click', function onConcept(): void {
+      // Purpose: switch the teaching card without changing any selection
+      const key = button.dataset.concept;
+      if (key === 'overview' || key === 'table' || key === 'river') inspector.concept(key);
+    });
+  }
 
   const set = function (control: keyof Selection, value: Selection[keyof Selection]): void {
     // Purpose: change one control and re-run the charts that depend on it
@@ -302,6 +338,26 @@ function createDashboard(
           }
           return done;
         });
+      } else if (chart === 'table') {
+        const started = timed(`${chart} failed`, () => runs.table(routes, options));
+        return started.then(function (done) {
+          // Purpose: draw only the bounded window of sorted routes the plan returned
+          if (done.result !== null) {
+            inspector.table(routeRows(done.result.toArray()));
+            showMs(chart, done.ms);
+          }
+          return done;
+        });
+      } else if (chart === 'flow') {
+        const started = timed(`${chart} failed`, () => runs.flow(routes, options));
+        return started.then(function (done) {
+          // Purpose: redraw the river from the bounded origin/hop-count plan
+          if (done.result !== null) {
+            inspector.river(flowRows(done.result.toArray()));
+            showMs(chart, done.ms);
+          }
+          return done;
+        });
       }
       const started = timed(`${chart} failed`, () => runs.regions(routes, options));
       return started.then(function (done) {
@@ -327,6 +383,12 @@ function createDashboard(
     } else if (chart === 'pathLen' && wasmRuns !== null && engineSession !== null) {
       const target = wasmRuns;
       wasm = timed(`wasm ${chart} failed`, () => target.pathLen(engineSession!.table, wasmOptions));
+    } else if (chart === 'table' && wasmRuns !== null && engineSession !== null) {
+      const target = wasmRuns;
+      wasm = timed(`wasm ${chart} failed`, () => target.table(engineSession!.table, wasmOptions));
+    } else if (chart === 'flow' && wasmRuns !== null && engineSession !== null) {
+      const target = wasmRuns;
+      wasm = timed(`wasm ${chart} failed`, () => target.flow(engineSession!.table, wasmOptions));
     } else if (wasmRuns !== null && engineSession !== null) {
       const target = wasmRuns;
       wasm = timed(`wasm ${chart} failed`, () => target.regions(engineSession!.table, wasmOptions));
@@ -452,8 +514,8 @@ function createDashboard(
   };
 
   const runAll = function (): void {
-    // Purpose: run every chart
-    interaction(['networks', 'prefixLen', 'pathLen', 'regions']);
+    // Purpose: run every chart and inspector view
+    interaction(['networks', 'prefixLen', 'pathLen', 'regions', 'table', 'flow']);
   };
 
   window.addEventListener('resize', function onResize() {
@@ -471,6 +533,8 @@ function createDashboard(
         prefixLen: latest(plans.prefixLen),
         pathLen: latest(plans.pathLen),
         regions: latest(plans.regions),
+        table: latest(plans.table),
+        flow: latest(plans.flow),
       };
       panel.setStatus('warming engine…', 'loading');
       const session = engine.backend.session();
@@ -479,6 +543,8 @@ function createDashboard(
         plans.prefixLen.execute(engine.table, { params: paramsFor(EMPTY_SELECTION, 'prefixLen'), session }),
         plans.pathLen.execute(engine.table, { params: paramsFor(EMPTY_SELECTION, 'pathLen'), session }),
         plans.regions.execute(engine.table, { params: paramsFor(EMPTY_SELECTION, 'regions'), session }),
+        plans.table.execute(engine.table, { params: paramsFor(EMPTY_SELECTION, 'table'), session }),
+        plans.flow.execute(engine.table, { params: paramsFor(EMPTY_SELECTION, 'flow'), session }),
       ];
       void Promise.all(warm).then(function () {
         // Purpose: drop the warm-up session and run the first measured comparison

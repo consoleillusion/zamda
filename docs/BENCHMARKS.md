@@ -567,3 +567,30 @@ error if the engine module is absent. Raw samples are
 A separate Chrome run with `ENGINE=dist/no-such-engine.wasm` showed the explicit 404 error, printed
 no speedup, and still drew 20 top-network bars and 32 prefix bars from the JS engine
 (`bench/results/t510-no-engine-chrome.json`; the browser logs one expected 404 resource error).
+
+## Linked inspector and path river (T-512)
+
+Measured on 2026-11-20 with the production demo server, real `data/routes.bin` (1,163,624 routes)
+and `?live=sim`. The race panel now runs six plans: the four original charts plus an address-sorted
+`limit(400)` table plan and an origin/hop-count `groupBy` + `sort` + `limit(24)` flow plan. All six
+WASM answers matched the JS answers, with zero fallbacks. The table result has 400 rows but only 11
+DOM rows are drawn at one time; the river draws the six strongest origins and three hop-count
+nodes from this snapshot.
+
+| Browser | Table JS time | River JS time | Table drawn | River drawn | Race | Route click → camera | Origin trace → camera | Errors |
+| --- | ---: | ---: | --- | --- | --- | --- | --- | ---: |
+| Chrome 156 | 271 ms | 373 ms | 400 rows / 11 in DOM | 6 ribbons / 9 nodes | 6 runs, match yes, 0 fallbacks | unchanged | unchanged | 0 |
+| Firefox 158 | 74 ms | 191 ms | 400 rows / 11 in DOM | 6 ribbons / 9 nodes | 6 runs, match yes, 0 fallbacks | unchanged | unchanged | 0 |
+
+An earlier load measured 91/183 ms in Chrome and 687/657 ms in Firefox, so these are samples, not
+stable engine numbers.
+
+Clicking the first table row changed the selection to that prefix's block and then traced its
+origin, leaving the concept card on “Observed adjacency for AS50628”; clicking a ribbon origin
+changed the card to “Observed adjacency for AS13335”. Both gestures expanded that AS's
+neighbourhood. In both gestures the graph camera stayed exactly at
+`0.5644, 0.5932, 0.6235`, so the new trace keeps D-086's zoom-preserving behaviour. The river's
+hint and card say it shows path shape, not AS sequences: `routes.bin` stores `path_len` but no
+`AS_PATH`. Raw samples are `bench/results/t512-inspector-chrome.json` and
+`bench/results/t512-inspector-firefox.json`. These are headless development-machine numbers from one
+load per browser, not a fixed speed claim.

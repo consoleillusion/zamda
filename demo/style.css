@@ -232,6 +232,64 @@ h3 { margin: 14px 0 7px; color: var(--muted); font-size: 11px; font-weight: 650;
 .graph-edge-key i { display: inline-block; width: 16px; height: 2px; margin: 0 5px 3px 8px; background: #8ea2ba; }
 .graph-edge-key i.hot { background: var(--warn); }
 
+.routes, .flow { grid-column: span 5; }
+.concept { grid-column: span 2; }
+.route-table {
+  height: 260px;
+  overflow-y: auto;
+  border: 1px solid #1d2a3c;
+  border-radius: 10px;
+  background: rgba(8, 13, 21, 0.86);
+  scrollbar-color: #29405a transparent;
+}
+.route-row {
+  display: grid;
+  grid-template-columns: 1.25fr 0.7fr 1.35fr 0.55fr 0.45fr;
+  gap: 8px;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-bottom: 1px solid #142033;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.route-row:hover, .route-row:focus-visible { background: rgba(77, 224, 198, 0.08); color: var(--ink); outline: none; }
+.route-row span:first-child { color: var(--cyan); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.route-row span:last-child { text-align: right; }
+.path-river { height: 180px; }
+.river-svg { width: 100%; height: 180px; display: block; overflow: visible; }
+.river-band { fill: none; stroke: url(#river-gradient); stroke-opacity: 0.24; }
+.river-pulse {
+  fill: none;
+  stroke: var(--cyan);
+  stroke-opacity: 0.85;
+  stroke-width: 1;
+  stroke-dasharray: 2 16;
+  animation: river-flow 3.2s linear infinite;
+}
+@keyframes river-flow { to { stroke-dashoffset: -72; } }
+.river-node rect { fill: var(--blue); }
+.river-node.origin { cursor: pointer; }
+.river-node.origin rect { fill: var(--cyan); }
+.river-node.origin:hover rect { fill: var(--ink); }
+.river-label { fill: var(--muted); font-size: 9px; font-family: inherit; }
+.concept-tabs { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 12px; }
+.concept-tabs button {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #0a1019;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.concept-tabs button:hover { border-color: var(--cyan); color: var(--cyan); }
+.concept h3 { margin: 0 0 7px; color: var(--cyan); font-size: 12px; text-transform: none; letter-spacing: 0; }
+#concept-body { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+
 .race-context { margin: 0 0 14px; color: var(--muted); font-size: 11px; }
 .race-speed { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; padding: 14px 0 12px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
 .race-speed strong { display: block; margin-top: 3px; color: var(--cyan); font-size: 46px; line-height: 1; font-weight: 680; letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
@@ -289,8 +347,9 @@ footer { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line-s
   .hero { grid-template-columns: 1fr; }
   .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .metric-engine { grid-column: auto; }
-  .atlas, .race, .networks, .prefix, .path, .regions, .live { grid-column: span 12; }
+  .atlas, .race, .routes, .flow, .concept, .networks, .prefix, .path, .regions, .live { grid-column: span 12; }
   .graph-canvas { height: 520px; }
+  .concept { max-width: none; }
 }
 
 @media (max-width: 720px) {
@@ -303,4 +362,5 @@ footer { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line-s
 
 @media (prefers-reduced-motion: reduce) {
   .track i { transition: none; }
+  .river-pulse { animation: none; stroke-opacity: 0.35; }
 }
