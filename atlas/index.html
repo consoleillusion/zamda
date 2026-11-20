@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>zamda · BGP topology</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main id="stage">
+      <canvas id="topology" aria-label="Observed BGP adjacency topology"></canvas>
+      <header class="caption">
+        <h1>BGP topology</h1>
+        <p id="status">Loading the observed graph…</p>
+        <p id="engine">compiled plans: starting…</p>
+      </header>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -12,5 +12,5 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src", "tests", "scripts", "demo", "bench", "spike"]
+  "include": ["src", "tests", "scripts", "demo", "atlas", "bench", "spike"]
 }
