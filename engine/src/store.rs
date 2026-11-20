@@ -175,7 +175,7 @@ impl View {
 
     pub fn has_nulls(&self, col: usize) -> bool {
         // Purpose: whether any row this view sees is null in this column
-        self.valid(col).map_or(false, |v| v.iter().any(|&b| b == 0))
+        self.valid(col).is_some_and(|v| v.contains(&0))
     }
 
     pub fn shares_storage_with(&self, other: &View) -> bool {
@@ -335,7 +335,7 @@ impl Table {
                 let present = valid.as_ref().map(|v| v.bytes());
                 for (i, &code) in codes.iter().enumerate() {
                     // A negative code wraps to a huge u32, so one comparison covers both ends.
-                    if present.map_or(true, |v| v[i] != 0) && code as u32 >= dict_len {
+                    if present.is_none_or(|v| v[i] != 0) && code as u32 >= dict_len {
                         return Err(StoreError::CodeOutOfRange);
                     }
                 }

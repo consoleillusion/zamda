@@ -5,7 +5,7 @@
 // finishes it and drops the result). Use createWorkerBackend, which puts the failure model of managed.ts on top.
 
 import type { ResultData } from '../../backend';
-import { AbortError, EngineCrashError } from '../../errors';
+import { AbortError, EngineCrashError, PlanError } from '../../errors';
 import { createManagedBackend, EngineLinkFailure } from './managed';
 import type { EngineLink, ManagedBackend, RunHooks, RunRequest, TableState } from './managed';
 import type { WasmStats } from './index';
@@ -26,11 +26,34 @@ interface Pending {
   onProgress?: RunHooks['onProgress'];
 }
 
-export function workerLink(options: { spawn: () => WorkerLike; engine: EngineSource }): EngineLink {
+// How long an aborted run may keep the worker busy before the worker is treated as stuck, by default.
+// Only a bug should get near it: the longest single step (a sort of every row) takes well under a second.
+export const DEFAULT_STALL_MS = 5000;
+
+export interface WorkerLinkOptions {
+  readonly spawn: () => WorkerLike;
+  readonly engine: EngineSource;
+  // The backstop of the failure model: after abort(), if the worker has not answered the aborted run within
+  // this many milliseconds, it is terminated and the engine is replaced (tables without `reload` are lost).
+  // 0 turns the backstop off.
+  readonly stallMs?: number;
+}
+
+export function workerLink(options: WorkerLinkOptions): EngineLink {
   // Purpose: a link to an engine in a worker made by `spawn`; a new worker is made when the engine is replaced
   let worker: WorkerLike | null = null;
   let pending = new Map<number, Pending>();
+  // Aborted runs the worker has not answered yet, each with its stall timer.
+  const draining = new Map<number, ReturnType<typeof setTimeout>>();
   let next = 1;
+  const stallMs = options.stallMs ?? DEFAULT_STALL_MS;
+  if (!(stallMs >= 0)) throw new PlanError(`stallMs must be zero or more, got ${stallMs}`);
+
+  const stopDraining = (): void => {
+    // Purpose: forget the stall timers of a worker that is gone
+    for (const timer of draining.values()) clearTimeout(timer);
+    draining.clear();
+  };
 
   const failAll = (message: string): void => {
     // Purpose: the worker is gone: every call waiting on it fails with a lost-engine error
@@ -42,6 +65,13 @@ export function workerLink(options: { spawn: () => WorkerLike; engine: EngineSou
     // Purpose: listen to one worker
     w.addEventListener('message', event => {
       const reply = event.data as Reply;
+      const timer = draining.get(reply.id);
+      if (timer !== undefined && !('progress' in reply)) {
+        // The worker answered an aborted run: it is not stuck, and the answer is dropped.
+        clearTimeout(timer);
+        draining.delete(reply.id);
+        return;
+      }
       const p = pending.get(reply.id);
       if (p === undefined) return;
       if ('progress' in reply) {
@@ -82,6 +112,7 @@ export function workerLink(options: { spawn: () => WorkerLike; engine: EngineSou
       // Purpose: a new worker with a fresh engine (the old worker, if any, is stopped)
       const old = worker;
       worker = null;
+      stopDraining();
       failAll('The engine worker was replaced');
       old?.terminate();
       const w = options.spawn();
@@ -108,7 +139,25 @@ export function workerLink(options: { spawn: () => WorkerLike; engine: EngineSou
       return new Promise<ResultData>((resolve, reject) => {
         const onAbort = (): void => {
           pending.delete(id);
-          worker?.postMessage({ id: next++, type: 'abort', target: id } satisfies Request);
+          const w = worker;
+          if (w !== null) {
+            w.postMessage({ id: next++, type: 'abort', target: id } satisfies Request);
+            if (stallMs > 0) {
+              draining.set(
+                id,
+                setTimeout(() => {
+                  // The aborted run never gave the worker back: terminate it. The next call finds no worker,
+                  // which the managed backend treats as a lost engine and replaces (C-FAIL backstop).
+                  draining.delete(id);
+                  if (worker !== w) return;
+                  worker = null;
+                  stopDraining();
+                  failAll(`The engine worker did not stop within ${stallMs} ms of an abort and was terminated`);
+                  w.terminate();
+                }, stallMs),
+              );
+            }
+          }
           reject(new AbortError());
         };
         signal.addEventListener('abort', onAbort, { once: true });
@@ -130,13 +179,15 @@ export function workerLink(options: { spawn: () => WorkerLike; engine: EngineSou
       // Purpose: stop the worker and everything in it
       const w = worker;
       worker = null;
+      stopDraining();
       failAll('The engine worker was stopped');
       w?.terminate();
     },
   };
 }
 
-export function createWorkerBackend(options: { spawn: () => WorkerLike; engine: EngineSource; memoryLimitBytes?: number }): Promise<ManagedBackend> {
+export async function createWorkerBackend(options: WorkerLinkOptions & { memoryLimitBytes?: number }): Promise<ManagedBackend> {
   // Purpose: the WASM engine in a worker, with the memory limit and the failure model of managed.ts
-  return createManagedBackend(workerLink({ spawn: options.spawn, engine: options.engine }), options.memoryLimitBytes === undefined ? {} : { memoryLimitBytes: options.memoryLimitBytes });
+  const { memoryLimitBytes, ...link } = options;
+  return createManagedBackend(workerLink(link), memoryLimitBytes === undefined ? {} : { memoryLimitBytes });
 }

@@ -367,6 +367,36 @@ All zamda errors derive from `ZamdaError` and carry a `code`:
 Errors are structured: the message says what was expected, what was found, and
 where (row, column, node); the `.code` is stable for programmatic handling.
 
+## The WASM accelerator: `zamda/wasm`
+
+```ts
+import { wasmEngine } from 'zamda/wasm';
+
+const engine = await wasmEngine();               // a Web Worker in a page, this thread in Bun/Node
+const big = await engine.load(Users, rows);      // rows or columns, copied into engine memory once
+const out = await plan.execute(big, { signal }); // the same compiled plan, the same result
+await big.dispose();                             // or: await using big = await engine.load(...)
+```
+
+- **`wasmEngine(options?)`** starts the engine. Options: `wasm` (a URL, bytes or a compiled
+  `WebAssembly.Module`; default the `zamda-engine.wasm` shipped beside the entry point), `worker`
+  (`true`/`false`, or a function returning your own `Worker` when your bundler needs the URL spelled
+  out: `() => new Worker(new URL('zamda/zamda-worker.js', import.meta.url), { type: 'module' })`),
+  `memoryLimitBytes` (0 to 4 GiB; past it a load or run raises `MemoryError` and the engine stays
+  healthy) and `stallMs` (worker only, default 5000: an aborted run that holds the worker longer is
+  treated as a stuck engine, the worker is terminated and replaced).
+- **`engine.load(schema, data, options?)`** returns a table resident in the engine. `append()` adds rows
+  (C-LIVE); `options.reload` lets the table be rebuilt if the engine has to be replaced after a trap,
+  otherwise the table is lost and raises `HandleError`. `options.transfer: true` moves typed arrays to the
+  worker instead of copying them (they are detached on the page).
+- **`engine.session()`** groups the runs of one interaction so they share filter work; pass it as
+  `session` to `execute()`. `engine.stats()` counts engine runs and JS fallbacks (see below).
+- **`engine.terminate()`** stops the engine; its tables are gone.
+- A plan the engine cannot run yet (for now: string-valued results such as `lower(x)` as an output
+  column, comparisons between two string columns) runs on the JS executor over the same snapshot and
+  gives the same result (D-067); `stats().fallback` counts those runs. Joins and windows raise
+  `PlanError` (D-077).
+
 ## Backends and the IR
 
 Nothing about the IR is public API; **`IR_VERSION`** says which IR version the
@@ -375,8 +405,9 @@ this number, and [IR-BINARY.md](IR-BINARY.md) documents the format.
 
 A backend is a `Backend`: `execute(plan, table, options) → Promise<ResultData>`.
 The JS backend (`table()`) and the WASM backend (via `zamda/wasm`) both conform
-to it, and both reject plans they cannot run with `PlanError` (never substitute
-different semantics). `Table` is the abstract handle; `ResultData` is
+to it, and neither substitutes different semantics: the WASM backend either runs a
+plan itself, runs it on the JS executor with the same results (counted in
+`stats().fallback`), or raises `PlanError`. `Table` is the abstract handle; `ResultData` is
 `{ schema, columns, rowCount }` over the same column storage (see ARCHITECTURE).
 
 The rest — `Backend`, `BackendOptions`, `ResultData`, `Table`, `RunSession`,

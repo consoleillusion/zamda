@@ -24,11 +24,23 @@ out.toArray(); // { name: string | null; next: number | null }[]
 
 ## Status
 
-Milestone 1 (the core) is complete: every rule in the contract is implemented on
-the JS backend and pinned by a test. See [docs/MILESTONE-1.md](docs/MILESTONE-1.md)
-for the gate review and [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for numbers.
-Milestone 2, the JS release, is under way: execution is now chunked and
-cancellable. See [docs/ROADMAP.md](docs/ROADMAP.md).
+Milestones 1 (core) and 3 (WASM engine) are complete; Milestone 2 is complete
+except the npm alpha. Keyed live tables, Substrait export/import, joins and
+window functions (JS backend only) followed. See [docs/ROADMAP.md](docs/ROADMAP.md)
+and [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+### The WASM accelerator
+
+```ts
+import { wasmEngine } from 'zamda/wasm';
+
+const engine = await wasmEngine();          // a Web Worker in a page
+const big = await engine.load(Users, rows); // resident in engine memory
+const out = await plan.execute(big);        // same plan, same result
+```
+
+See [docs/API.md](docs/API.md#the-wasm-accelerator-zamdawasm). Build the module
+once with `bun run wasm:build` (needs `rustup target add wasm32-unknown-unknown`).
 
 ## What you can write
 
@@ -94,7 +106,7 @@ bun run check     # typecheck + tests + size budget
 | `bun test` | Unit, slice and golden contract tests |
 | `bun run lint` | ESLint over the repo with the zamda accessor-callback rule |
 | `bun run typecheck` | `tsc --noEmit`, including the type-inference tests |
-| `bun run build` | ESM bundle and `.d.ts` files in `dist/` for publishing |
+| `bun run build` | ESM bundles (`zamda`, `zamda/wasm`, the worker) and `.d.ts` files in `dist/`; `bun run build:all` also builds the WASM module first |
 | `bun run publish:alpha` | Build and publish the package to npm under the `alpha` tag |
 | `bun run size` | Fails if the core exceeds 40 KB gzipped |
 | `bun run bench` | Group-by benchmark against plain JS and Arquero |

@@ -12,12 +12,16 @@ const BUDGET = 400 * 1024;
 const built = 'engine/target/wasm32-unknown-unknown/release/zamda_engine.wasm';
 const out = 'dist/zamda-engine.wasm';
 
-function run(command: string[]): number {
+// One SIMD128 build (spec v4 decision "SIMD"): every current browser runs it. Set here rather than in a
+// .cargo/config.toml because cargo reads that from the working directory, not from --manifest-path.
+const SIMD = { CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: '-C target-feature=+simd128' };
+
+function run(command: string[], env: Record<string, string> = {}): number {
   // Purpose: run a command with its output shown; its exit code
-  return Bun.spawnSync(command, { stdout: 'inherit', stderr: 'inherit' }).exitCode;
+  return Bun.spawnSync(command, { stdout: 'inherit', stderr: 'inherit', env: { ...process.env, ...env } }).exitCode;
 }
 
-if (run(['cargo', 'build', '--release', '--manifest-path', 'engine/Cargo.toml', '--target', 'wasm32-unknown-unknown']) !== 0) {
+if (run(['cargo', 'build', '--release', '--manifest-path', 'engine/Cargo.toml', '--target', 'wasm32-unknown-unknown'], SIMD) !== 0) {
   console.error('\nThe build failed. If the target is missing: rustup target add wasm32-unknown-unknown');
   process.exit(1);
 }

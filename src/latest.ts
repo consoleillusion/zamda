@@ -25,20 +25,23 @@ export function latest<In extends Fields, Out extends Fields, P extends ParamDec
     current = controller;
     const options = args[0] ?? {};
     const outer = options.signal;
+    const forward = function (): void {
+      // Purpose: the caller's own signal still cancels the run
+      controller.abort();
+    };
     if (outer) {
-      // The caller's own signal still cancels the run.
       if (outer.aborted) controller.abort();
-      else {
-        outer.addEventListener(
-          'abort',
-          function () {
-            controller.abort();
-          },
-          { once: true },
-        );
-      }
+      else outer.addEventListener('abort', forward, { once: true });
     }
     const merged = [{ ...options, signal: controller.signal }] as unknown as ExecuteArgs<P>;
-    return plan.execute(table, ...merged);
+    const running = plan.execute(table, ...merged);
+    // A long-lived signal shared by many runs (a page's or a component's) must not collect one listener per run.
+    if (outer) {
+      void running.then(
+        () => outer.removeEventListener('abort', forward),
+        () => outer.removeEventListener('abort', forward),
+      );
+    }
+    return running;
   };
 }

@@ -79,7 +79,7 @@ impl<'a> Reader<'a> {
     fn zigzag(&mut self) -> Result<i64, Error> {
         // Purpose: the next signed varint
         let z = self.varint()?;
-        Ok(if z % 2 == 0 { (z / 2) as i64 } else { -(((z + 1) / 2) as i64) })
+        Ok(if z % 2 == 0 { (z / 2) as i64 } else { -(z.div_ceil(2) as i64) })
     }
 
     fn u64(&mut self) -> Result<u64, Error> {

@@ -11,6 +11,20 @@ export type ErrorCode =
   | 'abort'
   | 'crash';
 
+// The class name for each code, spelled out: bundlers rename classes (PlanError becomes PlanError2), so
+// `new.target.name` would put the renamed name into `error.name` and into messages users read.
+const NAMES: Readonly<Record<ErrorCode, string>> = {
+  schema: 'SchemaError',
+  type: 'TypeCheckError',
+  expression: 'ExpressionError',
+  plan: 'PlanError',
+  execution: 'ExecutionError',
+  memory: 'MemoryError',
+  handle: 'HandleError',
+  abort: 'AbortError',
+  crash: 'EngineCrashError',
+};
+
 export class ZamdaError extends Error {
   readonly code: ErrorCode;
 
@@ -18,7 +32,7 @@ export class ZamdaError extends Error {
     // Purpose: base class carrying a stable error code alongside the message
     super(message);
     this.code = code;
-    this.name = new.target.name;
+    this.name = new.target === ZamdaError ? 'ZamdaError' : NAMES[code];
   }
 }
 

@@ -1,6 +1,11 @@
 // The zamda WASM engine. Plans are read and validated (T-402) and tables live in
 // the engine's memory (T-403); the operators arrive in T-404 onward. See docs/TASKS.md, Milestone 3.
 
+// The `zs_*` C-ABI entry points take raw pointers from the host (WASM memory offsets or FFI pointers)
+// by design: the host is the only caller, and each entry point checks lengths and codes before use.
+// Marking them `unsafe extern "C"` would change nothing for the host and only add noise to the tests.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 pub mod decode;
 pub mod encode;
 pub mod error;
@@ -61,13 +66,20 @@ pub extern "C" fn zs_plan_error_at() -> u32 {
 #[no_mangle]
 pub extern "C" fn zs_alloc(bytes: usize) -> *mut u8 {
     // Purpose: give the host a block to write a plan into
-    let layout = std::alloc::Layout::from_size_align(bytes.max(8), 8).unwrap();
-    unsafe { std::alloc::alloc(layout) }
+    // A size no layout can hold (over isize::MAX) is refused with null, like any failed allocation,
+    // instead of panicking, which would abort the module.
+    match std::alloc::Layout::from_size_align(bytes.max(8), 8) {
+        Ok(layout) => unsafe { std::alloc::alloc(layout) },
+        Err(_) => std::ptr::null_mut(),
+    }
 }
 
 #[no_mangle]
 pub extern "C" fn zs_free(ptr: *mut u8, bytes: usize) {
     // Purpose: return a block from zs_alloc
-    let layout = std::alloc::Layout::from_size_align(bytes.max(8), 8).unwrap();
+    if ptr.is_null() {
+        return;
+    }
+    let Ok(layout) = std::alloc::Layout::from_size_align(bytes.max(8), 8) else { return };
     unsafe { std::alloc::dealloc(ptr, layout) }
 }

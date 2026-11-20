@@ -77,15 +77,22 @@ IR; any backend that honours the contract can execute it.
 | `src/plan.ts` | `Plan.execute`, `explain` | backend, expr, ir, result, schema |
 | `src/result.ts` | `Result` | backend, column, schema |
 | `src/latest.ts` | `latest()`: a new run aborts the previous one | plan (types only) |
+| `src/keyed.ts` | `KeyedTable`: keyed live tables over any backend (C-LIVE-KEY) | backend, schema, types, errors |
+| `src/ir-binary.ts` | Binary IR encoder and decoder for the engine (docs/IR-BINARY.md) | ir, types, errors |
+| `src/substrait.ts` | Substrait export and import, pinned to 0.108.0 (docs/SUBSTRAIT.md); not exported yet | ir, registry, types |
 | `src/backends/js/` | JS reference executor | core modules only |
-| `src/index.ts` | Public API | everything |
+| `src/backends/wasm/` | WASM backend: engine host, tables in engine memory, worker link, failure model | core modules, and `backends/js` (see below) |
+| `src/index.ts` | Public API (`zamda`) | everything except `backends/wasm` |
+| `src/wasm.ts` | Public API (`zamda/wasm`): `wasmEngine()` | `backends/wasm` |
 
 ### Dependency rules
 
 - Core modules never import from `src/backends/`. Only `src/index.ts` does.
-- A backend imports core modules only. Backends never import each other.
-- `src/index.ts` must not pull in WASM. The WASM backend gets its own entry
-  point, `zamda/wasm`, so a JS-only install stays small.
+- A backend imports core modules only, with one exception: the WASM backend uses
+  the JS executor as its oracle for string lookups (D-066) and for plans the
+  engine does not support yet (D-067). The JS backend never imports the WASM one.
+- `src/index.ts` must not pull in WASM. The WASM backend has its own entry
+  point, `src/wasm.ts` (`zamda/wasm`), so a JS-only install stays small.
 
 ## The IR
 
@@ -176,7 +183,10 @@ Substrait mapping.
   because chunks computed separately have separate dictionaries.
 - `sort.ts` sorts row indexes: integer and boolean keys by a stable radix sort, anything else by native-sorted runs merged in bounded steps; a small limit uses a heap. Every step yields so a sort can be paused or aborted.
 
-## The reference dashboard (demo/, not part of the package)
+## The demos (not part of the package)
+
+`bun run demo` serves `atlas/` (the AS-topology view, T-513); `bun run demo:legacy` serves
+`demo/`, the four-chart dashboard of the spec plus the later graph and race panels:
 
 ```
 demo/server.ts     Bun.serve: bundles index.html and serves data/routes.bin and data/graph.bin
@@ -214,20 +224,27 @@ scripts/check-dump.ts     re-reads a dump with random splits; all passes must ag
 scripts/bgp/mrt.ts        streaming MRT (RFC 6396) reader: TABLE_DUMP_V2 IPv4 RIBs and AS_PATH
 scripts/bgp/routes.ts     one route per prefix (shortest path, lowest peer)
 scripts/bgp/graph.ts      one weighted AS-adjacency graph from the same chosen routes
-scripts/bgp/graph-file.ts the ZGR2 graph file format, country-centred positions and its loader
+scripts/bgp/graph-file.ts the graph file format (ZGR4), country-centred positions and its loader
 scripts/bgp/registry.ts   asn.txt names/countries, NRO delegation stats and country centroids
 scripts/bgp/file.ts       the routes file format and its loader into a zamda table
 ```
 
-## Planned layout for the WASM backend
-
-Not built until the spike passes (see `docs/ROADMAP.md`).
+## The WASM backend
 
 ```
-crates/zamda-engine/      Rust: IR decoder, validator, kernels, executor
-src/backends/wasm/        TS: worker host, loader, Backend implementation
+engine/                   Rust, no dependencies: binary IR decoder and validator, table store,
+                          expression kernels, executor (filter, project, limit, aggregate, sort),
+                          sessions, counting allocator with a byte limit; C-ABI `zs_*` exports
+src/backends/wasm/load.ts    instantiate the module and wrap its exports (EngineRunHost)
+src/backends/wasm/index.ts   the in-thread Backend: plans to bytes, string ids and lookups, time slices
+src/backends/wasm/managed.ts the failure model: traps replace the module, tables reload or are lost
+src/backends/wasm/worker-*   the worker host: messages, transfer, abort, the stall backstop
+src/wasm.ts               `wasmEngine()`, the public entry
 spike/                    Throwaway spike code; never imported by src/
 ```
+
+`bun run build` emits `dist/index.js`, `dist/wasm.js`, `dist/zamda-worker.js` and keeps
+`dist/zamda-engine.wasm` from `bun run wasm:build` (`bun run build:all` does both).
 
 ## Errors
 
@@ -250,4 +267,4 @@ spike/                    Throwaway spike code; never imported by src/
 | Execution | `tests/execution.test.ts` | Yielding, cancellation, progress, early termination, `latest()` |
 | Types | `tests/types/inference.ts` | TypeScript inference, checked by `tsc` |
 | Registry | `tests/registry.test.ts` | Structural rules on the function registry |
-| Cross-backend property tests | later, with the WASM backend | Random plans must match the JS backend |
+| Cross-backend property tests | `tests/engine-*.test.ts`, `tests/wasm-*.test.ts` | Random plans and expressions must match the JS backend; the golden suite runs on both |

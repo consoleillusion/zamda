@@ -103,12 +103,9 @@ impl Sorter {
         if keys.len() == 1 {
             let k = &keys[0];
             let mut tagged: Vec<(u8, u64, u32)> = order.iter().map(|&i| (rank(k, i as usize), k.words[i as usize], i)).collect();
-            match limit {
-                Some(l) => {
-                    tagged.select_nth_unstable(l - 1);
-                    tagged.truncate(l);
-                }
-                None => {}
+            if let Some(l) = limit {
+                tagged.select_nth_unstable(l - 1);
+                tagged.truncate(l);
             }
             tagged.sort_unstable();
             return tagged.into_iter().map(|(_, _, i)| i).collect();

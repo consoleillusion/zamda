@@ -365,6 +365,8 @@ pub fn is_null<'a>(x: &Vector<'a>, n: usize) -> Vector<'a> {
 
 pub fn is_nan<'a>(x: &Vector<'a>, n: usize) -> Vector<'a> {
     // Purpose: 1 where a float value is NaN; null stays null
+    // A value is unequal to itself only when it is NaN; `Num` has no is_nan, so the test is spelled out.
+    #[allow(clippy::eq_op)]
     fn run<'a, T: Num>(x: &Vector<'a>, n: usize) -> Vector<'a> {
         match operand::<T>(x) {
             Opd::Const(c) => bool_const(c != c),
@@ -531,7 +533,7 @@ fn int_unary<'a, T: Int>(is_abs: bool, ty: Type, x: &Vector<'a>, n: usize) -> Re
     let mut out: Vec<T> = Vec::with_capacity(n);
     for i in 0..n {
         let v = a.at(i);
-        if valid.map_or(false, |m| m[i] == 0) {
+        if valid.is_some_and(|m| m[i] == 0) {
             out.push(v);
             continue;
         }
@@ -675,7 +677,7 @@ fn cast_typed<'a, S: CastFrom, D: CastTo>(to: Type, x: &Vector<'a>, n: usize) ->
     let valid = x.valid();
     let mut out: Vec<D> = Vec::with_capacity(n);
     for i in 0..n {
-        if valid.map_or(false, |m| m[i] == 0) {
+        if valid.is_some_and(|m| m[i] == 0) {
             out.push(D::from_i128_(0));
             continue;
         }
@@ -757,13 +759,10 @@ pub fn coalesce<'a>(a: Vector<'a>, b: Vector<'a>, n: usize) -> Result<Vector<'a>
 
 pub fn if_else<'a>(c: &Vector<'a>, a: Vector<'a>, b: Vector<'a>, n: usize) -> Result<Vector<'a>, EvalError> {
     // Purpose: C-IF: the second argument where the condition is true, else the third (also for a null condition)
-    match &c.data {
-        Data::Const(Scalar::U8(v)) => return Ok(if *v != 0 { a } else { b }),
-        _ => {}
-    }
+    if let Data::Const(Scalar::U8(v)) = &c.data { return Ok(if *v != 0 { a } else { b }) }
     let flags = operand::<u8>(c);
     let valid = c.valid();
-    let first: Vec<u8> = (0..n).map(|i| (flags.at(i) != 0 && valid.map_or(true, |m| m[i] != 0)) as u8).collect();
+    let first: Vec<u8> = (0..n).map(|i| (flags.at(i) != 0 && valid.is_none_or(|m| m[i] != 0)) as u8).collect();
     choose(&first, &a, &b, n)
 }
 

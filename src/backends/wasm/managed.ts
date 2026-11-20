@@ -76,6 +76,16 @@ export function classify(error: unknown, limit: number, refused: boolean): Zamda
   return new EngineCrashError(`The engine stopped with an unexpected failure and was replaced (${what})`);
 }
 
+// wasm32 addresses 4 GiB; the engine takes the limit as a 32-bit size, so a larger number would wrap.
+const MAX_LIMIT = 2 ** 32 - 1;
+
+function checkLimit(what: string, bytes: number): void {
+  // Purpose: refuse a byte limit the engine cannot hold, instead of letting it wrap to a small one
+  if (!Number.isInteger(bytes) || bytes < 0 || bytes > MAX_LIMIT) {
+    throw new PlanError(`${what} must be an integer from 0 (no limit) to ${MAX_LIMIT} bytes, got ${bytes}`);
+  }
+}
+
 export function inThreadLink(load: () => Promise<EngineRunHost>): EngineLink {
   // Purpose: a link to an engine loaded in this thread
   let host: EngineRunHost | null = null;
@@ -243,6 +253,16 @@ export class ManagedTable<F extends Fields = Fields> implements Table<F> {
     // Purpose: free the table in the engine
     return this.backend.disposeTable(this);
   }
+
+  [Symbol.asyncDispose](): Promise<void> {
+    // Purpose: `await using t = await engine.load(...)` frees the table at the end of the block
+    return this.dispose();
+  }
+
+  [Symbol.dispose](): void {
+    // Purpose: `using t = ...` starts freeing the table at the end of the block (the engine frees it shortly after)
+    void this.dispose();
+  }
 }
 
 export interface ManagedBackend extends Backend {
@@ -266,7 +286,7 @@ export interface ManagedBackend extends Backend {
 export async function createManagedBackend(link: EngineLink, options: { memoryLimitBytes?: number } = {}): Promise<ManagedBackend> {
   // Purpose: start an engine behind a link and wrap it in the failure model above
   let limit = options.memoryLimitBytes ?? 0;
-  if (!Number.isInteger(limit) || limit < 0) throw new PlanError(`memoryLimitBytes must be a non-negative integer, got ${limit}`);
+  checkLimit('memoryLimitBytes', limit);
   await link.start(limit);
   let generation = 0;
   let replacements = 0;
@@ -408,7 +428,7 @@ export async function createManagedBackend(link: EngineLink, options: { memoryLi
     stats: () => call(() => link.stats()),
     async setMemoryLimit(bytes) {
       // Purpose: change the byte limit (0 removes it); a replacement module gets the new limit too
-      if (!Number.isInteger(bytes) || bytes < 0) throw new PlanError(`The memory limit must be a non-negative integer, got ${bytes}`);
+      checkLimit('The memory limit', bytes);
       limit = bytes;
       await call(() => link.setMemoryLimit(bytes));
     },

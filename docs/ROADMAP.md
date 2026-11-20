@@ -9,7 +9,7 @@ are TypeScript only and produce a usable library on their own.
                                         +--fail--> stop at 2; zamda is a JS library
 ```
 
-**Current position:** Milestone 2. Chunked execution (T-201), `latest()` (T-202), live tables (T-204) and the dataset script (T-205) are done. The dashboard (T-206) is built and measured by the owner on real data in Chromium: 109 to 123 ms per interaction, inside the 200 ms target (T-217). The benchmark harness (T-207) is done and the WASM spike (S-301) met its gate on the owner's machine (D-054): 3.4x to 4.2x at 1M rows with loading included. The dashboard on the spike's kernels runs in 17 ms per interaction in Chrome and Firefox against the 50 ms target (D-057). Milestone 3 is broken into tasks T-401 to T-413 in `docs/TASKS.md`.
+**Current position:** Milestones 1 and 3 are done; Milestone 2 is done except the npm alpha (T-209, blocked on npm auth). The general WASM engine meets the 50 ms dashboard target on the owner's machine (D-069, D-070) with no JS fallbacks, and `zamda/wasm` is the public entry (D-089). Since then: Substrait (T-501), keyed live tables (T-502), joins and windows on the JS backend (T-503), and the AS-graph demo work (T-504 to T-513), none of which is in spec v4.
 
 ## Milestones
 

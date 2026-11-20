@@ -62,7 +62,7 @@ pub(crate) fn set_error(code: u32, what: u32, ty: u32) -> u32 {
 
 fn plan_error(e: Error) -> u32 {
     // Purpose: remember a decoding or validation error (codes below 200, the position in the second field)
-    set_error(e.code as u32, e.at as u32, 0)
+    set_error(e.code as u32, e.at, 0)
 }
 
 pub(crate) fn eval_error(e: &EvalError) -> u32 {

@@ -113,7 +113,7 @@ fn field_of_ms(ms: i64, unit: Unit) -> i64 {
 pub fn date_op<'a>(func: &str, unit: Unit, ty: Type, x: &Vector<'a>, n: usize) -> Result<Vector<'a>, EvalError> {
     // Purpose: `date_trunc` (result of the input's type) or `extract` (int32) over n rows; a null row stays null and holds 0
     let (values, valid) = x.clone().into_columns(n);
-    let valid_at = |i: usize| valid.as_ref().map_or(true, |v| v[i] != 0);
+    let valid_at = |i: usize| valid.as_ref().is_none_or(|v| v[i] != 0);
     let out = match (x.ty, values, func) {
         (Type::Date32, Values::I32(v), "date_trunc") => {
             Values::I32(Cow::Owned((0..n).map(|i| if valid_at(i) { truncate_days(v[i] as i64, unit) as i32 } else { 0 }).collect()))

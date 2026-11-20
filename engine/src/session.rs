@@ -218,6 +218,12 @@ pub fn has_field(e: &Expr) -> bool {
     }
 }
 
+impl Default for Session {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Session {
     // Purpose: an empty cache
     pub fn new() -> Self {
