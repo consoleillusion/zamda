@@ -26,7 +26,7 @@
     },
     {
       title: 'Physical route confidence',
-      body: 'Three layers, three levels of evidence. Thin coloured lines join a BGP next hop to the RIS collector that saw it: UPDATE hops are observed; RIB routes use the originating AS’s RIS peer address as an inferred next hop. Thick amber lines are an inferred physical route: both IP endpoints are geolocated with DB-IP, then the shortest path over public submarine cable geometry is drawn between their nearest landings. Faint grey lines are the cables themselves. BGP did not observe the cable path, and no layer shows the fibre a packet actually took. IP locations: DB-IP (CC BY 4.0) and operator geofeeds.',
+      body: 'Three layers, three levels of evidence. Thin coloured lines join a BGP next hop to the RIS collector that saw it: UPDATE hops are observed; RIB routes use the originating AS’s RIS peer address as an inferred next hop. Thick amber lines are an inferred physical route: the origin prefix and its BGP next hop are geolocated with DB-IP, then the shortest path over public submarine cable geometry is drawn between their nearest landings. Faint grey lines are the cables themselves. BGP did not observe the cable path, and no layer shows the fibre a packet actually took. IP locations: DB-IP (CC BY 4.0) and operator geofeeds.',
     },
     {
       title: 'A focused network or country',

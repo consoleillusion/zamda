@@ -6,8 +6,8 @@
 //                           prefix, in time order: the replay
 //   data/globe-ips.zcl      every BGP-speaking IP observed in those updates and in the RIS peer index,
 //                           geolocated by DB-IP (operator geofeeds as fallback)
-//   data/globe-ip-routes.zcl  observed announcements aggregated by origin, peer and next hop, with a
-//                           physical path snapped to the public cable graph where one can be inferred
+//   data/globe-ip-routes.zcl  observed announcements aggregated by origin prefix, next hop and collector,
+//                           with a physical path snapped to the public cable graph where inferable
 //   data/globe-as-ips.zcl   geolocated address blocks per AS, from RIB prefixes and operator geofeeds
 //
 //   bun run prep:globe                     60 minutes of updates after the routes dump
@@ -845,6 +845,21 @@ const routeCount = routeRows.length;
 // are dead weight in the file, so rebuild the list from what the final rows actually use.
 const usedPaths = [...new Set(routeRows.map(row => row.path))];
 const usedPathCode = new Map(usedPaths.map((path, i) => [path, i]));
+function routeOrigin(row: RouteObservation): GeoPoint {
+  // Purpose: the geolocated origin prefix, falling back to the AS registry position
+  const key = row.prefixKeys.values().next().value as string | undefined;
+  const addr = ipNumber(key?.split('/')[0]);
+  const at = addr === null ? null : (locateDbip(addr) ?? locateGeofeed(addr));
+  if (at !== null) return at;
+  const i = asIndex.get(row.originAs);
+  if (i === undefined) return { lon: 0, lat: 0, city: '', country: '' };
+  return {
+    lon: as.lon[i]!,
+    lat: as.lat[i]!,
+    city: '',
+    country: as.cc[i] === NONE ? '' : (countries[as.cc[i]!] ?? ''),
+  };
+}
 const ipRouteColumns = {
   origin_as: new Uint32Array(routeCount),
   peer_as: new Uint32Array(routeCount),
@@ -855,6 +870,10 @@ const ipRouteColumns = {
   prefixes: new Uint32Array(routeCount),
   pathCode: new Uint32Array(routeCount),
   physicalPathCode: new Uint32Array(routeCount),
+  origin_cityCode: new Uint32Array(routeCount),
+  origin_countryCode: new Uint8Array(routeCount),
+  origin_lon: new Float32Array(routeCount),
+  origin_lat: new Float32Array(routeCount),
   count: new Uint32Array(routeCount),
   first: new Uint32Array(routeCount),
   last: new Uint32Array(routeCount),
@@ -868,9 +887,13 @@ routeRows.forEach((row, i) => {
   ipRouteColumns.sourceCode[i] = row.source;
   ipRouteColumns.prefixes[i] = row.prefixKeys.size;
   ipRouteColumns.pathCode[i] = usedPathCode.get(row.path)!;
-  const source = locateGeofeed(row.nextHop) ?? ipPositions.get(row.nextHop);
-  const destination = ipPositions.get(row.localIp);
-  ipRouteColumns.physicalPathCode[i] = source !== undefined && destination !== undefined ? physicalPathCode(source, destination) : 0;
+  const origin = routeOrigin(row);
+  const nextHop = locateGeofeed(row.nextHop) ?? ipPositions.get(row.nextHop);
+  ipRouteColumns.physicalPathCode[i] = nextHop !== undefined ? physicalPathCode(origin, nextHop) : 0;
+  ipRouteColumns.origin_cityCode[i] = cityCode(origin.city);
+  ipRouteColumns.origin_countryCode[i] = countryCodeOf.get(origin.country) ?? NONE;
+  ipRouteColumns.origin_lon[i] = origin.lon;
+  ipRouteColumns.origin_lat[i] = origin.lat;
   ipRouteColumns.count[i] = row.count;
   ipRouteColumns.first[i] = row.first;
   ipRouteColumns.last[i] = row.last;
@@ -880,8 +903,8 @@ await writeFile(
   encodeColumns({
     rows: routeCount,
     columns: ipRouteColumns,
-    lists: { paths: usedPaths, physicalPaths, routeSources: ['RIS UPDATE header', 'RIB prefix with RIS peer next hop'] },
-    meta: { rrc, start, minutes, source: 'RIS MRT BGP4MP updates and RIB prefixes, aggregated by origin, peer and next hop; physical paths inferred from the public cable graph' },
+    lists: { paths: usedPaths, physicalPaths, routeSources: ['RIS UPDATE header', 'RIB prefix with RIS peer next hop'], cities: cityList, countries },
+    meta: { rrc, start, minutes, source: 'RIS MRT BGP4MP updates and RIB prefixes, aggregated by geolocated origin prefix, next hop and collector; physical paths inferred from the public cable graph' },
   }),
 );
 console.log(`wrote globe-ip-routes.zcl: ${routeCount.toLocaleString()} paths, ${physicalPaths.length - 1} distinct physical cable paths`);

@@ -350,7 +350,16 @@ export class Model {
     const key = this.routeKey(originAs, peerAs, peerIp, localIp, nextHop);
     let row = this.observedRouteIndex.get(key);
     if (row === undefined) {
-      row = { originAs, peerAs, peerIp, localIp, nextHop, prefixes, source: 'live RIS Live update', path, physicalPath: null, count: 0, first: second, last: second };
+      const at = this.networks?.index.get(originAs);
+      const code = at === undefined || this.networks!.cc[at] === NONE ? '' : (this.networks!.countries[this.networks!.cc[at]!] ?? '');
+      row = {
+        originAs, peerAs, peerIp, localIp, nextHop, prefixes,
+        source: 'live RIS Live update', path,
+        originLon: at === undefined ? NaN : this.networks!.lon[at]!,
+        originLat: at === undefined ? NaN : this.networks!.lat[at]!,
+        originCity: '', originCountry: code,
+        physicalPath: null, count: 0, first: second, last: second,
+      };
       this.observedRouteIndex.set(key, row);
     }
     row.count++;

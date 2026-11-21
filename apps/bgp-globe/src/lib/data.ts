@@ -91,6 +91,11 @@ export interface ObservedRoute {
   readonly prefixes: number;
   readonly source: string;
   readonly path: string;
+  // The origin prefix's own location, so a focus starts at the selected AS's IP space.
+  readonly originLon: number;
+  readonly originLat: number;
+  readonly originCity: string;
+  readonly originCountry: string;
   // Inferred path over the public cable graph, from geolocated next hop to collector.
   readonly physicalPath: [number, number][] | null;
   readonly count: number;
@@ -202,6 +207,8 @@ function observedRoutes(file: ColumnsFile | null): ObservedRoute[] {
   const c = file.columns;
   const paths = file.lists.paths ?? [];
   const sources = file.lists.routeSources ?? [];
+  const cities = file.lists.cities ?? [];
+  const countries = file.lists.countries ?? [];
   const physical = (file.lists.physicalPaths ?? []).map(text => text === '' ? null : text.split(';').map(pair => {
     const [lon, lat] = pair.split(',');
     return [Number(lon), Number(lat)] as [number, number];
@@ -217,6 +224,10 @@ function observedRoutes(file: ColumnsFile | null): ObservedRoute[] {
       prefixes: Number(c.prefixes![i]),
       source: sources[Number(c.sourceCode?.[i] ?? 0)] ?? 'observed route',
       path: paths[Number(c.pathCode![i])] ?? '',
+      originLon: Number(c.origin_lon?.[i] ?? NaN),
+      originLat: Number(c.origin_lat?.[i] ?? NaN),
+      originCity: cities[Number(c.origin_cityCode?.[i] ?? 0)] ?? '',
+      originCountry: countries[Number(c.origin_countryCode?.[i] ?? NONE)] ?? '',
       physicalPath: physical[Number(c.physicalPathCode?.[i] ?? 0)] ?? null,
       count: Number(c.count![i]),
       first: Number(c.first![i]),

@@ -313,6 +313,9 @@
     source: string;
     asPath: string;
     routerDetail: string;
+    origin: [number, number];
+    nextHopPoint: [number, number];
+    collector: [number, number];
     physicalPath: [number, number][] | null;
   };
   type AsIpDraw = AsIpPoint & { pos: [number, number] };
@@ -382,16 +385,19 @@
     let maxIp = 1;
     for (const ip of ips) maxIp = Math.max(maxIp, ip.count);
 
-    // Operator-published geofeed points for the selected ASes: their own address space, at city level.
+    // Geolocated address blocks for the selected ASes: their own IP space, at city level.
     const asIps = hasSelection ? model.asIps.filter(point => model.matchesSelection(point.asn)) : [];
 
-    type Group = { from: [number, number]; to: [number, number]; originAs: number; peerAs: number; nextHop: number; peerIp: number; localIp: number; count: number; prefixes: number; source: string; path: string; routerDetail: string; physicalPath: [number, number][] | null };
+    type Group = RouteDraw & { originLabel: string };
     const groups = new Map<string, Group>();
     for (const route of selectedRoutes) {
-      const from = allIpIndex.get(route.nextHop)?.pos ?? position(route.peerAs);
-      const to = allIpIndex.get(route.localIp)?.pos ?? position(route.peerAs);
-      if (from === null || to === null || from === undefined || to === undefined) continue;
-      const key = `${from[0].toFixed(2)},${from[1].toFixed(2)}>${to[0].toFixed(2)},${to[1].toFixed(2)}`;
+      const origin: [number, number] | null = Number.isFinite(route.originLon) && Number.isFinite(route.originLat)
+        ? [route.originLon, route.originLat]
+        : position(route.originAs);
+      const nextHopPoint = allIpIndex.get(route.nextHop)?.pos ?? position(route.peerAs);
+      const collector = allIpIndex.get(route.localIp)?.pos ?? position(route.peerAs);
+      if (origin === null || nextHopPoint === null || nextHopPoint === undefined || collector === null || collector === undefined) continue;
+      const key = `${origin[0].toFixed(2)},${origin[1].toFixed(2)}>${nextHopPoint[0].toFixed(2)},${nextHopPoint[1].toFixed(2)}>${collector[0].toFixed(2)},${collector[1].toFixed(2)}`;
       let group = groups.get(key);
       if (group === undefined) {
         const next = allIpIndex.get(route.nextHop);
@@ -399,8 +405,13 @@
         const geo = (ip: IpDraw | undefined) => ip === undefined
           ? 'no location'
           : `${[ip.country, ip.city].filter(Boolean).join(' · ') || (ip.precision === 1 ? 'country-level fix' : 'unknown')} · ${ip.lat.toFixed(2)}, ${ip.lon.toFixed(2)}`;
-        const routerDetail = `${ipText(route.nextHop)} next hop ${geo(next)} · ${ipText(route.localIp)} collector ${geo(local)}`;
-        group = { from, to, originAs: route.originAs, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp, count: 0, prefixes: 0, source: route.source, path: route.path, routerDetail, physicalPath: route.physicalPath };
+        const originLabel = `${[route.originCountry, route.originCity].filter(Boolean).join(' · ') || 'origin prefix'} · ${route.originLat.toFixed(2)}, ${route.originLon.toFixed(2)}`;
+        const routerDetail = `${originLabel} origin prefix → ${ipText(route.nextHop)} next hop ${geo(next)} → ${ipText(route.localIp)} collector ${geo(local)}`;
+        group = {
+          path: [], originAs: route.originAs, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp,
+          count: 0, prefixes: 0, source: route.source, asPath: route.path, routerDetail,
+          origin, nextHopPoint, collector, physicalPath: route.physicalPath, originLabel,
+        };
         groups.set(key, group);
       }
       group.count += route.count;
@@ -411,18 +422,8 @@
       .sort((a, b) => b.count - a.count)
       .slice(0, 1200)
       .map(group => ({
-        path: arcPath(group.from, group.to, model.projection === 'globe' ? 0.03 : 0),
-        originAs: group.originAs,
-        peerAs: group.peerAs,
-        nextHop: group.nextHop,
-        peerIp: group.peerIp,
-        localIp: group.localIp,
-        count: group.count,
-        prefixes: group.prefixes,
-        source: group.source,
-        asPath: group.path,
-        routerDetail: group.routerDetail,
-        physicalPath: group.physicalPath,
+        ...group,
+        path: surfacePath([group.origin, group.nextHopPoint, group.collector], model.projection === 'globe' ? 0.03 : 0),
       }));
     let maxRoute = 1;
     for (const route of routePaths) maxRoute = Math.max(maxRoute, route.count);
@@ -736,7 +737,7 @@
           ${route.routerDetail}<br>
           ${route.source}<br>
           ${route.prefixes.toLocaleString('en')} prefix(es) · ${route.count.toLocaleString('en')} observations merged<br>
-          <span class="muted">Cable path is the shortest route over public cable geometry between the nearest landings. BGP did not observe this cable path.</span>`,
+          <span class="muted">Cable path is the shortest route over public cable geometry between the origin prefix and next-hop landings. BGP did not observe this cable path.</span>`,
       };
     }
     if (info.layer.id === 'advertised-routes') {
@@ -746,7 +747,7 @@
         html: `<b>AS${route.originAs}</b> ${nameOf(route.originAs)} advertises <b>${route.prefixes.toLocaleString('en')}</b> prefix(es)<br>
           ${route.source} · ${route.count.toLocaleString('en')} observations merged<br>
           ${model.pathDetail === 'ips-geoip' ? `${route.routerDetail}<br>` : ''}
-          <span class="mono">${route.asPath || 'path unavailable'}</span><br><span class="muted">BGP next hop to collector, not a fibre route. Width grows logarithmically with the merged count.</span>`,
+          <span class="mono">${route.asPath || 'path unavailable'}</span><br><span class="muted">Origin prefix → BGP next hop → collector, not a fibre route. Width grows logarithmically with the merged count.</span>`,
       };
     }
     if (info.layer.id === 'origins') {

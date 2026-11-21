@@ -112,7 +112,7 @@
     <h2>Physical route layers</h2>
     <div class="legend">
       <div><i class="sw solid"></i><span><b>BGP next hop</b> — observed UPDATE hop, or a RIB prefix with its AS's RIS peer address as next hop.</span></div>
-      <div><i class="sw dashed"></i><span><b>Inferred physical route</b> — shortest path over public cables between the geolocated next hop and collector. BGP did not observe the cable path.</span></div>
+      <div><i class="sw dashed"></i><span><b>Inferred physical route</b> — shortest path over public cables between the geolocated origin prefix and its BGP next hop. BGP did not observe the cable path.</span></div>
       <div><i class="sw cable"></i><span><b>Submarine cables</b> — background geometry only, never a claim that traffic uses that cable.</span></div>
     </div>
     <p class="muted hint">IP locations: <a href="https://db-ip.com" target="_blank" rel="noreferrer">DB-IP</a> (CC BY 4.0) and operator geofeeds.</p>
