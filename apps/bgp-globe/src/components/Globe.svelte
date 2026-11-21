@@ -162,7 +162,7 @@
     const b = v(to);
     const dot = Math.max(-1, Math.min(1, a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!));
     const omega = Math.acos(dot);
-    const steps = Math.max(4, Math.ceil(omega * 24));
+    const steps = Math.max(4, Math.ceil(omega * 12));
     const out: [number, number, number][] = [];
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
@@ -210,6 +210,15 @@
     paths: { path: [number, number, number][]; arc: ArcDraw }[];
   } = { arcs: [], maxArc: 1, origins: [], maxOrigin: 1, maxCountry: 1, routeMax: 1, moasArcs: [], paths: [] };
 
+  // Deck.gl reuses layer instances cheaply; rebuilding them every pulse frame re-uploads the terrain and
+  // country textures. Keep every layer that does not animate in one cache, keyed by its inputs.
+  let staticLayers: { deps: unknown[]; layers: unknown[] } | null = null;
+
+  function sameDeps(a: readonly unknown[], b: readonly unknown[]): boolean {
+    // Purpose: compare layer inputs by identity, so a new object every frame still invalidates the cache.
+    return a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
+  }
+
   function rebuild(): void {
     // Purpose: positions and scales for the latest results
     const arcs = model.arcs.map(a => ({ ...a, from: position(a.peer), to: position(a.origin) })).filter(a => a.from !== null && a.to !== null);
@@ -227,129 +236,159 @@
     for (const v of model.countryActivity.values()) maxCountry = Math.max(maxCountry, v.updates);
     let routeMax = 1;
     for (const v of model.routeCountries.values()) routeMax = Math.max(routeMax, v.routes);
-    // The globe gets the strongest 700 arcs, kept low, so the land stays readable underneath.
-    const paths = model.projection === 'globe' ? arcs.slice(0, 700).map(arc => ({ path: arcPath(arc.from!, arc.to!, 0.07), arc })) : [];
+    // The globe gets the strongest 400 arcs; fewer, shorter paths keep the 3D render cheap and the land readable.
+    const paths = model.projection === 'globe' ? arcs.slice(0, 400).map(arc => ({ path: arcPath(arc.from!, arc.to!, 0.07), arc })) : [];
     drawn = { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths };
   }
 
   function layers(): unknown[] {
-    // Purpose: every layer, from the model's latest results
+    // Purpose: every layer, with the static ones cached so pulse frames do not re-upload the whole globe.
     const globe = model.projection === 'globe';
-    const { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths } = drawn;
-    const selected = model.country;
+    const deps = [globe, light, model.country, model.countryActivity, model.routeCountries, model.selectedMoas, drawn, countriesGeo];
+    if (staticLayers === null || !sameDeps(staticLayers.deps, deps)) {
+      const { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths } = drawn;
+      const selected = model.country;
+      staticLayers = {
+        deps,
+        layers: [
+          // The globe surface is always drawn first, so tiles and data never reveal a grey sphere.
+          new SolidPolygonLayer({
+            id: 'globe-surface',
+            data: [[[-180, 90], [0, 90], [180, 90], [180, -90], [0, -90], [-180, -90]]],
+            getPolygon: (d: unknown) => d as [number, number][],
+            stroked: false,
+            filled: true,
+            getFillColor: light ? LIGHT_OCEAN : DARK_OCEAN,
+          }),
+          globe &&
+            new TileLayer({
+              id: 'terrain-shade',
+              data: '/terrain/{z}/{x}/{y}.png',
+              fetch: terrainTextureFetch as never,
+              minZoom: 1,
+              maxZoom: 3,
+              tileSize: 256,
+              renderSubLayers: (props: unknown) => {
+                const { id, data, tile } = props as {
+                  id: string;
+                  data: HTMLCanvasElement | null;
+                  tile: { bbox: { west: number; south: number; east: number; north: number } };
+                };
+                return data === null ? null : new BitmapLayer({
+                  id: `${id}-shade`,
+                  image: data,
+                  bounds: [tile.bbox.west, tile.bbox.south, tile.bbox.east, tile.bbox.north],
+                  pickable: false,
+                  parameters: {
+                    blend: true,
+                    blendColorOperation: 'add',
+                    blendColorSrcFactor: 'dst',
+                    blendColorDstFactor: 'zero',
+                    blendAlphaOperation: 'add',
+                    blendAlphaSrcFactor: 'one',
+                    blendAlphaDstFactor: 'zero',
+                    depthTest: false,
+                  },
+                });
+              },
+            }),
+          new PathLayer({ id: 'graticule', data: graticule, getPath: (d: unknown) => d as [number, number][], getColor: light ? [0, 0, 0, 26] : [255, 255, 255, 22], widthMinPixels: 1, parameters: { depthTest: false } }),
+          countriesGeo &&
+            new GeoJsonLayer({
+              id: 'countries',
+              data: countriesGeo as never,
+              pickable: true,
+              stroked: true,
+              filled: true,
+              lineWidthMinPixels: 0.6,
+              getLineColor: (f: { properties: { iso: string } }) => selected !== null && model.countryIndex.get(f.properties.iso) === selected
+                ? (light ? [20, 20, 20, 220] : [255, 255, 255, 220])
+                : (light ? [0, 0, 0, 70] : [255, 255, 255, 55]),
+              getFillColor: (f: { properties: { iso: string } }) => {
+                const v = countryValue(f.properties.iso);
+                if (v !== null) {
+                  const [r, g, b] = ramp(Math.log1p(v.value) / Math.log1p(maxCountry));
+                  return [r, g, b, 130];
+                }
+                const code = model.countryIndex.get(f.properties.iso);
+                const routes = code === undefined ? 0 : (model.routeCountries.get(code)?.routes ?? 0);
+                const [r, g, b] = ramp(0.25 * (Math.log1p(routes) / Math.log1p(routeMax)));
+                return [r, g, b, 120];
+              },
+              updateTriggers: { getFillColor: [model.countryActivity, model.routeCountries, light], getLineColor: [selected, light] },
+              transitions: { getFillColor: 350 },
+              // Paint the data ramp over the relief texture instead of hiding behind it.
+              parameters: { depthTest: false },
+            }),
+          globe &&
+            new PathLayer({
+              id: 'arcs',
+              data: paths,
+              pickable: true,
+              getPath: (d: { path: [number, number, number][] }) => d.path,
+              getColor: (d: { arc: ArcDraw }) => [...mix(d.arc.withdraws / d.arc.updates), 30 + Math.round(150 * Math.sqrt(d.arc.updates / maxArc))] as [number, number, number, number],
+              getWidth: (d: { arc: ArcDraw }) => 0.5 + 2.5 * Math.sqrt(d.arc.updates / maxArc),
+              widthUnits: 'pixels',
+              capRounded: false,
+              wrapLongitude: false,
+              updateTriggers: { getColor: [paths, light], getWidth: [maxArc] },
+            }),
+          !globe && new ArcLayer({
+            id: 'arcs',
+            data: arcs,
+            pickable: true,
+            greatCircle: true,
+            getSourcePosition: (d: ArcDraw) => d.from!,
+            getTargetPosition: (d: ArcDraw) => d.to!,
+            getSourceColor: (d: ArcDraw) => [...mix(d.withdraws / d.updates), 40] as [number, number, number, number],
+            getTargetColor: (d: ArcDraw) => [...mix(d.withdraws / d.updates), 220] as [number, number, number, number],
+            getWidth: (d: ArcDraw) => 0.6 + 3.4 * Math.sqrt(d.updates / maxArc),
+            getHeight: 0.35,
+            widthUnits: 'pixels',
+            updateTriggers: { getSourceColor: [arcs, light], getWidth: [maxArc] },
+          }),
+          new ScatterplotLayer({
+            id: 'origins',
+            data: origins,
+            pickable: true,
+            radiusUnits: 'pixels',
+            getPosition: (d: OriginLike) => position(d.asn)!,
+            getRadius: (d: OriginLike) => 1.5 + 16 * Math.sqrt(d.updates / maxOrigin),
+            getFillColor: (d: OriginLike) => [...mix(d.withdraws / Math.max(1, d.updates)), 150] as [number, number, number, number],
+            getLineColor: light ? [20, 20, 20, 110] : [255, 255, 255, 120],
+            lineWidthMinPixels: 0.5,
+            stroked: true,
+            updateTriggers: { getRadius: [maxOrigin], getFillColor: [origins, light] },
+            transitions: { getRadius: 250 },
+            parameters: { depthTest: false },
+          }),
+          globe &&
+            new PathLayer({
+              id: 'moas',
+              data: moasArcs.map(m => arcPath(m.from, m.to, 0.12)),
+              getPath: (d: [number, number, number][]) => d,
+              wrapLongitude: false,
+              getColor: light ? [139, 101, 4, 255] : [255, 170, 60, 255],
+              getWidth: 3,
+              widthUnits: 'pixels',
+            }),
+          !globe && new ArcLayer({
+            id: 'moas',
+            data: moasArcs,
+            greatCircle: true,
+            getSourcePosition: (d: { from: [number, number] }) => d.from,
+            getTargetPosition: (d: { to: [number, number] }) => d.to,
+            getSourceColor: light ? [139, 101, 4, 255] : [255, 200, 60, 255],
+            getTargetColor: light ? [183, 28, 76, 255] : [255, 70, 70, 255],
+            getWidth: 3,
+            getHeight: 0.6,
+          }),
+        ].filter(Boolean),
+      };
+    }
     const t = now;
     return [
-      // The globe surface is always drawn first, so tiles and data never reveal a grey sphere.
-      new SolidPolygonLayer({
-        id: 'globe-surface',
-        data: [[[-180, 90], [0, 90], [180, 90], [180, -90], [0, -90], [-180, -90]]],
-        getPolygon: (d: unknown) => d as [number, number][],
-        stroked: false,
-        filled: true,
-        getFillColor: light ? LIGHT_OCEAN : DARK_OCEAN,
-      }),
-      globe &&
-        new TileLayer({
-          id: 'terrain-shade',
-          data: '/terrain/{z}/{x}/{y}.png',
-          fetch: terrainTextureFetch as never,
-          minZoom: 1,
-          maxZoom: 3,
-          tileSize: 256,
-          renderSubLayers: (props: unknown) => {
-            const { id, data, tile } = props as {
-              id: string;
-              data: HTMLCanvasElement | null;
-              tile: { bbox: { west: number; south: number; east: number; north: number } };
-            };
-            return data === null ? null : new BitmapLayer({
-              id: `${id}-shade`,
-              image: data,
-              bounds: [tile.bbox.west, tile.bbox.south, tile.bbox.east, tile.bbox.north],
-              pickable: false,
-              parameters: {
-                blend: true,
-                blendColorOperation: 'add',
-                blendColorSrcFactor: 'dst',
-                blendColorDstFactor: 'zero',
-                blendAlphaOperation: 'add',
-                blendAlphaSrcFactor: 'one',
-                blendAlphaDstFactor: 'zero',
-                depthTest: false,
-              },
-            });
-          },
-        }),
-      new PathLayer({ id: 'graticule', data: graticule, getPath: (d: unknown) => d as [number, number][], getColor: light ? [0, 0, 0, 26] : [255, 255, 255, 22], widthMinPixels: 1, parameters: { depthTest: false } }),
-      countriesGeo &&
-        new GeoJsonLayer({
-          id: 'countries',
-          data: countriesGeo as never,
-          pickable: true,
-          stroked: true,
-          filled: true,
-          lineWidthMinPixels: 0.6,
-          getLineColor: (f: { properties: { iso: string } }) => selected !== null && model.countryIndex.get(f.properties.iso) === selected
-            ? (light ? [20, 20, 20, 220] : [255, 255, 255, 220])
-            : (light ? [0, 0, 0, 70] : [255, 255, 255, 55]),
-          getFillColor: (f: { properties: { iso: string } }) => {
-            const v = countryValue(f.properties.iso);
-            if (v !== null) {
-              const [r, g, b] = ramp(Math.log1p(v.value) / Math.log1p(maxCountry));
-              return [r, g, b, 130];
-            }
-            const code = model.countryIndex.get(f.properties.iso);
-            const routes = code === undefined ? 0 : (model.routeCountries.get(code)?.routes ?? 0);
-            const [r, g, b] = ramp(0.25 * (Math.log1p(routes) / Math.log1p(routeMax)));
-            return [r, g, b, 120];
-          },
-          updateTriggers: { getFillColor: [model.countryActivity, model.routeCountries, light], getLineColor: [selected, light] },
-          transitions: { getFillColor: 350 },
-          // Paint the data ramp over the relief texture instead of hiding behind it.
-          parameters: { depthTest: false },
-        }),
-      globe &&
-        new PathLayer({
-          id: 'arcs',
-          data: paths,
-          pickable: true,
-          getPath: (d: { path: [number, number, number][] }) => d.path,
-          getColor: (d: { arc: ArcDraw }) => [...mix(d.arc.withdraws / d.arc.updates), 30 + Math.round(150 * Math.sqrt(d.arc.updates / maxArc))] as [number, number, number, number],
-          getWidth: (d: { arc: ArcDraw }) => 0.5 + 2.5 * Math.sqrt(d.arc.updates / maxArc),
-          widthUnits: 'pixels',
-          capRounded: true,
-          wrapLongitude: false,
-          updateTriggers: { getColor: [paths, light], getWidth: [maxArc] },
-        }),
-      !globe && new ArcLayer({
-        id: 'arcs',
-        data: arcs,
-        pickable: true,
-        greatCircle: true,
-        getSourcePosition: (d: ArcDraw) => d.from!,
-        getTargetPosition: (d: ArcDraw) => d.to!,
-        getSourceColor: (d: ArcDraw) => [...mix(d.withdraws / d.updates), 40] as [number, number, number, number],
-        getTargetColor: (d: ArcDraw) => [...mix(d.withdraws / d.updates), 220] as [number, number, number, number],
-        getWidth: (d: ArcDraw) => 0.6 + 3.4 * Math.sqrt(d.updates / maxArc),
-        getHeight: 0.35,
-        widthUnits: 'pixels',
-        updateTriggers: { getSourceColor: [arcs, light], getWidth: [maxArc] },
-      }),
-      new ScatterplotLayer({
-        id: 'origins',
-        data: origins,
-        pickable: true,
-        radiusUnits: 'pixels',
-        getPosition: (d: OriginLike) => position(d.asn)!,
-        getRadius: (d: OriginLike) => 1.5 + 16 * Math.sqrt(d.updates / maxOrigin),
-        getFillColor: (d: OriginLike) => [...mix(d.withdraws / Math.max(1, d.updates)), 150] as [number, number, number, number],
-        getLineColor: light ? [20, 20, 20, 110] : [255, 255, 255, 120],
-        lineWidthMinPixels: 0.5,
-        stroked: true,
-        updateTriggers: { getRadius: [maxOrigin], getFillColor: [origins, light] },
-        transitions: { getRadius: 250 },
-        parameters: { depthTest: false },
-      }),
+      ...staticLayers.layers,
       new ScatterplotLayer({
         id: 'pulses',
         data: model.pulses,
@@ -364,28 +403,7 @@
         updateTriggers: { getRadius: [t], getFillColor: [t, light] },
         parameters: { depthTest: false },
       }),
-      globe &&
-        new PathLayer({
-          id: 'moas',
-          data: moasArcs.map(m => arcPath(m.from, m.to, 0.12)),
-          getPath: (d: [number, number, number][]) => d,
-          wrapLongitude: false,
-          getColor: light ? [139, 101, 4, 255] : [255, 170, 60, 255],
-          getWidth: 3,
-          widthUnits: 'pixels',
-        }),
-      !globe && new ArcLayer({
-        id: 'moas',
-        data: moasArcs,
-        greatCircle: true,
-        getSourcePosition: (d: { from: [number, number] }) => d.from,
-        getTargetPosition: (d: { to: [number, number] }) => d.to,
-        getSourceColor: light ? [139, 101, 4, 255] : [255, 200, 60, 255],
-        getTargetColor: light ? [183, 28, 76, 255] : [255, 70, 70, 255],
-        getWidth: 3,
-        getHeight: 0.6,
-      }),
-    ].filter(Boolean);
+    ];
   }
 
   type OriginLike = { asn: number; updates: number; withdraws: number; prefixes: number };
@@ -482,13 +500,18 @@
     });
     // Optional slow rotation while nobody touches the globe; off by default, and it stops for 8 s after any interaction.
     let raf = 0;
+    let lastPulseFrame = 0;
     const spin = (time: number) => {
       now = performance.now();
       if (model.autoRotate && model.projection === 'globe' && time - lastInteraction > 8000 && !(viewState as { transitionDuration?: number }).transitionDuration) {
         viewState = { ...viewState, longitude: ((Number(viewState.longitude) + 0.025 + 180) % 360) - 180 };
         deck?.setProps({ viewState: viewState as never });
       }
-      if (model.pulses.length > 0) apply();
+      // Pulse animation needs redraws, but cap them so a busy globe does not starve engine replies.
+      if (model.pulses.length > 0 && time - lastPulseFrame > 50) {
+        lastPulseFrame = time;
+        apply();
+      }
       raf = requestAnimationFrame(spin);
     };
     raf = requestAnimationFrame(spin);
