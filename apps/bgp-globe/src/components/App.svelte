@@ -5,7 +5,6 @@
   import Globe from './Globe.svelte';
   import EnginePanel from './EnginePanel.svelte';
   import SidePanel from './SidePanel.svelte';
-  import Timeline from './Timeline.svelte';
   import Learn from './Learn.svelte';
   import { compact, utc } from '../lib/format';
 
@@ -80,10 +79,6 @@
           </div>
         </div>
         <div class="row">
-          <div class="seg" role="tablist" aria-label="Mode">
-            <button class:on={model.mode === 'replay'} onclick={() => model.setMode('replay')}>Replay an hour</button>
-            <button class:on={model.mode === 'live'} onclick={() => model.setMode('live')}><span class="dot" class:live={model.mode === 'live'}></span>Live</button>
-          </div>
           <div class="seg" aria-label="Projection">
             <button class:on={model.projection === 'globe'} onclick={() => (model.projection = 'globe')}>Globe</button>
             <button class:on={model.projection === 'mercator'} onclick={() => (model.projection = 'mercator')}>Mercator</button>
@@ -98,16 +93,13 @@
         </div>
         {#if model.routes}
           <p class="source muted">
-            {compact(model.routeTotals.routes)} routes from {model.routes.collector} (RIPE RIS) at {utc(model.routes.time)} ·
-            {compact(model.updates?.rows ?? 0)} updates recorded over the next {model.updates?.minutes} minutes
+            {compact(model.routeTotals.routes)} routes from {model.routes.collector} (RIPE RIS) at {utc(model.routes.time)}
           </p>
         {/if}
       </section>
       <EnginePanel {model} />
       <SidePanel {model} />
     </aside>
-
-    <Timeline {model} />
   </div>
 {:else if model.phase === 'loading'}
   <div class="loading">
@@ -155,9 +147,6 @@
   .tick:hover, .tick.on { color: var(--text); }
   .box { display: inline-grid; place-items: center; width: 14px; height: 14px; border: 1px solid var(--line-strong); border-radius: 0; background: var(--wash-1); color: var(--announce); font-size: 11px; line-height: 1; }
   .source { margin: 10px 0 0; font-size: 11.5px; }
-  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); margin-right: 6px; vertical-align: 1px; }
-  .dot.live { background: var(--withdraw); box-shadow: 0 0 0 0 var(--withdraw-pulse); animation: pulse 1.6s infinite; }
-  @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--withdraw-pulse); } 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
   .corner-controls { position: absolute; top: 0; left: 0; display: flex; gap: 6px; z-index: 20; }
   .icon-btn {
