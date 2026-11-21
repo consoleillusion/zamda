@@ -1,11 +1,11 @@
 <script lang="ts">
-  // Short explanations of what the page shows, one at a time.
+  // The explainer, kept out of the way until the info control in the drawer is hovered or focused.
   import type { Model } from '../lib/model.svelte';
   import { compact } from '../lib/format';
 
   let { model }: { model: Model } = $props();
   let index = $state(0);
-  let open = $state(true);
+  let open = $state(false);
 
   const cards = $derived([
     {
@@ -22,7 +22,7 @@
     },
     {
       title: 'Prefixes and the routing table',
-      body: `The table holds ${compact(model.routeTotals.routes)} IPv4 prefixes covering ${compact(model.routeTotals.addresses)} addresses. A /24 is 256 addresses, a /16 is 65,536. A router picks the most specific prefix that covers an address: try the lookup on the right.`,
+      body: `The table holds ${compact(model.routeTotals.routes)} IPv4 prefixes covering ${compact(model.routeTotals.addresses)} addresses. A /24 is 256 addresses, a /16 is 65,536. A router picks the most specific prefix that covers an address: try the lookup below.`,
     },
     {
       title: 'Possible hijacks',
@@ -35,34 +35,37 @@
   ]);
 </script>
 
-{#if open}
-  <section class="learn glass">
-    <div class="head">
-      <h2>{index + 1}/{cards.length} · {cards[index]!.title}</h2>
-      <button class="x" aria-label="close" onclick={() => (open = false)}>✕</button>
+<span
+  class="info-wrap"
+  role="group"
+  aria-label="What you are looking at"
+  onpointerenter={() => (open = true)}
+  onpointerleave={() => (open = false)}
+  onfocusin={() => (open = true)}
+  onfocusout={() => (open = false)}
+>
+  <button class="info" aria-label="What you are looking at" aria-expanded={open} title="What you are looking at">ⓘ</button>
+  {#if open}
+    <div class="tip" role="tooltip">
+      <div class="tip-head"><b>{cards[index]!.title}</b><span>{index + 1}/{cards.length}</span></div>
+      <p>{cards[index]!.body}</p>
+      <div class="tip-nav">
+        <button aria-label="Previous" onclick={() => (index = (index + cards.length - 1) % cards.length)}>‹</button>
+        <button aria-label="Next" onclick={() => (index = (index + 1) % cards.length)}>›</button>
+      </div>
     </div>
-    <p>{cards[index]!.body}</p>
-    <div class="nav">
-      <button onclick={() => (index = (index + cards.length - 1) % cards.length)}>‹ Back</button>
-      <div class="dots">{#each cards as _, i (i)}<button class:on={i === index} aria-label="card {i + 1}" onclick={() => (index = i)}></button>{/each}</div>
-      <button onclick={() => (index = (index + 1) % cards.length)}>Next ›</button>
-    </div>
-  </section>
-{:else}
-  <button class="reopen glass" onclick={() => (open = true)}>ⓘ How to read this</button>
-{/if}
+  {/if}
+</span>
 
 <style>
-  .learn { position: absolute; left: 16px; bottom: 150px; width: 360px; padding: 14px 16px; z-index: 5; }
-  .head { display: flex; justify-content: space-between; align-items: start; }
-  .x { background: none; border: 0; color: var(--muted); cursor: pointer; }
-  p { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: var(--learn-text); min-height: 80px; }
-  .nav { display: flex; align-items: center; justify-content: space-between; }
-  .nav > button { background: none; border: 1px solid var(--line); border-radius: 0; padding: 4px 10px; cursor: pointer; color: var(--muted); font-size: 12px; }
-  .nav > button:hover { color: var(--text); border-color: var(--line-strong); }
-  .dots { display: flex; gap: 5px; }
-  .dots button { width: 6px; height: 6px; border-radius: 50%; border: 0; padding: 0; background: var(--wash-4); cursor: pointer; }
-  .dots button.on { background: var(--announce); }
-  .reopen { position: absolute; left: 16px; bottom: 150px; padding: 8px 12px; cursor: pointer; z-index: 5; font-size: 12.5px; }
-  @media (max-width: 900px) { .learn, .reopen { display: none; } }
+  .info-wrap { position: relative; display: inline-flex; }
+  .info { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 0; background: var(--wash-1); color: var(--muted); cursor: pointer; font-size: 14px; }
+  .info:hover, .info:focus-visible { color: var(--text); border-color: var(--line-strong); outline: none; }
+  .tip { position: absolute; left: 0; top: calc(100% + 6px); width: 300px; padding: 10px 12px; z-index: 30; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 0; color: var(--text); }
+  .tip-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; }
+  .tip-head span { color: var(--faint); font-family: var(--mono); }
+  .tip p { margin: 6px 0 8px; font-size: 12px; line-height: 1.5; color: var(--learn-text); }
+  .tip-nav { display: flex; justify-content: flex-end; gap: 6px; }
+  .tip-nav button { width: 22px; height: 20px; padding: 0; border: 1px solid var(--line); border-radius: 0; background: var(--wash-1); color: var(--muted); cursor: pointer; line-height: 1; }
+  .tip-nav button:hover { color: var(--text); border-color: var(--line-strong); }
 </style>

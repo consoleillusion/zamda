@@ -84,6 +84,9 @@
             <button class:on={model.projection === 'mercator'} onclick={() => (model.projection = 'mercator')}>Mercator</button>
           </div>
         </div>
+        <div class="row toggle-row">
+          <Learn {model} />
+        </div>
         {#if model.routes}
           <p class="source muted">
             {compact(model.routeTotals.routes)} routes from {model.routes.collector} (RIPE RIS) at {utc(model.routes.time)} ·
@@ -96,7 +99,6 @@
     </aside>
 
     <Timeline {model} />
-    <Learn {model} />
   </div>
 {:else if model.phase === 'loading'}
   <div class="loading">
@@ -137,6 +139,7 @@
   h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; font-weight: 700; }
   .title p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .toggle-row { margin-top: 10px; align-items: center; gap: 14px; }
   .source { margin: 10px 0 0; font-size: 11.5px; }
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); margin-right: 6px; vertical-align: 1px; }
   .dot.live { background: var(--withdraw); box-shadow: 0 0 0 0 var(--withdraw-pulse); animation: pulse 1.6s infinite; }
