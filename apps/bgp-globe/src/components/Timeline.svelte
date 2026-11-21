@@ -80,7 +80,7 @@
 </footer>
 
 <style>
-  .timeline { position: absolute; left: 16px; right: calc(min(var(--drawer-width), 100vw) + 12px); bottom: 16px; padding: 12px 16px; z-index: 5; }
+  .timeline { position: absolute; left: calc(min(var(--drawer-width), 100vw) + 12px); right: 16px; bottom: 16px; padding: 12px 16px; z-index: 5; }
   .controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
   .play { width: 36px; height: 36px; border-radius: 0; border: 1px solid var(--line-strong); background: var(--accent-wash); display: grid; place-items: center; cursor: pointer; }
   .play svg { fill: var(--text); }

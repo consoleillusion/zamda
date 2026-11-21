@@ -69,7 +69,7 @@ export class Model {
   wasmStatus = $state('waiting for data');
   wasmReady = $state(false);
   projection = $state<Projection>('globe');
-  mode = $state<Mode>('replay');
+  mode = $state<Mode>('live');
 
   // Filters.
   kinds = $state<number[]>([0, 1]);
@@ -161,6 +161,7 @@ export class Model {
       });
       await this.refreshTimeline();
       await this.refreshRoutes();
+      if (this.mode === 'live') this.startLive();
       this.requestFrame();
       this.loop();
     } catch (error) {
