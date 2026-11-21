@@ -46,32 +46,37 @@
   <Globe {model} {light} />
 {/if}
 
-<div class="corner-controls">
-  <button class="icon-btn" onclick={toggleTheme} aria-label={light ? 'Switch to dark mode' : 'Switch to light mode'} title={light ? 'Dark mode' : 'Light mode'}>
-    {#if light}
-      <svg viewBox="0 0 20 20" width="26" height="26" aria-hidden="true"><circle cx="10" cy="10" r="3.2" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
-    {:else}
-      <svg viewBox="0 0 20 20" width="26" height="26" aria-hidden="true"><path d="M16.5 12.2A7 7 0 0 1 7.8 3.5 7 7 0 1 0 16.5 12.2Z" fill="currentColor" /></svg>
-    {/if}
-  </button>
-  <button class="icon-btn" onclick={togglePanels} aria-label={panelsOpen ? 'Hide panels' : 'Show panels'} title={panelsOpen ? 'Hide panels (F)' : 'Show panels (F)'}>
-    {#if panelsOpen}
-      <svg viewBox="0 0 20 20" width="26" height="26" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M6.5 3.5v13" stroke="currentColor" stroke-width="1.5" /><rect x="2.6" y="4.1" width="3.4" height="11.8" fill="currentColor" /></svg>
-    {:else}
+{#if !panelsOpen}
+  <div class="corner-controls">
+    <button class="icon-btn" onclick={togglePanels} aria-label="Show panels" aria-expanded="false" title="Show panels (F)">
       <svg viewBox="0 0 20 20" width="26" height="26" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
-    {/if}
-  </button>
-</div>
+    </button>
+  </div>
+{/if}
 
 {#if model.phase === 'ready'}
   <div class="hud" class:hidden={!panelsOpen} aria-hidden={!panelsOpen} inert={!panelsOpen}>
     <aside class="drawer glass" aria-label="Live Internet options and data panels">
       <section class="drawer-head">
-        <div class="title">
-          <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="var(--announce)" stroke-width="2.4" /><path d="M3 16h26M16 3c-6 7-6 19 0 26M16 3c6 7 6 19 0 26" stroke="var(--announce)" stroke-width="1.6" fill="none" /></svg>
-          <div>
-            <h1>Live Internet</h1>
-            <p>How the world's networks tell each other where every IPv4 address lives.</p>
+        <div class="head-row">
+          <div class="title">
+            <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="var(--announce)" stroke-width="2.4" /><path d="M3 16h26M16 3c-6 7-6 19 0 26M16 3c6 7 6 19 0 26" stroke="var(--announce)" stroke-width="1.6" fill="none" /></svg>
+            <div>
+              <h1>Live Internet</h1>
+              <p>How the world's networks tell each other where every IPv4 address lives.</p>
+            </div>
+          </div>
+          <div class="head-actions">
+            <button class="icon-btn" onclick={toggleTheme} aria-label={light ? 'Switch to dark mode' : 'Switch to light mode'} title={light ? 'Dark mode' : 'Light mode'}>
+              {#if light}
+                <svg viewBox="0 0 20 20" width="26" height="26" aria-hidden="true"><circle cx="10" cy="10" r="3.2" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+              {:else}
+                <svg viewBox="0 0 20 20" width="26" height="26" aria-hidden="true"><path d="M16.5 12.2A7 7 0 0 1 7.8 3.5 7 7 0 1 0 16.5 12.2Z" fill="currentColor" /></svg>
+              {/if}
+            </button>
+            <button class="icon-btn" onclick={togglePanels} aria-label="Hide panels" aria-expanded="true" title="Hide panels (F)">
+              <svg viewBox="0 0 20 20" width="26" height="26" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M6.5 3.5v13" stroke="currentColor" stroke-width="1.5" /><rect x="2.6" y="4.1" width="3.4" height="11.8" fill="currentColor" /></svg>
+            </button>
           </div>
         </div>
         <div class="row">
@@ -139,7 +144,9 @@
   .hidden .drawer { transform: translateX(-100%); }
 
   .drawer-head { padding: 14px 16px; border-bottom: 1px solid var(--line); flex: none; }
-  .title { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+  .head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+  .head-actions { display: flex; gap: 6px; flex: none; }
+  .title { display: flex; gap: 12px; align-items: center; min-width: 0; }
   h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; font-weight: 700; }
   .title p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -152,7 +159,7 @@
   .dot.live { background: var(--withdraw); box-shadow: 0 0 0 0 var(--withdraw-pulse); animation: pulse 1.6s infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--withdraw-pulse); } 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
-  .corner-controls { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; z-index: 20; }
+  .corner-controls { position: absolute; top: 14px; left: max(12px, calc(min(var(--drawer-width), 100vw) - 65px)); display: flex; gap: 6px; z-index: 20; }
   .icon-btn {
     width: 48px;
     height: 48px;
