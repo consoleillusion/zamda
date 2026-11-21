@@ -5,7 +5,7 @@
   import { TileLayer } from '@deck.gl/geo-layers';
   import { ArcLayer, BitmapLayer, GeoJsonLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from '@deck.gl/layers';
   import type { Model } from '../lib/model.svelte';
-  import type { ObservedIp, ObservedRoute } from '../lib/data';
+  import type { ObservedIp, ObservedRoute, AsIpPoint } from '../lib/data';
   import { compact, flag } from '../lib/format';
   import { NONE } from '../lib/schemas';
 
@@ -271,6 +271,16 @@
     return out;
   }
 
+  function surfacePath(points: [number, number][], lift: number): [number, number, number][] {
+    // Purpose: turn a precomputed 2D cable path into surface-hugging 3D segments for the globe
+    const out: [number, number, number][] = [];
+    for (let i = 0; i + 1 < points.length; i++) {
+      const segment = arcPath(points[i]!, points[i + 1]!, lift);
+      out.push(...(i === 0 ? segment : segment.slice(1)));
+    }
+    return out;
+  }
+
   const graticule = (() => {
     // Purpose: faint lines every 30 degrees, for a sense of the sphere
     const lines: [number, number][][] = [];
@@ -300,9 +310,12 @@
     localIp: number;
     count: number;
     prefixes: number;
+    source: string;
     asPath: string;
     routerDetail: string;
+    physicalPath: [number, number][] | null;
   };
+  type AsIpDraw = AsIpPoint & { pos: [number, number] };
   // Drawn data, rebuilt only when a result changes (not on every animation frame).
   let drawn: {
     arcs: ArcDraw[];
@@ -315,10 +328,11 @@
     paths: { path: [number, number, number][]; arc: ArcDraw }[];
     ips: IpDraw[];
     maxIp: number;
+    asIps: AsIpDraw[];
     inferred: InferredDraw[];
     routePaths: RouteDraw[];
     maxRoute: number;
-  } = { arcs: [], maxArc: 1, origins: [], maxOrigin: 1, maxCountry: 1, routeMax: 1, moasArcs: [], paths: [], ips: [], maxIp: 1, inferred: [], routePaths: [], maxRoute: 1 };
+  } = { arcs: [], maxArc: 1, origins: [], maxOrigin: 1, maxCountry: 1, routeMax: 1, moasArcs: [], paths: [], ips: [], maxIp: 1, asIps: [], inferred: [], routePaths: [], maxRoute: 1 };
 
   // Deck.gl reuses layer instances cheaply; rebuilding them every pulse frame re-uploads the terrain and
   // country textures. Keep every layer that does not animate in one cache, keyed by its inputs.
@@ -331,11 +345,11 @@
 
   function rebuild(): void {
     // Purpose: positions and scales for the latest results, including the physical-IP and selected-route layers
-    const selected = model.selectedAsn;
-    const arcs = selected === null
+    const hasSelection = model.hasSelection;
+    const arcs = !hasSelection
       ? model.arcs.map(a => ({ ...a, from: position(a.peer), to: position(a.origin) })).filter(a => a.from !== null && a.to !== null)
       : [];
-    const origins = model.origins.filter(o => position(o.asn) !== null && (selected === null || o.asn === selected));
+    const origins = model.origins.filter(o => position(o.asn) !== null && model.matchesSelection(o.asn));
     const moasArcs: { from: [number, number]; to: [number, number] }[] = [];
     if (model.selectedMoas !== null) {
       const pts = model.selectedMoas.origins.map(o => position(o.asn)).filter((p): p is [number, number] => p !== null);
@@ -356,31 +370,41 @@
     for (const ip of model.observedIps) {
       if (ip.precision > 0) allIpIndex.set(ip.ip, { ...ip, pos: [ip.lon, ip.lat] });
     }
-    const ips = [...allIpIndex.values()].filter(ip => selected === null || ip.asn === selected);
+    const selectedRoutes = model.routesForSelection();
+    // Show the selected ASes' IPs and every next hop / collector address their routes actually use —
+    // including next hops in other countries, which is the point of following the path.
+    const endpointIps = new Set<number>();
+    for (const route of selectedRoutes) {
+      endpointIps.add(route.nextHop);
+      endpointIps.add(route.localIp);
+    }
+    const ips = [...allIpIndex.values()].filter(ip => !hasSelection || model.matchesSelection(ip.asn) || endpointIps.has(ip.ip));
     let maxIp = 1;
     for (const ip of ips) maxIp = Math.max(maxIp, ip.count);
 
-    const groups = new Map<string, { from: [number, number]; to: [number, number]; originAs: number; peerAs: number; nextHop: number; peerIp: number; localIp: number; count: number; prefixes: number; path: string; routerDetail: string }>();
-    if (selected !== null) {
-      for (const route of model.observedRoutesFor(selected)) {
-        const from = allIpIndex.get(route.nextHop)?.pos ?? position(route.peerAs);
-        const to = allIpIndex.get(route.localIp)?.pos ?? position(route.peerAs);
-        if (from === null || to === null || from === undefined || to === undefined) continue;
-        const key = `${from[0].toFixed(2)},${from[1].toFixed(2)}>${to[0].toFixed(2)},${to[1].toFixed(2)}`;
-        let group = groups.get(key);
-        if (group === undefined) {
-          const next = allIpIndex.get(route.nextHop);
-          const local = allIpIndex.get(route.localIp);
-          const geo = (ip: IpDraw | undefined) => ip === undefined
-            ? 'no GeoIP fix'
-            : `${ip.lat.toFixed(2)}, ${ip.lon.toFixed(2)} · ${ip.precision === 2 ? 'facility-level' : ip.precision === 1 ? 'country-level' : 'unlocated'} GeoIP`;
-          const routerDetail = `${ipText(route.nextHop)} next hop (${geo(next)}) · ${ipText(route.localIp)} collector (${geo(local)})`;
-          group = { from, to, originAs: selected, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp, count: 0, prefixes: 0, path: route.path, routerDetail };
-          groups.set(key, group);
-        }
-        group.count += route.count;
-        group.prefixes += route.prefixes;
+    // Operator-published geofeed points for the selected ASes: their own address space, at city level.
+    const asIps = hasSelection ? model.asIps.filter(point => model.matchesSelection(point.asn)) : [];
+
+    type Group = { from: [number, number]; to: [number, number]; originAs: number; peerAs: number; nextHop: number; peerIp: number; localIp: number; count: number; prefixes: number; source: string; path: string; routerDetail: string; physicalPath: [number, number][] | null };
+    const groups = new Map<string, Group>();
+    for (const route of selectedRoutes) {
+      const from = allIpIndex.get(route.nextHop)?.pos ?? position(route.peerAs);
+      const to = allIpIndex.get(route.localIp)?.pos ?? position(route.peerAs);
+      if (from === null || to === null || from === undefined || to === undefined) continue;
+      const key = `${from[0].toFixed(2)},${from[1].toFixed(2)}>${to[0].toFixed(2)},${to[1].toFixed(2)}`;
+      let group = groups.get(key);
+      if (group === undefined) {
+        const next = allIpIndex.get(route.nextHop);
+        const local = allIpIndex.get(route.localIp);
+        const geo = (ip: IpDraw | undefined) => ip === undefined
+          ? 'no location'
+          : `${[ip.country, ip.city].filter(Boolean).join(' · ') || (ip.precision === 1 ? 'country-level fix' : 'unknown')} · ${ip.lat.toFixed(2)}, ${ip.lon.toFixed(2)}`;
+        const routerDetail = `${ipText(route.nextHop)} next hop ${geo(next)} · ${ipText(route.localIp)} collector ${geo(local)}`;
+        group = { from, to, originAs: route.originAs, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp, count: 0, prefixes: 0, source: route.source, path: route.path, routerDetail, physicalPath: route.physicalPath };
+        groups.set(key, group);
       }
+      group.count += route.count;
+      group.prefixes += route.prefixes;
     }
     // Co-located routes share one line; width is logarithmic in how many observations merged into it.
     const routePaths: RouteDraw[] = [...groups.values()]
@@ -395,8 +419,10 @@
         localIp: group.localIp,
         count: group.count,
         prefixes: group.prefixes,
+        source: group.source,
         asPath: group.path,
         routerDetail: group.routerDetail,
+        physicalPath: group.physicalPath,
       }));
     let maxRoute = 1;
     for (const route of routePaths) maxRoute = Math.max(maxRoute, route.count);
@@ -410,15 +436,15 @@
       for (const path of dashedSegments(ip.pos, landing)) inferred.push({ path, ip, landing });
     }
 
-    drawn = { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, inferred, routePaths, maxRoute };
+    drawn = { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, asIps: asIps.map(point => ({ ...point, pos: [point.lon, point.lat] })), inferred, routePaths, maxRoute };
   }
 
   function layers(): unknown[] {
     // Purpose: every layer, with the static ones cached so pulse frames do not re-upload the whole globe.
     const globe = model.projection === 'globe';
-    const deps = [globe, light, model.country, model.countryActivity, model.routeCountries, model.selectedMoas, model.selectedAsn, model.showCables, drawn, countriesGeo, cablesGeo];
+    const deps = [globe, light, model.country, model.countryActivity, model.routeCountries, model.selectedMoas, model.selectedAsn, model.selectedCountry, model.showCables, drawn, countriesGeo, cablesGeo];
     if (staticLayers === null || !sameDeps(staticLayers.deps, deps)) {
-      const { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, inferred, routePaths, maxRoute } = drawn;
+      const { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, asIps, inferred, routePaths, maxRoute } = drawn;
       const selected = model.country;
       staticLayers = {
         deps,
@@ -518,6 +544,33 @@
               wrapLongitude: !globe,
               parameters: { depthTest: false },
             }),
+          new PathLayer({
+            id: 'physical-routes',
+            data: routePaths.filter(route => route.physicalPath !== null && route.physicalPath.length > 1),
+            pickable: true,
+            getPath: (d: RouteDraw) => surfacePath(d.physicalPath!, globe ? 0.02 : 0),
+            getColor: [236, 168, 66, 210] as [number, number, number, number],
+            getWidth: (d: RouteDraw) => 2 + 6 * Math.log1p(d.count) / Math.log1p(maxRoute),
+            widthUnits: 'pixels',
+            capRounded: false,
+            wrapLongitude: !globe,
+            updateTriggers: { getWidth: [maxRoute], getPath: [globe] },
+            parameters: { depthTest: false },
+          }),
+          new ScatterplotLayer({
+            id: 'as-ip-points',
+            data: asIps,
+            pickable: true,
+            radiusUnits: 'pixels',
+            getPosition: (d: AsIpDraw) => d.pos,
+            getRadius: 4,
+            getFillColor: (d: AsIpDraw) => [...asColor(d.asn), 200] as [number, number, number, number],
+            getLineColor: light ? [20, 20, 20, 120] : [255, 255, 255, 160],
+            stroked: true,
+            lineWidthMinPixels: 0.6,
+            updateTriggers: { getFillColor: [asIps, light] },
+            parameters: { depthTest: false },
+          }),
           new PathLayer({
             id: 'advertised-routes',
             data: routePaths,
@@ -619,7 +672,13 @@
       ...staticLayers.layers,
       new ScatterplotLayer({
         id: 'pulses',
-        data: model.selectedAsn === null ? model.pulses : [],
+        // Live advertisement pulses are the remaining global event layer: apply the same AS/country,
+        // announcement/withdrawal and prefix-length filters as the arc query.
+        data: model.pulses.filter(p =>
+          (!model.hasSelection || model.matchesSelection(p.asn)) &&
+          (model.country === null || p.cc === model.country) &&
+          model.kinds.includes(p.kind) &&
+          p.prefixLen >= model.lenRange[0] && p.prefixLen <= model.lenRange[1]),
         radiusUnits: 'pixels',
         getPosition: (d: { lon: number; lat: number }) => [d.lon, d.lat],
         getRadius: (d: { born: number }) => 2 + Math.min(12, Math.max(0, t - d.born) / 400),
@@ -651,13 +710,33 @@
     if (info.layer.id === 'observed-ips') {
       const ip = info.object as IpDraw;
       const who = ip.asn === 0 ? 'RIS collector' : `<b>AS${ip.asn}</b> ${nameOf(ip.asn)} <span class="muted">${ccOf(ip.asn)}</span>`;
-      const at = `${ip.lat.toFixed(2)}, ${ip.lon.toFixed(2)}`;
+      const at = `${[ip.country, ip.city].filter(Boolean).join(' · ') || 'unknown place'} · ${ip.lat.toFixed(2)}, ${ip.lon.toFixed(2)}`;
       return {
         className: 'tip',
         html: `<b class="mono">${ipText(ip.ip)}</b> ${who}<br>
           ${roleLabel(ip.roleMask)} · ${sourceLabel(ip.source)}<br>
-          ${at} · ${ip.precision === 2 ? 'facility-level' : 'country-level'} position<br>
+          ${at} · ${ip.precision === 3 ? 'city-level' : ip.precision === 2 ? 'facility-level' : 'country-level'} position<br>
           seen ${ip.count.toLocaleString('en')} times<br><span class="muted">click to focus this network</span>`,
+      };
+    }
+    if (info.layer.id === 'as-ip-points') {
+      const point = info.object as AsIpDraw;
+      return {
+        className: 'tip',
+        html: `<b>AS${point.asn}</b> ${nameOf(point.asn)}<br>
+          <span class="mono">${ipText(point.addr)}/${point.len}</span> · ${[point.country, point.city].filter(Boolean).join(' · ') || 'located prefix'}<br>
+          ${point.lat.toFixed(2)}, ${point.lon.toFixed(2)} · ${point.count.toLocaleString('en')} prefix(es) here<br><span class="muted">Geolocated address space (DB-IP / operator geofeeds), grouped per city. Not one point per machine.</span>`,
+      };
+    }
+    if (info.layer.id === 'physical-routes') {
+      const route = info.object as RouteDraw;
+      return {
+        className: 'tip',
+        html: `<b>Inferred physical route</b><br>
+          ${route.routerDetail}<br>
+          ${route.source}<br>
+          ${route.prefixes.toLocaleString('en')} prefix(es) · ${route.count.toLocaleString('en')} observations merged<br>
+          <span class="muted">Cable path is the shortest route over public cable geometry between the nearest landings. BGP did not observe this cable path.</span>`,
       };
     }
     if (info.layer.id === 'advertised-routes') {
@@ -665,9 +744,9 @@
       return {
         className: 'tip',
         html: `<b>AS${route.originAs}</b> ${nameOf(route.originAs)} advertises <b>${route.prefixes.toLocaleString('en')}</b> prefix(es)<br>
-          ${route.count.toLocaleString('en')} observations merged<br>
+          ${route.source} · ${route.count.toLocaleString('en')} observations merged<br>
           ${model.pathDetail === 'ips-geoip' ? `${route.routerDetail}<br>` : ''}
-          <span class="mono">${route.asPath || 'path unavailable'}</span><br><span class="muted">Observed BGP next hop to collector, not a fibre route. Width grows logarithmically with the merged count.</span>`,
+          <span class="mono">${route.asPath || 'path unavailable'}</span><br><span class="muted">BGP next hop to collector, not a fibre route. Width grows logarithmically with the merged count.</span>`,
       };
     }
     if (info.layer.id === 'origins') {
@@ -746,14 +825,17 @@
         if (info.layer?.id === 'countries' && info.object) {
           const code = model.countryIndex.get((info.object as { properties: { iso: string } }).properties.iso) ?? null;
           model.setFilter({ country: model.country === code ? null : code });
+          model.selectCountry(model.selectedCountry === code ? null : code);
         } else if (info.layer?.id === 'observed-ips' && info.object) {
           const ip = info.object as IpDraw;
           if (ip.asn !== 0) {
             model.selectAsn(ip.asn);
             model.flyTo(ip.lon, ip.lat, 3);
           }
-        } else if (info.layer?.id === 'advertised-routes' && info.object) {
-          model.selectAsn((info.object as RouteDraw).originAs);
+        } else if ((info.layer?.id === 'advertised-routes' || info.layer?.id === 'physical-routes' || info.layer?.id === 'as-ip-points') && info.object) {
+          const picked = info.object as { originAs?: number; asn?: number };
+          const asn = picked.originAs ?? picked.asn;
+          if (asn !== undefined) model.selectAsn(asn);
         } else if (info.layer?.id === 'origins' && info.object) {
           const asn = (info.object as OriginLike).asn;
           model.selectAsn(asn);
@@ -793,7 +875,7 @@
 
   $effect(() => {
     // Redraw whenever a result, a filter, the selection or the theme changes.
-    void [model.arcs, model.origins, model.countryActivity, model.routeCountries, model.country, model.selectedMoas, model.selectedAsn, model.showCables, model.observedIps, model.observedRoutes, light];
+    void [model.arcs, model.origins, model.countryActivity, model.routeCountries, model.country, model.selectedMoas, model.selectedAsn, model.selectedCountry, model.showCables, model.observedIps, model.observedRoutes, model.asIps, light];
     rebuild();
     apply();
   });

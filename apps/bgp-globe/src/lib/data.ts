@@ -61,11 +61,25 @@ export interface ObservedIp {
   readonly roleMask: number;
   readonly source: number;
   readonly precision: number;
+  readonly city: string;
+  readonly country: string;
   readonly lon: number;
   readonly lat: number;
   readonly count: number;
   readonly first: number;
   readonly last: number;
+}
+
+// A geolocated address block belonging to an AS, from its RIB prefixes or an operator geofeed.
+export interface AsIpPoint {
+  readonly asn: number;
+  readonly addr: number;
+  readonly len: number;
+  readonly city: string;
+  readonly country: string;
+  readonly count: number;
+  readonly lon: number;
+  readonly lat: number;
 }
 
 export interface ObservedRoute {
@@ -75,7 +89,10 @@ export interface ObservedRoute {
   readonly localIp: number;
   readonly nextHop: number;
   readonly prefixes: number;
+  readonly source: string;
   readonly path: string;
+  // Inferred path over the public cable graph, from geolocated next hop to collector.
+  readonly physicalPath: [number, number][] | null;
   readonly count: number;
   readonly first: number;
   readonly last: number;
@@ -84,6 +101,7 @@ export interface ObservedRoute {
 export interface ObservedData {
   readonly ips: ObservedIp[];
   readonly routes: ObservedRoute[];
+  readonly asIps: AsIpPoint[];
 }
 
 async function readBody(response: Response, onProgress?: (loaded: number, total: number) => void): Promise<Uint8Array> {
@@ -130,16 +148,21 @@ function observedIps(file: ColumnsFile | null): ObservedIp[] {
   // Purpose: shape the observed-IP table for the map, ignoring points with no location at all
   if (file === null) return [];
   const c = file.columns;
+  const cities = file.lists.cities ?? [];
+  const countries = file.lists.countries ?? [];
   const rows: ObservedIp[] = [];
   for (let i = 0; i < file.rows; i++) {
     const precision = Number(c.precision![i]);
     if (precision === 0) continue;
+    const countryCode = Number(c.countryCode?.[i] ?? NONE);
     rows.push({
       ip: Number(c.ip![i]),
       asn: Number(c.asn![i]),
       roleMask: Number(c.roleMask![i]),
       source: Number(c.source![i]),
       precision,
+      city: cities[Number(c.cityCode?.[i] ?? 0)] ?? '',
+      country: countryCode === NONE ? '' : (countries[countryCode] ?? ''),
       lon: Number(c.lon![i]),
       lat: Number(c.lat![i]),
       count: Number(c.count![i]),
@@ -150,11 +173,39 @@ function observedIps(file: ColumnsFile | null): ObservedIp[] {
   return rows;
 }
 
+function asIpPoints(file: ColumnsFile | null): AsIpPoint[] {
+  // Purpose: shape the geolocated AS address blocks into map points
+  if (file === null) return [];
+  const c = file.columns;
+  const cities = file.lists.cities ?? [];
+  const countries = file.lists.countries ?? [];
+  const rows: AsIpPoint[] = new Array(file.rows);
+  for (let i = 0; i < file.rows; i++) {
+    const countryCode = Number(c.countryCode?.[i] ?? NONE);
+    rows[i] = {
+      asn: Number(c.asn![i]),
+      addr: Number(c.addr![i]),
+      len: Number(c.len![i]),
+      city: cities[Number(c.cityCode![i])] ?? '',
+      country: countryCode === NONE ? '' : (countries[countryCode] ?? ''),
+      count: Number(c.count?.[i] ?? 1),
+      lon: Number(c.lon![i]),
+      lat: Number(c.lat![i]),
+    };
+  }
+  return rows;
+}
+
 function observedRoutes(file: ColumnsFile | null): ObservedRoute[] {
   // Purpose: shape the observed advertised-path table, including its full AS path text
   if (file === null) return [];
   const c = file.columns;
   const paths = file.lists.paths ?? [];
+  const sources = file.lists.routeSources ?? [];
+  const physical = (file.lists.physicalPaths ?? []).map(text => text === '' ? null : text.split(';').map(pair => {
+    const [lon, lat] = pair.split(',');
+    return [Number(lon), Number(lat)] as [number, number];
+  }));
   const rows: ObservedRoute[] = new Array(file.rows);
   for (let i = 0; i < file.rows; i++) {
     rows[i] = {
@@ -164,7 +215,9 @@ function observedRoutes(file: ColumnsFile | null): ObservedRoute[] {
       localIp: Number(c.local_ip![i]),
       nextHop: Number(c.next_hop![i]),
       prefixes: Number(c.prefixes![i]),
+      source: sources[Number(c.sourceCode?.[i] ?? 0)] ?? 'observed route',
       path: paths[Number(c.pathCode![i])] ?? '',
+      physicalPath: physical[Number(c.physicalPathCode?.[i] ?? 0)] ?? null,
       count: Number(c.count![i]),
       first: Number(c.first![i]),
       last: Number(c.last![i]),
@@ -188,19 +241,20 @@ export function prefixSize(length: number): number {
 }
 
 export async function loadAll(onProgress: (what: string, fraction: number) => void): Promise<{ networks: Networks; routes: RouteColumns; updates: UpdateColumns; observed: ObservedData }> {
-  // Purpose: fetch the three core data files and the optional physical-IP tables in parallel
+  // Purpose: fetch the core tables and the optional geolocation tables in parallel
   const sizes = { as: [0, 1], routes: [0, 1], updates: [0, 1] } as Record<string, [number, number]>;
   const report = (name: string) => (loaded: number, total: number) => {
     sizes[name] = [loaded, total || loaded];
     const sum = Object.values(sizes).reduce((s, [l, t]) => [s[0]! + l, s[1]! + t], [0, 0]);
     onProgress('downloading the routing table and an hour of BGP updates', sum[0]! / Math.max(1, sum[1]!));
   };
-  const [as, routeFile, updateFile, ipFile, ipRouteFile] = await Promise.all([
+  const [as, routeFile, updateFile, ipFile, ipRouteFile, asIpFile] = await Promise.all([
     fetchFile('/data/globe-as.zcl', report('as')),
     fetchFile('/data/globe-routes.zcl', report('routes')),
     fetchFile('/data/globe-updates.zcl', report('updates')),
     fetchOptionalFile('/data/globe-ips.zcl'),
     fetchOptionalFile('/data/globe-ip-routes.zcl'),
+    fetchOptionalFile('/data/globe-as-ips.zcl'),
   ]);
 
   const n = as.rows;
@@ -281,7 +335,7 @@ export async function loadAll(onProgress: (what: string, fraction: number) => vo
     start: Number(updateFile.meta.start),
     minutes: Number(updateFile.meta.minutes),
   };
-  return { networks, routes, updates, observed: { ips: observedIps(ipFile), routes: observedRoutes(ipRouteFile) } };
+  return { networks, routes, updates, observed: { ips: observedIps(ipFile), routes: observedRoutes(ipRouteFile), asIps: asIpPoints(asIpFile) } };
 }
 
 export function countryName(networks: Networks, code: number, names: ReadonlyMap<string, string>): string {

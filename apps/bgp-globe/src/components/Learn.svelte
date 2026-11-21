@@ -26,11 +26,11 @@
     },
     {
       title: 'Physical route confidence',
-      body: 'Three layers, three levels of evidence. Solid coloured lines are observed BGP hops: a prefix really was advertised through that next hop to that collector. Dashed amber lines are an inference only — the nearest submarine cable landing to an observed IP, with no BGP evidence linking them. Faint grey lines are public submarine cable geometry, background context with no route evidence at all. None of these shows the fibre a packet actually took.',
+      body: 'Three layers, three levels of evidence. Thin coloured lines join a BGP next hop to the RIS collector that saw it: UPDATE hops are observed; RIB routes use the originating AS’s RIS peer address as an inferred next hop. Thick amber lines are an inferred physical route: both IP endpoints are geolocated with DB-IP, then the shortest path over public submarine cable geometry is drawn between their nearest landings. Faint grey lines are the cables themselves. BGP did not observe the cable path, and no layer shows the fibre a packet actually took. IP locations: DB-IP (CC BY 4.0) and operator geofeeds.',
     },
     {
-      title: 'A focused network',
-      body: 'Search for an AS, click its IP point or click an origin dot. The globe then shows only that network’s observed IPs and the prefixes it originated, grouped where they share the same next hop and collector. Thicker lines mean more observations, on a logarithmic scale.',
+      title: 'A focused network or country',
+      body: 'Search for an AS, pick a country, or click a point or origin dot. The globe then shows every known BGP-speaking IP of the matching ASes, their geolocated address blocks, and the prefixes they originated. Next hops stay visible even when they sit in another country, so you can see where the route leaves. Line width is logarithmic in the number of merged observations.',
     },
     {
       title: 'Prefixes and the routing table',

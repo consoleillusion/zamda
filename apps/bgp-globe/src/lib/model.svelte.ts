@@ -3,7 +3,7 @@
 
 import { ARC_LIMIT, compileOriginsOfPrefixPlan, compileRoutePlans, compileTimelinePlan, compileUpdatePlans } from './plans';
 import { loadAll, prefixSize } from './data';
-import type { Networks, RouteColumns, UpdateColumns, ObservedIp, ObservedRoute } from './data';
+import type { Networks, RouteColumns, UpdateColumns, ObservedIp, ObservedRoute, AsIpPoint } from './data';
 import { Engines } from './engines';
 import type { EngineName, EngineTables } from './engines';
 import { startFeed } from './live';
@@ -50,6 +50,9 @@ export interface Totals {
 }
 
 export interface Pulse {
+  readonly asn: number;
+  readonly cc: number;
+  readonly prefixLen: number;
   readonly lon: number;
   readonly lat: number;
   readonly kind: number;
@@ -94,10 +97,12 @@ export class Model {
 
   // Physical-IP view: every BGP-speaking IP we have observed and the paths it advertised.
   selectedAsn = $state<number | null>(null);
+  selectedCountry = $state<number | null>(null);
   showCables = $state(true);
   pathDetail = $state<'as-paths' | 'ips-geoip'>('ips-geoip');
   observedIps = $state.raw<ObservedIp[]>([]);
   observedRoutes = $state.raw<ObservedRoute[]>([]);
+  asIps = $state.raw<AsIpPoint[]>([]);
 
   // Results the map and panels draw.
   origins = $state.raw<OriginRow[]>([]);
@@ -149,6 +154,8 @@ export class Model {
   private observedIpIndex = new Map<number, LiveIp>();
   private observedRouteIndex = new Map<string, LiveRoute>();
   private observedRoutesByOrigin = new Map<number, ObservedRoute[]>();
+  private asnsByCountry = new Map<number, Set<number>>();
+  private asIpsByAsn = new Map<number, AsIpPoint[]>();
   private lastObservedPublish = 0;
 
   async start(): Promise<void> {
@@ -166,6 +173,19 @@ export class Model {
       this.updates = data.updates;
       this.observedIps = data.observed.ips;
       this.observedRoutes = data.observed.routes;
+      this.asIps = data.observed.asIps;
+      for (const row of data.observed.asIps) {
+        let list = this.asIpsByAsn.get(row.asn);
+        if (list === undefined) this.asIpsByAsn.set(row.asn, list = []);
+        list.push(row);
+      }
+      for (let i = 0; i < data.networks.count; i++) {
+        const code = data.networks.cc[i]!;
+        if (code === NONE) continue;
+        let list = this.asnsByCountry.get(code);
+        if (list === undefined) this.asnsByCountry.set(code, list = new Set());
+        list.add(data.networks.asn[i]!);
+      }
       for (const row of data.observed.ips) this.observedIpIndex.set(row.ip, { ...row });
       for (const row of data.observed.routes) {
         this.observedRouteIndex.set(this.routeKey(row.originAs, row.peerAs, row.peerIp, row.localIp, row.nextHop), { ...row });
@@ -241,9 +261,46 @@ export class Model {
 
   selectAsn(asn: number | null): void {
     // Purpose: focus the whole globe on one network's IPs and originated routes
-    if (this.selectedAsn === asn) return;
+    if (this.selectedAsn === asn && this.selectedCountry === null) return;
     this.selectedAsn = asn;
+    this.selectedCountry = null;
     this.requestFrame();
+  }
+
+  selectCountry(code: number | null): void {
+    // Purpose: focus on every BGP-participating AS registered in one country, and the routes they originate
+    if (this.selectedCountry === code && this.selectedAsn === null) return;
+    this.selectedCountry = code;
+    this.selectedAsn = null;
+    this.requestFrame();
+  }
+
+  get hasSelection(): boolean {
+    return this.selectedAsn !== null || this.selectedCountry !== null;
+  }
+
+  matchesSelection(asn: number): boolean {
+    // Purpose: whether one AS belongs to the current network or country focus
+    if (this.selectedAsn !== null) return asn === this.selectedAsn;
+    if (this.selectedCountry !== null) {
+      const list = this.asnsByCountry.get(this.selectedCountry);
+      return list !== undefined && list.has(asn);
+    }
+    return true;
+  }
+
+  asIpPointsFor(asn: number): readonly AsIpPoint[] {
+    // Purpose: geolocated address blocks for one AS, indexed at load time
+    return this.asIpsByAsn.get(asn) ?? [];
+  }
+
+  routesForSelection(): readonly ObservedRoute[] {
+    // Purpose: all routes originated by the focused AS or by ASes registered in the focused country
+    if (this.selectedAsn !== null) return this.observedRoutesFor(this.selectedAsn);
+    if (this.selectedCountry === null) return this.observedRoutes;
+    const out: ObservedRoute[] = [];
+    for (const asn of this.asnsByCountry.get(this.selectedCountry) ?? []) out.push(...(this.observedRoutesByOrigin.get(asn) ?? []));
+    return out;
   }
 
   private routeKey(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number): string {
@@ -262,6 +319,8 @@ export class Model {
         asn,
         roleMask: 0,
         source,
+        city: '',
+        country: '',
         precision: at === undefined ? 0 : this.networks!.precision[at]!,
         lon: at === undefined ? 0 : this.networks!.lon[at]!,
         lat: at === undefined ? 0 : this.networks!.lat[at]!,
@@ -275,6 +334,7 @@ export class Model {
       const at = this.networks?.index.get(asn);
       row.source = source;
       row.asn = asn;
+      row.city = '';
       row.precision = at === undefined ? 0 : this.networks!.precision[at]!;
       row.lon = at === undefined ? 0 : this.networks!.lon[at]!;
       row.lat = at === undefined ? 0 : this.networks!.lat[at]!;
@@ -290,7 +350,7 @@ export class Model {
     const key = this.routeKey(originAs, peerAs, peerIp, localIp, nextHop);
     let row = this.observedRouteIndex.get(key);
     if (row === undefined) {
-      row = { originAs, peerAs, peerIp, localIp, nextHop, prefixes, path, count: 0, first: second, last: second };
+      row = { originAs, peerAs, peerIp, localIp, nextHop, prefixes, source: 'live RIS Live update', path, physicalPath: null, count: 0, first: second, last: second };
       this.observedRouteIndex.set(key, row);
     }
     row.count++;
@@ -632,7 +692,7 @@ export class Model {
       cols.path_len[i] = row.path_len;
       cols.cc[i] = at === undefined ? NONE : networks.cc[at]!;
       cols.pkey[i] = key;
-      if (at !== undefined && i % 3 === 0) pulses.push({ lon: networks.lon[at]!, lat: networks.lat[at]!, kind: row.kind, born: now + (i / n) * 900 });
+      if (at !== undefined && i % 3 === 0) pulses.push({ asn: row.origin_as, cc: cols.cc[i]!, prefixLen: row.prefix_len, lon: networks.lon[at]!, lat: networks.lat[at]!, kind: row.kind, born: now + (i / n) * 900 });
     });
     const up = [...upserts.values()];
     const routeCols =

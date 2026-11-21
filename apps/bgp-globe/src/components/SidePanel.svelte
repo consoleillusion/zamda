@@ -10,8 +10,44 @@
   let asQuery = $state('');
 
   const asResults = $derived(model.searchNetworks(asQuery));
-  const selectedIps = $derived(model.selectedAsn === null ? 0 : model.observedIps.filter(ip => ip.asn === model.selectedAsn).length);
-  const selectedPaths = $derived(model.selectedAsn === null ? 0 : model.observedRoutes.filter(route => route.originAs === model.selectedAsn).length);
+  const selectedIps = $derived(model.hasSelection ? model.observedIps.filter(ip => model.matchesSelection(ip.asn)).length : 0);
+  const selectedPaths = $derived(model.hasSelection ? model.routesForSelection().length : 0);
+  const selectedGeoPoints = $derived(model.hasSelection ? model.asIps.filter(point => model.matchesSelection(point.asn)).length : 0);
+  const countryOptions = $derived.by(() => {
+    if (model.networks === null) return [];
+    const networks = model.networks;
+    type Row = { code: number; name: string; lon: number; lat: number; count: number; asCount: number };
+    const byCode = new Map<number, Row>();
+    networks.countries.forEach((iso, code) => byCode.set(code, { code, name: model.countryNames.get(iso) ?? iso, lon: 0, lat: 0, count: 0, asCount: 0 }));
+    for (let i = 0; i < networks.count; i++) {
+      const code = networks.cc[i]!;
+      if (code === NONE) continue;
+      const row = byCode.get(code)!;
+      row.lon += networks.lon[i]!;
+      row.lat += networks.lat[i]!;
+      row.asCount++;
+    }
+    const withData = new Set<number>();
+    const add = (asn: number) => {
+      const i = networks.index.get(asn);
+      if (i === undefined || networks.cc[i] === NONE) return;
+      const code = networks.cc[i]!;
+      const row = byCode.get(code)!;
+      if (withData.has(asn)) return;
+      withData.add(asn);
+      row.count++;
+    };
+    for (const ip of model.observedIps) add(ip.asn);
+    for (const point of model.asIps) add(point.asn);
+    return [...byCode.values()].map(row => ({ code: row.code, name: row.name, lon: row.lon / Math.max(1, row.asCount), lat: row.lat / Math.max(1, row.asCount), count: row.count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  });
+
+  function chooseCountry(code: number | null): void {
+    // Purpose: focus every observed IP and originated route for ASes registered in one country
+    const at = code === null ? null : countryOptions.find(option => option.code === code);
+    model.selectCountry(code);
+    if (at !== undefined && at !== null) model.flyTo(at.lon, at.lat, 1.5);
+  }
 
   function name(asn: number): string {
     // Purpose: a network's registered name
@@ -75,10 +111,11 @@
   <section>
     <h2>Physical route layers</h2>
     <div class="legend">
-      <div><i class="sw solid"></i><span><b>Observed BGP hop</b> — advertised next hop to the RIS collector.</span></div>
-      <div><i class="sw dashed"></i><span><b>Inferred cable link</b> — nearest cable landing to an observed IP. No BGP evidence ties them together.</span></div>
+      <div><i class="sw solid"></i><span><b>BGP next hop</b> — observed UPDATE hop, or a RIB prefix with its AS's RIS peer address as next hop.</span></div>
+      <div><i class="sw dashed"></i><span><b>Inferred physical route</b> — shortest path over public cables between the geolocated next hop and collector. BGP did not observe the cable path.</span></div>
       <div><i class="sw cable"></i><span><b>Submarine cables</b> — background geometry only, never a claim that traffic uses that cable.</span></div>
     </div>
+    <p class="muted hint">IP locations: <a href="https://db-ip.com" target="_blank" rel="noreferrer">DB-IP</a> (CC BY 4.0) and operator geofeeds.</p>
     <label class="tick"><input type="checkbox" bind:checked={model.showCables} /> Show cable geometry</label>
     <label class="detail-level">
       Path detail
@@ -106,16 +143,31 @@
 
   <section>
     <h2>Network focus</h2>
+    <label class="detail-level">
+      Country
+      <select value={model.selectedCountry ?? ''} onchange={e => chooseCountry(e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}>
+        <option value="">All countries</option>
+        {#each countryOptions as option (option.code)}
+          <option value={option.code}>{option.name} ({option.count})</option>
+        {/each}
+      </select>
+    </label>
     <form onsubmit={searchAsn}>
       <input class="mono" bind:value={asQuery} placeholder="AS1564, name or country" spellcheck="false" />
       <button type="submit">Focus</button>
     </form>
-    {#if model.selectedAsn !== null}
+    {#if model.selectedAsn !== null || model.selectedCountry !== null}
       <div class="focus-chip">
-        <span><b>AS{model.selectedAsn}</b> {name(model.selectedAsn)} {cc(model.selectedAsn)}</span>
-        <button aria-label="clear network focus" onclick={() => model.selectAsn(null)}>✕</button>
+        <span>
+          {#if model.selectedAsn !== null}
+            <b>AS{model.selectedAsn}</b> {name(model.selectedAsn)} {cc(model.selectedAsn)}
+          {:else}
+            <b>{countryOptions.find(option => option.code === model.selectedCountry)?.name ?? 'Country'}</b> · all BGP ASes
+          {/if}
+        </span>
+        <button aria-label="clear network focus" onclick={() => { model.selectAsn(null); model.selectCountry(null); }}>✕</button>
       </div>
-      <p class="muted hint">{selectedIps} observed IPs · {selectedPaths} advertised paths</p>
+      <p class="muted hint">{selectedIps} observed IPs · {selectedGeoPoints} geolocated blocks · {selectedPaths} advertised paths</p>
     {/if}
     {#if asQuery.trim().length > 0}
       <ol class="list">

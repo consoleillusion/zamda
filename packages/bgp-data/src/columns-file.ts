@@ -83,7 +83,8 @@ export function decodeColumns(input: Uint8Array): ColumnsFile {
   const header = JSON.parse(new TextDecoder().decode(input.subarray(8, 8 + headerLength))) as ColumnsHeader;
   const base = 8 + pad8(headerLength);
   // One aligned copy, so every column can be a typed-array view whatever the input's alignment.
-  const body = input.slice(base).buffer;
+  // `slice` keeps the parent buffer in Bun, so copy through a fresh Uint8Array explicitly.
+  const body = new Uint8Array(input.subarray(base)).buffer;
   const columns: Record<string, ColumnArray> = {};
   for (const entry of header.columns) {
     const make = MAKERS[entry.kind];
