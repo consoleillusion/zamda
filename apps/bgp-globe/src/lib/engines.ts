@@ -22,7 +22,10 @@ export interface EngineTables {
 
 export const LIVE_ROWS = 600_000;
 // Small blocks keep each live upsert cheap: a batch rewrites only the blocks its prefixes fall in.
-const BLOCK_ROWS = 4096;
+// With 1.17 M routes and ~1 k changed prefixes per second, 4096-row blocks meant almost every block
+// in the table was copied to the worker on every batch. 128 rows bounds that to about 128 changed rows
+// per touched prefix while keeping the segment count reasonable for the engine's route queries.
+const BLOCK_ROWS = 128;
 
 function emptyUpdates(): { columns: Record<keyof UpdatesT, ArrayLike<number>> } {
   // Purpose: column input with no rows
