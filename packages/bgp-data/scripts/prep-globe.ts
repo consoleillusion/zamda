@@ -671,8 +671,9 @@ await writeFile(
 console.log(`wrote globe-as-ips.zcl: ${asIpPoints.length.toLocaleString()} geolocated address blocks for ${new Set(asIpPoints.map(p => p.asn)).size.toLocaleString()} ASes`);
 
 // A physical route is inferred, never observed: connect the two geolocated IP endpoints to the
-// nearest public cable landing and run the shortest path over the cable graph. The result is stored
-// per route row so the browser only has to draw the line, with no runtime tile or routing service.
+// nearest public cable landing and run the shortest path over the cable graph. This single path is
+// the legacy field in the table; the app now derives every candidate path for each adjacent AS hop
+// from the same local cable geometry, so no runtime tile or routing service is needed.
 interface CableNode { readonly lon: number; readonly lat: number; readonly edges: { to: number; weight: number }[] }
 const cableGeo = JSON.parse(await readFile(dataFile('cables.geojson'), 'utf8')) as { features: { geometry: { coordinates: number[][][] } }[] };
 const cableNodes: CableNode[] = [];

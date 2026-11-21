@@ -96,7 +96,8 @@ export interface ObservedRoute {
   readonly originLat: number;
   readonly originCity: string;
   readonly originCountry: string;
-  // Inferred path over the public cable graph, from geolocated next hop to collector.
+  // Legacy single inferred origin → next-hop cable path from prep-globe. The map now infers every
+  // candidate path per AS hop at render time, but the table is kept for compatibility with old data.
   readonly physicalPath: [number, number][] | null;
   readonly count: number;
   readonly first: number;

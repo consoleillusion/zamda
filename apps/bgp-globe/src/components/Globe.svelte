@@ -6,6 +6,8 @@
   import { ArcLayer, BitmapLayer, GeoJsonLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from '@deck.gl/layers';
   import type { Model } from '../lib/model.svelte';
   import type { ObservedIp, ObservedRoute, AsIpPoint } from '../lib/data';
+  import { buildCableGraph, collectPhysicalRoutes } from '../lib/cables';
+  import type { CableGraph, PhysicalRouteGroup, PhysicalRouteRow, Point } from '../lib/cables';
   import { compact, flag } from '../lib/format';
   import { NONE } from '../lib/schemas';
 
@@ -16,10 +18,10 @@
   let countriesGeo: { type: string; features: { properties: { iso: string; name: string } }[] } | null = null;
   let cablesGeo: { type: string; features: { geometry: { type: string; coordinates: number[][][] } }[] } | null = null;
   let cableLandings: [number, number][] = [];
+  let cableGraph: CableGraph | null = null;
   let viewState: Record<string, unknown> = { longitude: 10, latitude: 25, zoom: 1.55, pitch: 0, bearing: 0 };
   let lastInteraction = 0;
   let fading = $state(false);
-  let now = $state(0);
 
   // Globe colours follow the theme: neutral land and water, semantic colours for activity.
   type RGB = [number, number, number];
@@ -316,15 +318,13 @@
     origin: [number, number];
     nextHopPoint: [number, number];
     collector: [number, number];
-    physicalPath: [number, number][] | null;
   };
   type AsIpDraw = AsIpPoint & { pos: [number, number] };
+  type PhysicalDraw = PhysicalRouteGroup & { path3d: [number, number, number][] };
   // Drawn data, rebuilt only when a result changes (not on every animation frame).
   let drawn: {
     arcs: ArcDraw[];
     maxArc: number;
-    origins: OriginLike[];
-    maxOrigin: number;
     maxCountry: number;
     routeMax: number;
     moasArcs: { from: [number, number]; to: [number, number] }[];
@@ -335,10 +335,34 @@
     inferred: InferredDraw[];
     routePaths: RouteDraw[];
     maxRoute: number;
-  } = { arcs: [], maxArc: 1, origins: [], maxOrigin: 1, maxCountry: 1, routeMax: 1, moasArcs: [], paths: [], ips: [], maxIp: 1, asIps: [], inferred: [], routePaths: [], maxRoute: 1 };
+    physicalRoutes: PhysicalDraw[];
+    maxPhysical: number;
+  } = { arcs: [], maxArc: 1, maxCountry: 1, routeMax: 1, moasArcs: [], paths: [], ips: [], maxIp: 1, asIps: [], inferred: [], routePaths: [], maxRoute: 1, physicalRoutes: [], maxPhysical: 1 };
 
-  // Deck.gl reuses layer instances cheaply; rebuilding them every pulse frame re-uploads the terrain and
-  // country textures. Keep every layer that does not animate in one cache, keyed by its inputs.
+  let physicalCache: { deps: unknown[]; groups: PhysicalRouteGroup[] } | null = null;
+
+  function physicalGroups(rows: readonly PhysicalRouteRow[]): PhysicalRouteGroup[] {
+    // Purpose: infer every cable alternative for the current focus once, not on every globe repaint
+    if (cableGraph === null) return [];
+    const deps = [cableGraph, model.observedRoutes, model.selectedAsn, model.selectedCountry];
+    if (physicalCache !== null && sameDeps(physicalCache.deps, deps)) return physicalCache.groups;
+    // The unfocused globe would otherwise infer tens of thousands of candidates at once. Keep the
+    // overview responsive; a focused AS or country always computes every alternative for its routes.
+    const input = model.hasSelection ? rows : [...rows].sort((a, b) => b.count - a.count).slice(0, 1200);
+    const asPoint = (at: [number, number] | Point | null | undefined): Point | null => {
+      if (at === null || at === undefined) return null;
+      const lon = 'lon' in at ? at.lon : at[0]!;
+      const lat = 'lat' in at ? at.lat : at[1]!;
+      return Number.isFinite(lon) && Number.isFinite(lat) ? { lon, lat } : null;
+    };
+    const groups = collectPhysicalRoutes(cableGraph, input, {
+      asnPoint: asn => asPoint(model.asnPoint(asn)),
+      ipPoint: ip => asPoint(model.ipPoint(ip)),
+    });
+    physicalCache = { deps, groups };
+    return groups;
+  }
+
   let staticLayers: { deps: unknown[]; layers: unknown[] } | null = null;
 
   function sameDeps(a: readonly unknown[], b: readonly unknown[]): boolean {
@@ -347,12 +371,11 @@
   }
 
   function rebuild(): void {
-    // Purpose: positions and scales for the latest results, including the physical-IP and selected-route layers
+    // Purpose: positions and scales for the latest results, including every inferred cable alternative
     const hasSelection = model.hasSelection;
     const arcs = !hasSelection
       ? model.arcs.map(a => ({ ...a, from: position(a.peer), to: position(a.origin) })).filter(a => a.from !== null && a.to !== null)
       : [];
-    const origins = model.origins.filter(o => position(o.asn) !== null && model.matchesSelection(o.asn));
     const moasArcs: { from: [number, number]; to: [number, number] }[] = [];
     if (model.selectedMoas !== null) {
       const pts = model.selectedMoas.origins.map(o => position(o.asn)).filter((p): p is [number, number] => p !== null);
@@ -360,8 +383,6 @@
     }
     let maxArc = 1;
     for (const a of arcs) maxArc = Math.max(maxArc, a.updates);
-    let maxOrigin = 1;
-    for (const o of origins) maxOrigin = Math.max(maxOrigin, o.updates);
     let maxCountry = 1;
     for (const v of model.countryActivity.values()) maxCountry = Math.max(maxCountry, v.updates);
     let routeMax = 1;
@@ -410,7 +431,7 @@
         group = {
           path: [], originAs: route.originAs, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp,
           count: 0, prefixes: 0, source: route.source, asPath: route.path, routerDetail,
-          origin, nextHopPoint, collector, physicalPath: route.physicalPath, originLabel,
+          origin, nextHopPoint, collector, originLabel,
         };
         groups.set(key, group);
       }
@@ -428,6 +449,13 @@
     let maxRoute = 1;
     for (const route of routePaths) maxRoute = Math.max(maxRoute, route.count);
 
+    const physicalRoutes: PhysicalDraw[] = physicalGroups(selectedRoutes).map(group => ({
+      ...group,
+      path3d: surfacePath(group.path, model.projection === 'globe' ? 0.02 : 0),
+    }));
+    let maxPhysical = 1;
+    for (const group of physicalRoutes) maxPhysical = Math.max(maxPhysical, group.count);
+
     // Inferred tier: the closest cable landing to each well-observed IP. Dashed, amber and explicitly
     // labelled as a guess — there is no BGP evidence that any of these IPs uses the nearest cable.
     const inferred: InferredDraw[] = [];
@@ -437,15 +465,15 @@
       for (const path of dashedSegments(ip.pos, landing)) inferred.push({ path, ip, landing });
     }
 
-    drawn = { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, asIps: asIps.map(point => ({ ...point, pos: [point.lon, point.lat] })), inferred, routePaths, maxRoute };
+    drawn = { arcs, maxArc, maxCountry, routeMax, moasArcs, paths, ips, maxIp, asIps: asIps.map(point => ({ ...point, pos: [point.lon, point.lat] })), inferred, routePaths, maxRoute, physicalRoutes, maxPhysical };
   }
 
   function layers(): unknown[] {
-    // Purpose: every layer, with the static ones cached so pulse frames do not re-upload the whole globe.
+    // Purpose: every layer, cached as one group so a plain rotation does not re-upload the globe.
     const globe = model.projection === 'globe';
     const deps = [globe, light, model.country, model.countryActivity, model.routeCountries, model.selectedMoas, model.selectedAsn, model.selectedCountry, model.showCables, drawn, countriesGeo, cablesGeo];
     if (staticLayers === null || !sameDeps(staticLayers.deps, deps)) {
-      const { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, asIps, inferred, routePaths, maxRoute } = drawn;
+      const { arcs, maxArc, maxCountry, routeMax, moasArcs, paths, ips, maxIp, asIps, inferred, routePaths, maxRoute, physicalRoutes, maxPhysical } = drawn;
       const selected = model.country;
       staticLayers = {
         deps,
@@ -547,15 +575,15 @@
             }),
           new PathLayer({
             id: 'physical-routes',
-            data: routePaths.filter(route => route.physicalPath !== null && route.physicalPath.length > 1),
+            data: physicalRoutes,
             pickable: true,
-            getPath: (d: RouteDraw) => surfacePath(d.physicalPath!, globe ? 0.02 : 0),
+            getPath: (d: PhysicalDraw) => d.path3d,
             getColor: [236, 168, 66, 210] as [number, number, number, number],
-            getWidth: (d: RouteDraw) => 2 + 6 * Math.log1p(d.count) / Math.log1p(maxRoute),
+            getWidth: (d: PhysicalDraw) => 1.5 + 6 * Math.log1p(d.count) / Math.log1p(maxPhysical),
             widthUnits: 'pixels',
             capRounded: false,
             wrapLongitude: !globe,
-            updateTriggers: { getWidth: [maxRoute], getPath: [globe] },
+            updateTriggers: { getWidth: [maxPhysical], getPath: [physicalRoutes] },
             parameters: { depthTest: false },
           }),
           new ScatterplotLayer({
@@ -616,21 +644,6 @@
             updateTriggers: { getSourceColor: [arcs, light], getWidth: [maxArc] },
           }),
           new ScatterplotLayer({
-            id: 'origins',
-            data: origins,
-            pickable: true,
-            radiusUnits: 'pixels',
-            getPosition: (d: OriginLike) => position(d.asn)!,
-            getRadius: (d: OriginLike) => 1.5 + 16 * Math.sqrt(d.updates / maxOrigin),
-            getFillColor: (d: OriginLike) => [...mix(d.withdraws / Math.max(1, d.updates)), 150] as [number, number, number, number],
-            getLineColor: light ? [20, 20, 20, 110] : [255, 255, 255, 120],
-            lineWidthMinPixels: 0.5,
-            stroked: true,
-            updateTriggers: { getRadius: [maxOrigin], getFillColor: [origins, light] },
-            transitions: { getRadius: 250 },
-            parameters: { depthTest: false },
-          }),
-          new ScatterplotLayer({
             id: 'observed-ips',
             data: ips,
             pickable: true,
@@ -668,33 +681,8 @@
         ].filter(Boolean),
       };
     }
-    const t = now;
-    return [
-      ...staticLayers.layers,
-      new ScatterplotLayer({
-        id: 'pulses',
-        // Live advertisement pulses are the remaining global event layer: apply the same AS/country,
-        // announcement/withdrawal and prefix-length filters as the arc query.
-        data: model.pulses.filter(p =>
-          (!model.hasSelection || model.matchesSelection(p.asn)) &&
-          (model.country === null || p.cc === model.country) &&
-          model.kinds.includes(p.kind) &&
-          p.prefixLen >= model.lenRange[0] && p.prefixLen <= model.lenRange[1]),
-        radiusUnits: 'pixels',
-        getPosition: (d: { lon: number; lat: number }) => [d.lon, d.lat],
-        getRadius: (d: { born: number }) => 2 + Math.min(12, Math.max(0, t - d.born) / 400),
-        getFillColor: (d: { born: number; kind: number }) => {
-          const age = Math.max(0, t - d.born) / 6000;
-          return [...(d.kind === 1 ? withdraw() : announce()), Math.round(200 * Math.max(0, 1 - age))] as [number, number, number, number];
-        },
-        stroked: false,
-        updateTriggers: { getRadius: [t], getFillColor: [t, light] },
-        parameters: { depthTest: false },
-      }),
-    ];
+    return staticLayers.layers;
   }
-
-  type OriginLike = { asn: number; updates: number; withdraws: number; prefixes: number };
 
   function tooltip(info: { layer?: { id: string } | null; object?: unknown }): { html: string; className: string } | null {
     // Purpose: explain what is under the pointer
@@ -730,14 +718,13 @@
       };
     }
     if (info.layer.id === 'physical-routes') {
-      const route = info.object as RouteDraw;
+      const route = info.object as PhysicalDraw;
       return {
         className: 'tip',
         html: `<b>Inferred physical route</b><br>
-          ${route.routerDetail}<br>
-          ${route.source}<br>
-          ${route.prefixes.toLocaleString('en')} prefix(es) · ${route.count.toLocaleString('en')} observations merged<br>
-          <span class="muted">Cable path is the shortest route over public cable geometry between the origin prefix and next-hop landings. BGP did not observe this cable path.</span>`,
+          AS${route.fromAs} ${nameOf(route.fromAs)} → AS${route.toAs} ${nameOf(route.toAs)}<br>
+          ${route.routes.toLocaleString('en')} observed route(s) · ${route.paths.toLocaleString('en')} AS path(s) · ${route.prefixes.toLocaleString('en')} prefix(es) · ${route.count.toLocaleString('en')} observations merged<br>
+          <span class="muted">One of every distinct candidate cable path between plausible landings for this AS hop. BGP did not observe the cable path.</span>`,
       };
     }
     if (info.layer.id === 'advertised-routes') {
@@ -748,16 +735,6 @@
           ${route.source} · ${route.count.toLocaleString('en')} observations merged<br>
           ${model.pathDetail === 'ips-geoip' ? `${route.routerDetail}<br>` : ''}
           <span class="mono">${route.asPath || 'path unavailable'}</span><br><span class="muted">Origin prefix → BGP next hop → collector, not a fibre route. Width grows logarithmically with the merged count.</span>`,
-      };
-    }
-    if (info.layer.id === 'origins') {
-      const o = info.object as OriginLike;
-      const h = model.hoverNetwork?.asn === o.asn ? model.hoverNetwork : null;
-      return {
-        className: 'tip',
-        html: `<b>AS${o.asn}</b> ${nameOf(o.asn)} <span class="muted">${ccOf(o.asn)}</span><br>
-          ${o.updates.toLocaleString('en')} updates about ${o.prefixes.toLocaleString('en')} of its prefixes in the window, ${o.withdraws.toLocaleString('en')} withdrawals<br>
-          ${h ? `originates <b>${h.routes.toLocaleString('en')}</b> routes in the table (${compact(h.addresses)} addresses, /${h.shortest}–/${h.longest})` : '<span class="muted">looking it up in the routing table…</span>'}`,
       };
     }
     if (info.layer.id === 'arcs') {
@@ -803,6 +780,8 @@
       countriesGeo = geo;
       cablesGeo = cables;
       cableLandings = extractLandings(cables);
+      cableGraph = buildCableGraph(cables);
+      physicalCache = null;
       rebuild();
       apply();
     });
@@ -817,10 +796,6 @@
         deck?.setProps({ viewState: viewState as never });
       },
       getTooltip: tooltip as never,
-      onHover: (info: { layer?: { id: string } | null; object?: unknown }) => {
-        const asn = info.layer?.id === 'origins' && info.object ? (info.object as OriginLike).asn : null;
-        if (asn !== (model.hoverNetwork?.asn ?? null)) void model.inspectNetwork(asn);
-      },
       onClick: (info: { layer?: { id: string } | null; object?: unknown }) => {
         lastInteraction = performance.now();
         if (info.layer?.id === 'countries' && info.object) {
@@ -834,13 +809,9 @@
             model.flyTo(ip.lon, ip.lat, 3);
           }
         } else if ((info.layer?.id === 'advertised-routes' || info.layer?.id === 'physical-routes' || info.layer?.id === 'as-ip-points') && info.object) {
-          const picked = info.object as { originAs?: number; asn?: number };
-          const asn = picked.originAs ?? picked.asn;
+          const picked = info.object as { originAs?: number; fromAs?: number; asn?: number };
+          const asn = picked.fromAs ?? picked.originAs ?? picked.asn;
           if (asn !== undefined) model.selectAsn(asn);
-        } else if (info.layer?.id === 'origins' && info.object) {
-          const asn = (info.object as OriginLike).asn;
-          model.selectAsn(asn);
-          model.flyToNetwork(asn);
         } else if (model.selectedAsn !== null && !info.object) {
           model.selectAsn(null);
         }
@@ -852,19 +823,10 @@
     (globalThis as { zamdaDeck?: Deck<GlobeView | MapView> }).zamdaDeck = deck;
     // Optional slow rotation while nobody touches the globe; off by default, and it stops for 8 s after any interaction.
     let raf = 0;
-    let lastPulseFrame = 0;
     const spin = (time: number) => {
-      now = performance.now();
       if (model.autoRotate && model.projection === 'globe' && time - lastInteraction > 8000 && !(viewState as { transitionDuration?: number }).transitionDuration) {
         viewState = { ...viewState, longitude: ((Number(viewState.longitude) + 0.025 + 180) % 360) - 180 };
         deck?.setProps({ viewState: viewState as never });
-      }
-      // Pulse animation needs redraws, but a software renderer can block the page thread for seconds and
-      // delay a worker reply. Never paint while a query is in flight: the engine number then measures the
-      // engine, not the canvas.
-      if (model.pulses.length > 0 && !model.computing && time - lastPulseFrame > 50) {
-        lastPulseFrame = time;
-        apply();
       }
       raf = requestAnimationFrame(spin);
     };
@@ -878,7 +840,7 @@
 
   $effect(() => {
     // Redraw whenever a result, a filter, the selection or the theme changes.
-    void [model.arcs, model.origins, model.countryActivity, model.routeCountries, model.country, model.selectedMoas, model.selectedAsn, model.selectedCountry, model.showCables, model.observedIps, model.observedRoutes, model.asIps, light];
+    void [model.arcs, model.countryActivity, model.routeCountries, model.country, model.selectedMoas, model.selectedAsn, model.selectedCountry, model.showCables, model.observedIps, model.observedRoutes, model.asIps, light];
     rebuild();
     apply();
   });

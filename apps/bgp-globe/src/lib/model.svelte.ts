@@ -10,6 +10,7 @@ import { startFeed } from './live';
 import type { Feed, FeedSource, LiveRow } from './live';
 import { NONE } from './schemas';
 import { num, parseIp } from './format';
+import { asPathAsns } from './cables';
 
 export type Mode = 'replay' | 'live';
 export type Projection = 'globe' | 'mercator';
@@ -47,16 +48,6 @@ export interface Totals {
   readonly prefixes: number;
   readonly networks: number;
   readonly peers: number;
-}
-
-export interface Pulse {
-  readonly asn: number;
-  readonly cc: number;
-  readonly prefixLen: number;
-  readonly lon: number;
-  readonly lat: number;
-  readonly kind: number;
-  readonly born: number;
 }
 
 type LiveIp = { -readonly [K in keyof ObservedIp]: ObservedIp[K] };
@@ -113,7 +104,6 @@ export class Model {
   timeline = $state.raw<{ announce: Float64Array; withdraw: Float64Array; bucket: number }>({ announce: new Float64Array(0), withdraw: new Float64Array(0), bucket: TIMELINE_BUCKET });
   routeCountries = $state.raw<Map<number, { routes: number; addresses: number; networks: number }>>(new Map());
   routeTotals = $state.raw({ routes: 0, addresses: 0, networks: 0 });
-  pulses = $state.raw<Pulse[]>([]);
 
   // How long each engine took for one frame's queries, most recent last.
   history = $state.raw<Record<EngineName, number[]>>({ js: [], wasm: [] });
@@ -160,6 +150,7 @@ export class Model {
   private observedIpIndex = new Map<number, LiveIp>();
   private observedRouteIndex = new Map<string, LiveRoute>();
   private observedRoutesByOrigin = new Map<number, ObservedRoute[]>();
+  private observedRoutesByAsn = new Map<number, ObservedRoute[]>();
   private asnsByCountry = new Map<number, Set<number>>();
   private asIpsByAsn = new Map<number, AsIpPoint[]>();
   private lastObservedPublish = 0;
@@ -300,13 +291,33 @@ export class Model {
     return this.asIpsByAsn.get(asn) ?? [];
   }
 
+  asnPoint(asn: number): [number, number] | null {
+    // Purpose: the best known place to start or end a physical hop for one AS
+    const points = this.asIpsByAsn.get(asn);
+    if (points !== undefined && points.length > 0) {
+      const best = points.reduce((a, b) => (b.count > a.count ? b : a));
+      return [best.lon, best.lat];
+    }
+    const at = this.networks?.index.get(asn);
+    if (this.networks === null || at === undefined) return null;
+    return [this.networks.lon[at]!, this.networks.lat[at]!];
+  }
+
+  ipPoint(ip: number): [number, number] | null {
+    // Purpose: a located router or collector address, when one was observed
+    const row = this.observedIpIndex.get(ip);
+    return row === undefined || row.precision === 0 ? null : [row.lon, row.lat];
+  }
+
   routesForSelection(): readonly ObservedRoute[] {
-    // Purpose: all routes originated by the focused AS or by ASes registered in the focused country
-    if (this.selectedAsn !== null) return this.observedRoutesFor(this.selectedAsn);
-    if (this.selectedCountry === null) return this.observedRoutes;
-    const out: ObservedRoute[] = [];
-    for (const asn of this.asnsByCountry.get(this.selectedCountry) ?? []) out.push(...(this.observedRoutesByOrigin.get(asn) ?? []));
-    return out;
+    // Purpose: every route that involves the focused AS or any BGP-participating AS in the focused country
+    if (this.selectedAsn !== null) return this.observedRoutesByAsn.get(this.selectedAsn) ?? [];
+    if (this.selectedCountry === null) return [];
+    const unique = new Set<ObservedRoute>();
+    for (const asn of this.asnsByCountry.get(this.selectedCountry) ?? []) {
+      for (const row of this.observedRoutesByAsn.get(asn) ?? []) unique.add(row);
+    }
+    return [...unique];
   }
 
   private routeKey(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number): string {
@@ -378,16 +389,24 @@ export class Model {
   }
 
   private publishObserved(): void {
-    // Purpose: publish immutable arrays and the origin index; called at load and on a slow live throttle
+    // Purpose: publish immutable arrays and the AS/origin indexes; called at load and on a slow live throttle
     this.observedIps = [...this.observedIpIndex.values()];
     this.observedRoutes = [...this.observedRouteIndex.values()];
     const byOrigin = new Map<number, ObservedRoute[]>();
+    const byAsn = new Map<number, ObservedRoute[]>();
     for (const row of this.observedRoutes) {
       let list = byOrigin.get(row.originAs);
       if (list === undefined) byOrigin.set(row.originAs, list = []);
       list.push(row);
+      const involvedAsns = new Set<number>([row.originAs, row.peerAs, ...asPathAsns(row.path)]);
+      for (const asn of involvedAsns) {
+        let involved = byAsn.get(asn);
+        if (involved === undefined) byAsn.set(asn, involved = []);
+        involved.push(row);
+      }
     }
     this.observedRoutesByOrigin = byOrigin;
+    this.observedRoutesByAsn = byAsn;
   }
 
   setFilter(change: { kinds?: number[]; country?: number | null; lenRange?: [number, number] }): void {
@@ -526,10 +545,6 @@ export class Model {
         } else this.t = next;
         this.requestFrame();
       }
-      if (this.pulses.length > 0) {
-        const cutoff = performance.now() - 6000;
-        if (this.pulses[0]!.born < cutoff) this.pulses = this.pulses.filter(p => p.born >= cutoff);
-      }
       requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
@@ -654,7 +669,7 @@ export class Model {
   }
 
   private async onLiveBatch(rows: LiveRow[]): Promise<void> {
-    // Purpose: one second of live updates: log them, apply them to the routing table, pulse them on the map
+    // Purpose: one second of live updates: log them and apply them to the routing table
     const engines = this.engines;
     const networks = this.networks;
     if (engines === null || networks === null || this.mode !== 'live') return;
@@ -675,8 +690,6 @@ export class Model {
     // it; prefixes from the snapshot stay (the snapshot does not say which peers had them).
     const upserts = new Map<number, LiveRow>();
     const deletes: [number, number][] = [];
-    const now = performance.now();
-    const pulses: Pulse[] = [];
     rows.forEach((row, i) => {
       const key = row.prefix_addr * 64 + row.prefix_len;
       if (row.kind === 1) {
@@ -707,7 +720,6 @@ export class Model {
       cols.path_len[i] = row.path_len;
       cols.cc[i] = at === undefined ? NONE : networks.cc[at]!;
       cols.pkey[i] = key;
-      if (at !== undefined && i % 3 === 0) pulses.push({ asn: row.origin_as, cc: cols.cc[i]!, prefixLen: row.prefix_len, lon: networks.lon[at]!, lat: networks.lat[at]!, kind: row.kind, born: now + (i / n) * 900 });
     });
     const up = [...upserts.values()];
     const routeCols =
@@ -736,7 +748,6 @@ export class Model {
     this.liveNow = Math.max(this.liveNow, rows[rows.length - 1]?.second ?? this.liveNow);
     this.liveRateWindow = [...this.liveRateWindow, n].slice(-10);
     this.liveRate = this.liveRateWindow.reduce((s, v) => s + v, 0) / this.liveRateWindow.length;
-    this.pulses = [...this.pulses, ...pulses].slice(-3000);
     this.requestFrame();
     // The per-country routing table view is a full pass over 1.2 M routes: every few seconds is enough.
     if (performance.now() - this.routesRefreshed > 5000) {

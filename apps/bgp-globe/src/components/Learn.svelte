@@ -26,11 +26,11 @@
     },
     {
       title: 'Physical route confidence',
-      body: 'Three layers, three levels of evidence. Thin coloured lines join a BGP next hop to the RIS collector that saw it: UPDATE hops are observed; RIB routes use the originating AS’s RIS peer address as an inferred next hop. Thick amber lines are an inferred physical route: the origin prefix and its BGP next hop are geolocated with DB-IP, then the shortest path over public submarine cable geometry is drawn between their nearest landings. Faint grey lines are the cables themselves. BGP did not observe the cable path, and no layer shows the fibre a packet actually took. IP locations: DB-IP (CC BY 4.0) and operator geofeeds.',
+      body: 'Three layers, three levels of evidence. Thin coloured lines join a BGP next hop to the RIS collector that saw it: UPDATE hops are observed; RIB routes use the originating AS’s RIS peer address as an inferred next hop. Amber lines are inferred physical routes: for every adjacent pair of ASes in an AS_PATH, each distinct candidate path over the local public submarine-cable geometry is drawn once, merging every observed route that could use it. Faint grey lines are the cables themselves. BGP did not observe the cable path, and no layer shows the fibre a packet actually took. IP locations: DB-IP (CC BY 4.0) and operator geofeeds.',
     },
     {
       title: 'A focused network or country',
-      body: 'Search for an AS, pick a country, or click a point or origin dot. The globe then shows every known BGP-speaking IP of the matching ASes, their geolocated address blocks, and the prefixes they originated. Next hops stay visible even when they sit in another country, so you can see where the route leaves. Line width is logarithmic in the number of merged observations.',
+      body: 'With no focus, no BGP routes are drawn. Search for an AS, pick a country, or click a point or route. The globe then shows every known BGP-speaking IP of the matching ASes, their geolocated address blocks, and every route those ASes originate, carry or advertise. Next hops stay visible even when they sit in another country, so you can see where the route leaves. Line width is logarithmic in the number of merged observations.',
     },
     {
       title: 'Prefixes and the routing table',
