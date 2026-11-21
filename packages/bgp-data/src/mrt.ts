@@ -87,41 +87,62 @@ export class MrtFormatError extends Error {
   }
 }
 
+export interface AsPathSegment {
+  readonly type: number;
+  readonly asns: readonly number[];
+}
+
 export interface PathInfo {
   readonly pathLength: number;
   readonly originAs: number | null;
   readonly sequences: readonly (readonly number[])[];
+  // Every segment in wire order, so callers can show the full path, not just its origin.
+  readonly segments: readonly AsPathSegment[];
+  readonly text: string;
+}
+
+export function emptyPath(): PathInfo {
+  // Purpose: the path info for an entry without an AS_PATH attribute
+  return { pathLength: 0, originAs: null, sequences: [], segments: [], text: '' };
+}
+
+function segmentText(segment: AsPathSegment): string {
+  // Purpose: display braces for sets and angle brackets for confederations, so a path stays unambiguous
+  const list = segment.asns.join(' ');
+  if (segment.type === SEGMENT_AS_SET) return `{${list}}`;
+  if (segment.type === 3 || segment.type === 4) return `<${list}>`;
+  return list;
 }
 
 export function decodeAsPath(view: DataView, start: number, end: number, includeSequences = false): PathInfo {
-  // Purpose: path length and origin AS from an AS_PATH attribute value, plus its sequence segments when the graph needs them
+  // Purpose: path length, origin AS and full segment list from an AS_PATH attribute value
   let at = start;
   let pathLength = 0;
   let originAs: number | null = null;
   const sequences: number[][] = [];
+  const segments: AsPathSegment[] = [];
   while (at < end) {
     if (at + 2 > end) throw new MrtFormatError('AS_PATH segment header runs past the attribute');
     const type = view.getUint8(at);
     const count = view.getUint8(at + 1);
     at += 2;
     if (at + count * 4 > end) throw new MrtFormatError('AS_PATH segment runs past the attribute');
+    const asns: number[] = [];
+    for (let i = 0; i < count; i++) asns.push(view.getUint32(at + i * 4));
     if (type === SEGMENT_AS_SEQUENCE) {
       pathLength += count;
-      if (includeSequences && count > 0) {
-        const sequence: number[] = [];
-        for (let i = 0; i < count; i++) sequence.push(view.getUint32(at + i * 4));
-        sequences.push(sequence);
-      }
-      originAs = count > 0 ? view.getUint32(at + (count - 1) * 4) : originAs;
+      if (includeSequences && count > 0) sequences.push(asns);
+      originAs = count > 0 ? asns[count - 1]! : originAs;
     } else if (type === SEGMENT_AS_SET) {
       pathLength += 1;
       // The origin is ambiguous when the path ends in a set.
       originAs = null;
     }
     // Confederation segments (3 and 4) count for nothing and do not change the origin.
+    segments.push({ type, asns });
     at += count * 4;
   }
-  return { pathLength, originAs, sequences };
+  return { pathLength, originAs, sequences, segments, text: segments.map(segmentText).join(' ') };
 }
 
 function findAsPath(view: DataView, start: number, end: number, includeSequences: boolean): PathInfo {
@@ -139,7 +160,7 @@ function findAsPath(view: DataView, start: number, end: number, includeSequences
     if (type === ATTR_AS_PATH) return decodeAsPath(view, valueStart, valueEnd, includeSequences);
     at = valueEnd;
   }
-  return { pathLength: 0, originAs: null, sequences: [] };
+  return emptyPath();
 }
 
 function decodePeers(view: DataView, start: number, end: number): Peer[] {

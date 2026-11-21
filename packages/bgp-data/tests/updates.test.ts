@@ -14,8 +14,9 @@ function bgp4mpRecord(time: number, peerAs: number, withdrawn: [number, number][
   const wd = withdrawn.flatMap(prefix);
   const nlri = announced.flatMap(prefix);
   const asPath = path.length === 0 ? [] : [2, path.length, ...path.flatMap(a => [(a >>> 24) & 255, (a >>> 16) & 255, (a >>> 8) & 255, a & 255])];
-  // ORIGIN (type 1) then AS_PATH (type 2), both well-known transitive.
-  const attrs = [0x40, 1, 1, 0, ...(asPath.length === 0 ? [] : [0x40, 2, asPath.length, ...asPath])];
+  // ORIGIN (type 1), AS_PATH (type 2) and NEXT_HOP (type 3), all well-known transitive.
+  const nextHop = [0x40, 3, 4, 192, 0, 2, 1];
+  const attrs = [0x40, 1, 1, 0, ...(asPath.length === 0 ? [] : [0x40, 2, asPath.length, ...asPath]), ...nextHop];
   const body = [0, wd.length, ...wd, (attrs.length >> 8) & 255, attrs.length & 255, ...attrs, ...nlri];
   const message = [...new Array(16).fill(255), 0, 0, 2, ...body];
   message[16] = (message.length >> 8) & 255;
@@ -43,8 +44,30 @@ describe('BGP4MP updates', () => {
       for (let i = 0; i < bytes.length; i += split) reader.push(bytes.subarray(i, i + split));
       reader.finish();
       expect(seen).toEqual([
-        { time: 1000, peerAs: 64500, withdrawn: [{ addr: 0x0a000000, length: 8 }], announced: [{ addr: 0xc0a80000, length: 16 }, { addr: 0xcb007100, length: 24 }], originAs: 13335, pathLength: 3 },
-        { time: 1001, peerAs: 64501, withdrawn: [{ addr: 0x01020300, length: 24 }], announced: [], originAs: null, pathLength: 0 },
+        {
+          time: 1000,
+          peerAs: 64500,
+          peerIp: '10.0.0.1',
+          localIp: '10.0.0.2',
+          nextHop: '192.0.2.1',
+          asPath: '64500 3356 13335',
+          withdrawn: [{ addr: 0x0a000000, length: 8 }],
+          announced: [{ addr: 0xc0a80000, length: 16 }, { addr: 0xcb007100, length: 24 }],
+          originAs: 13335,
+          pathLength: 3,
+        },
+        {
+          time: 1001,
+          peerAs: 64501,
+          peerIp: '10.0.0.1',
+          localIp: '10.0.0.2',
+          nextHop: '192.0.2.1',
+          asPath: '',
+          withdrawn: [{ addr: 0x01020300, length: 24 }],
+          announced: [],
+          originAs: null,
+          pathLength: 0,
+        },
       ]);
     }
   });
