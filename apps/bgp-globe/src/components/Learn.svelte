@@ -25,8 +25,12 @@
       body: 'RIPE RIS collectors listen to BGP from networks around the world (the peers). An arc joins the peer that sent an update to the network that originates the prefix. It shows who learns about whom, not where cables run.',
     },
     {
+      title: 'Physical route confidence',
+      body: 'Three layers, three levels of evidence. Solid coloured lines are observed BGP hops: a prefix really was advertised through that next hop to that collector. Dashed amber lines are an inference only — the nearest submarine cable landing to an observed IP, with no BGP evidence linking them. Faint grey lines are public submarine cable geometry, background context with no route evidence at all. None of these shows the fibre a packet actually took.',
+    },
+    {
       title: 'A focused network',
-      body: 'Search for an AS, click its IP point or click an origin dot. The globe then shows only that network’s observed IPs and the prefixes it originated, grouped where they share the same next hop and collector. Thicker lines mean more observations, on a logarithmic scale. These are observed BGP hops, not fibre routes.',
+      body: 'Search for an AS, click its IP point or click an origin dot. The globe then shows only that network’s observed IPs and the prefixes it originated, grouped where they share the same next hop and collector. Thicker lines mean more observations, on a logarithmic scale.',
     },
     {
       title: 'Prefixes and the routing table',

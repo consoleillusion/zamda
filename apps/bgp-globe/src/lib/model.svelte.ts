@@ -94,6 +94,8 @@ export class Model {
 
   // Physical-IP view: every BGP-speaking IP we have observed and the paths it advertised.
   selectedAsn = $state<number | null>(null);
+  showCables = $state(true);
+  pathDetail = $state<'as-paths' | 'ips-geoip'>('ips-geoip');
   observedIps = $state.raw<ObservedIp[]>([]);
   observedRoutes = $state.raw<ObservedRoute[]>([]);
 

@@ -97,8 +97,10 @@
           </p>
         {/if}
       </section>
-      <EnginePanel {model} />
-      <SidePanel {model} />
+      <div class="drawer-body">
+        <EnginePanel {model} />
+        <SidePanel {model} />
+      </div>
     </aside>
   </div>
 {:else if model.phase === 'loading'}
@@ -135,6 +137,7 @@
   }
   .hidden .drawer { transform: translateX(-100%); }
 
+  .drawer-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
   .drawer-head { padding: 14px 16px; border-bottom: 1px solid var(--line); flex: none; }
   .head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
   .head-actions { display: flex; gap: 6px; flex: none; }

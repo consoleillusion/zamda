@@ -3,6 +3,7 @@
 //                    the physical-IP tables globe-ips.zcl and globe-ip-routes.zcl
 //   public/engine    a link to the WASM engine build (packages/zamda/dist/zamda-engine.wasm)
 //   public/countries.geojson  Natural Earth 1:110m countries (public domain), downloaded once
+//   public/cables.geojson     MIT-licensed submarine cable geometry (background context only), downloaded once
 //   public/terrain   low-resolution Terrarium elevation tiles (z=1..3), downloaded once
 //                    the browser turns these into a neutral relief texture at runtime
 // Nothing here is committed: public/ holds only links and downloads.
@@ -43,6 +44,56 @@ if (!existsSync(countries)) {
     })),
   };
   await writeFile(countries, JSON.stringify(slim));
+}
+
+// Public submarine cable geometry, used only as background context: it never claims that an
+// observed BGP path uses a particular cable. The source is MIT licensed; keep the notice local.
+const CABLES = 'https://raw.githubusercontent.com/hadistlm/submarine-cable-map/master/data/cable-geo.json';
+const CABLE_LICENSE = `cables.geojson — submarine cable geometry
+Source: ${CABLES}
+
+MIT License
+
+Copyright (c) 2020 Young Aus
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Note: this geometry is background context only. It is not derived from BGP and
+does not establish that any observed IP or AS path uses a particular cable.
+`;
+const cables = join(pub, 'cables.geojson');
+if (!existsSync(cables)) {
+  console.log(`downloading ${CABLES}`);
+  const response = await fetch(CABLES);
+  if (!response.ok) throw new Error(`${CABLES}: HTTP ${response.status}`);
+  const geo = (await response.json()) as { features: { properties: Record<string, unknown>; geometry: unknown }[] };
+  // Keep the fields the globe reads: the line geometry and the cable slug.
+  const slim = {
+    type: 'FeatureCollection',
+    features: geo.features.map(f => ({
+      type: 'Feature',
+      properties: { slug: String(f.properties.slug ?? '') },
+      geometry: f.geometry,
+    })),
+  };
+  await writeFile(cables, JSON.stringify(slim));
+  await writeFile(join(pub, 'cables.LICENSE.txt'), CABLE_LICENSE);
 }
 
 // Low-resolution global elevation: 4 + 16 + 64 Terrarium tiles, about 8 MB in total.

@@ -73,6 +73,23 @@
 
 <aside class="side">
   <section>
+    <h2>Physical route layers</h2>
+    <div class="legend">
+      <div><i class="sw solid"></i><span><b>Observed BGP hop</b> — advertised next hop to the RIS collector.</span></div>
+      <div><i class="sw dashed"></i><span><b>Inferred cable link</b> — nearest cable landing to an observed IP. No BGP evidence ties them together.</span></div>
+      <div><i class="sw cable"></i><span><b>Submarine cables</b> — background geometry only, never a claim that traffic uses that cable.</span></div>
+    </div>
+    <label class="tick"><input type="checkbox" bind:checked={model.showCables} /> Show cable geometry</label>
+    <label class="detail-level">
+      Path detail
+      <select bind:value={model.pathDetail}>
+        <option value="as-paths">AS numbers only</option>
+        <option value="ips-geoip">Router IPs plus GeoIP</option>
+      </select>
+    </label>
+  </section>
+
+  <section>
     <h2>{model.mode === 'live' ? 'Last two minutes' : 'In the window'}</h2>
     <div class="cards">
       <div><span class="num">{compact(model.totals.updates)}</span><small>updates</small></div>
@@ -202,7 +219,7 @@
 </aside>
 
 <style>
-  .side { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 16px; border-top: 1px solid var(--line); }
+  .side { flex: none; padding: 14px 16px; display: flex; flex-direction: column; gap: 16px; border-top: 1px solid var(--line); }
   .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .cards div { background: var(--wash-1); border: 1px solid var(--line); border-radius: 0; padding: 8px 10px; display: flex; flex-direction: column; }
   .cards .num { font-size: 18px; font-weight: 600; }
@@ -216,6 +233,7 @@
   .sw { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
   .sw.ann { background: var(--announce); }
   .sw.wd { background: var(--withdraw); }
+  .legend .sw { flex: none; width: 20px; height: 0; margin: 7px 0 0; border-radius: 0; border-top-width: 2px; }
   .filters { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
   .len { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; width: 100%; }
   .ranges { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -245,5 +263,14 @@
   .matches li { padding: 6px 8px; border-radius: 0; border: 1px solid var(--line); opacity: 0.7; }
   .matches li.best { opacity: 1; border-color: var(--accent-border); background: var(--accent-wash-soft); }
   .matches .muted { font-size: 11px; }
-  @media (max-width: 900px) { .side { display: none; } }
+  .legend { display: flex; flex-direction: column; gap: 7px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+  .legend div { display: flex; gap: 8px; align-items: flex-start; }
+  .legend b { color: var(--text); font-weight: 600; }
+  .sw.solid { border-top-style: solid; border-color: var(--announce); }
+  .sw.dashed { border-top-style: dashed; border-color: var(--amber); }
+  .sw.cable { border-top-style: solid; border-color: var(--faint); opacity: 0.7; }
+  .tick { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 12px; cursor: pointer; }
+  .tick input { accent-color: var(--announce); }
+  .detail-level { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .detail-level select { background: var(--wash-input); color: var(--text); border: 1px solid var(--line-strong); border-radius: 0; padding: 5px 7px; font: inherit; font-size: 12px; }
 </style>

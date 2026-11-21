@@ -14,6 +14,8 @@
   let host: HTMLDivElement;
   let deck: Deck<GlobeView | MapView> | null = null;
   let countriesGeo: { type: string; features: { properties: { iso: string; name: string } }[] } | null = null;
+  let cablesGeo: { type: string; features: { geometry: { type: string; coordinates: number[][][] } }[] } | null = null;
+  let cableLandings: [number, number][] = [];
   let viewState: Record<string, unknown> = { longitude: 10, latitude: 25, zoom: 1.55, pitch: 0, bearing: 0 };
   let lastInteraction = 0;
   let fading = $state(false);
@@ -198,6 +200,51 @@
     return [n.lon[i]!, n.lat[i]!];
   }
 
+  function extractLandings(geo: typeof cablesGeo): [number, number][] {
+    // Purpose: deduplicated cable endpoints, the only points where a cable can plausibly meet a router
+    if (geo === null) return [];
+    const seen = new Set<string>();
+    const out: [number, number][] = [];
+    for (const feature of geo.features) {
+      for (const line of feature.geometry.coordinates ?? []) {
+        if (line.length === 0) continue;
+        for (const point of [line[0]!, line[line.length - 1]!]) {
+          const lon = point[0]!, lat = point[1]!;
+          const key = `${Math.round(lon * 2)},${Math.round(lat * 2)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push([lon, lat]);
+        }
+      }
+    }
+    return out;
+  }
+
+  function nearestLanding(pos: [number, number]): [number, number] | null {
+    // Purpose: the closest cable landing to an observed IP, as an explicitly weak inference
+    let best: [number, number] | null = null;
+    let bestDistance = Infinity;
+    const cos = Math.cos(pos[1] * Math.PI / 180);
+    for (const landing of cableLandings) {
+      const dx = (landing[0] - pos[0]) * cos;
+      const dy = landing[1] - pos[1];
+      const distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = landing;
+      }
+    }
+    return best;
+  }
+
+  function dashedSegments(from: [number, number], to: [number, number]): [number, number, number][][] {
+    // Purpose: draw an inferred link as dashes so it never reads as an observed path
+    const points = arcPath(from, to, 0);
+    const segments: [number, number, number][][] = [];
+    for (let i = 0; i + 1 < points.length; i += 2) segments.push([points[i]!, points[i + 1]!]);
+    return segments;
+  }
+
   function arcPath(from: [number, number], to: [number, number], lift: number): [number, number, number][] {
     // Purpose: a great-circle arc raised off the sphere (the globe draws arcs as 3D paths)
     const rad = Math.PI / 180;
@@ -243,6 +290,7 @@
 
   type ArcDraw = { peer: number; origin: number; updates: number; withdraws: number; from: [number, number] | null; to: [number, number] | null };
   type IpDraw = ObservedIp & { pos: [number, number] };
+  type InferredDraw = { path: [number, number, number][]; ip: IpDraw; landing: [number, number] };
   type RouteDraw = {
     path: [number, number, number][];
     originAs: number;
@@ -253,6 +301,7 @@
     count: number;
     prefixes: number;
     asPath: string;
+    routerDetail: string;
   };
   // Drawn data, rebuilt only when a result changes (not on every animation frame).
   let drawn: {
@@ -266,9 +315,10 @@
     paths: { path: [number, number, number][]; arc: ArcDraw }[];
     ips: IpDraw[];
     maxIp: number;
+    inferred: InferredDraw[];
     routePaths: RouteDraw[];
     maxRoute: number;
-  } = { arcs: [], maxArc: 1, origins: [], maxOrigin: 1, maxCountry: 1, routeMax: 1, moasArcs: [], paths: [], ips: [], maxIp: 1, routePaths: [], maxRoute: 1 };
+  } = { arcs: [], maxArc: 1, origins: [], maxOrigin: 1, maxCountry: 1, routeMax: 1, moasArcs: [], paths: [], ips: [], maxIp: 1, inferred: [], routePaths: [], maxRoute: 1 };
 
   // Deck.gl reuses layer instances cheaply; rebuilding them every pulse frame re-uploads the terrain and
   // country textures. Keep every layer that does not animate in one cache, keyed by its inputs.
@@ -310,7 +360,7 @@
     let maxIp = 1;
     for (const ip of ips) maxIp = Math.max(maxIp, ip.count);
 
-    const groups = new Map<string, { from: [number, number]; to: [number, number]; originAs: number; peerAs: number; nextHop: number; peerIp: number; localIp: number; count: number; prefixes: number; path: string }>();
+    const groups = new Map<string, { from: [number, number]; to: [number, number]; originAs: number; peerAs: number; nextHop: number; peerIp: number; localIp: number; count: number; prefixes: number; path: string; routerDetail: string }>();
     if (selected !== null) {
       for (const route of model.observedRoutesFor(selected)) {
         const from = allIpIndex.get(route.nextHop)?.pos ?? position(route.peerAs);
@@ -319,7 +369,13 @@
         const key = `${from[0].toFixed(2)},${from[1].toFixed(2)}>${to[0].toFixed(2)},${to[1].toFixed(2)}`;
         let group = groups.get(key);
         if (group === undefined) {
-          group = { from, to, originAs: selected, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp, count: 0, prefixes: 0, path: route.path };
+          const next = allIpIndex.get(route.nextHop);
+          const local = allIpIndex.get(route.localIp);
+          const geo = (ip: IpDraw | undefined) => ip === undefined
+            ? 'no GeoIP fix'
+            : `${ip.lat.toFixed(2)}, ${ip.lon.toFixed(2)} · ${ip.precision === 2 ? 'facility-level' : ip.precision === 1 ? 'country-level' : 'unlocated'} GeoIP`;
+          const routerDetail = `${ipText(route.nextHop)} next hop (${geo(next)}) · ${ipText(route.localIp)} collector (${geo(local)})`;
+          group = { from, to, originAs: selected, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp, count: 0, prefixes: 0, path: route.path, routerDetail };
           groups.set(key, group);
         }
         group.count += route.count;
@@ -340,18 +396,29 @@
         count: group.count,
         prefixes: group.prefixes,
         asPath: group.path,
+        routerDetail: group.routerDetail,
       }));
     let maxRoute = 1;
     for (const route of routePaths) maxRoute = Math.max(maxRoute, route.count);
-    drawn = { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, routePaths, maxRoute };
+
+    // Inferred tier: the closest cable landing to each well-observed IP. Dashed, amber and explicitly
+    // labelled as a guess — there is no BGP evidence that any of these IPs uses the nearest cable.
+    const inferred: InferredDraw[] = [];
+    for (const ip of ips.slice(0, 40)) {
+      const landing = nearestLanding(ip.pos);
+      if (landing === null) continue;
+      for (const path of dashedSegments(ip.pos, landing)) inferred.push({ path, ip, landing });
+    }
+
+    drawn = { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, inferred, routePaths, maxRoute };
   }
 
   function layers(): unknown[] {
     // Purpose: every layer, with the static ones cached so pulse frames do not re-upload the whole globe.
     const globe = model.projection === 'globe';
-    const deps = [globe, light, model.country, model.countryActivity, model.routeCountries, model.selectedMoas, model.selectedAsn, drawn, countriesGeo];
+    const deps = [globe, light, model.country, model.countryActivity, model.routeCountries, model.selectedMoas, model.selectedAsn, model.showCables, drawn, countriesGeo, cablesGeo];
     if (staticLayers === null || !sameDeps(staticLayers.deps, deps)) {
-      const { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, routePaths, maxRoute } = drawn;
+      const { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, inferred, routePaths, maxRoute } = drawn;
       const selected = model.country;
       staticLayers = {
         deps,
@@ -425,6 +492,32 @@
               // Paint the data ramp over the relief texture instead of hiding behind it.
               parameters: { depthTest: false },
             }),
+          model.showCables &&
+            cablesGeo !== null &&
+            new GeoJsonLayer({
+              id: 'submarine-cables',
+              data: cablesGeo as never,
+              stroked: true,
+              filled: false,
+              lineWidthUnits: 'pixels',
+              getLineWidth: 0.8,
+              getLineColor: light ? [70, 86, 102, 90] : [150, 170, 190, 70],
+              parameters: { depthTest: false },
+              updateTriggers: { getLineColor: [light] },
+            }),
+          model.showCables &&
+            new PathLayer({
+              id: 'inferred-cable-links',
+              data: inferred,
+              pickable: false,
+              getPath: (d: InferredDraw) => d.path,
+              getColor: [236, 168, 66, 120] as [number, number, number, number],
+              getWidth: 1,
+              widthUnits: 'pixels',
+              capRounded: false,
+              wrapLongitude: !globe,
+              parameters: { depthTest: false },
+            }),
           new PathLayer({
             id: 'advertised-routes',
             data: routePaths,
@@ -489,7 +582,7 @@
             pickable: true,
             radiusUnits: 'pixels',
             getPosition: (d: IpDraw) => d.pos,
-            getRadius: (d: IpDraw) => 2 + 9 * Math.log1p(d.count) / Math.log1p(maxIp),
+            getRadius: (d: IpDraw) => 3 + 11 * Math.log1p(d.count) / Math.log1p(maxIp),
             getFillColor: (d: IpDraw) => [...asColor(d.asn), model.selectedAsn === null ? 170 : 230] as [number, number, number, number],
             getLineColor: light ? [20, 20, 20, 120] : [255, 255, 255, 150],
             lineWidthMinPixels: 0.8,
@@ -572,7 +665,8 @@
       return {
         className: 'tip',
         html: `<b>AS${route.originAs}</b> ${nameOf(route.originAs)} advertises <b>${route.prefixes.toLocaleString('en')}</b> prefix(es)<br>
-          ${ipText(route.nextHop)} → ${ipText(route.localIp)} · ${route.count.toLocaleString('en')} observations merged<br>
+          ${route.count.toLocaleString('en')} observations merged<br>
+          ${model.pathDetail === 'ips-geoip' ? `${route.routerDetail}<br>` : ''}
           <span class="mono">${route.asPath || 'path unavailable'}</span><br><span class="muted">Observed BGP next hop to collector, not a fibre route. Width grows logarithmically with the merged count.</span>`,
       };
     }
@@ -622,13 +716,16 @@
   }
 
   onMount(() => {
-    void fetch('/countries.geojson')
-      .then(r => r.json())
-      .then(geo => {
-        countriesGeo = geo;
-        rebuild();
-        apply();
-      });
+    void Promise.all([
+      fetch('/countries.geojson').then(r => r.json()),
+      fetch('/cables.geojson').then(r => r.json()),
+    ]).then(([geo, cables]) => {
+      countriesGeo = geo;
+      cablesGeo = cables;
+      cableLandings = extractLandings(cables);
+      rebuild();
+      apply();
+    });
     deck = new Deck({
       parent: host,
       views: view(),
@@ -668,6 +765,8 @@
       layers: [],
       parameters: { clearColor: [0, 0, 0, 0] } as never,
     });
+    // Exposed for browser checks, alongside the model on App.svelte.
+    (globalThis as { zamdaDeck?: Deck<GlobeView | MapView> }).zamdaDeck = deck;
     // Optional slow rotation while nobody touches the globe; off by default, and it stops for 8 s after any interaction.
     let raf = 0;
     let lastPulseFrame = 0;
@@ -694,7 +793,7 @@
 
   $effect(() => {
     // Redraw whenever a result, a filter, the selection or the theme changes.
-    void [model.arcs, model.origins, model.countryActivity, model.routeCountries, model.country, model.selectedMoas, model.selectedAsn, model.observedIps, model.observedRoutes, light];
+    void [model.arcs, model.origins, model.countryActivity, model.routeCountries, model.country, model.selectedMoas, model.selectedAsn, model.showCables, model.observedIps, model.observedRoutes, light];
     rebuild();
     apply();
   });
