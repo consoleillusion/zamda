@@ -146,6 +146,8 @@ export class Model {
   private routesRefreshed = 0;
   private observedIpIndex = new Map<number, LiveIp>();
   private observedRouteIndex = new Map<string, LiveRoute>();
+  private observedRoutesByOrigin = new Map<number, ObservedRoute[]>();
+  private lastObservedPublish = 0;
 
   async start(): Promise<void> {
     // Purpose: load the data, build the JS tables, then start the WASM engine in the background
@@ -164,8 +166,9 @@ export class Model {
       this.observedRoutes = data.observed.routes;
       for (const row of data.observed.ips) this.observedIpIndex.set(row.ip, { ...row });
       for (const row of data.observed.routes) {
-        this.observedRouteIndex.set(this.routeKey(row.originAs, row.peerAs, row.peerIp, row.localIp, row.nextHop, row.prefixAddr, row.prefixLen, row.path), { ...row });
+        this.observedRouteIndex.set(this.routeKey(row.originAs, row.peerAs, row.peerIp, row.localIp, row.nextHop), { ...row });
       }
+      this.publishObserved();
       for (const f of countries.features) this.countryNames.set(f.properties.iso, f.properties.name);
       data.networks.countries.forEach((iso, i) => this.countryIndex.set(iso, i));
       this.loadText = 'building the JS tables';
@@ -241,9 +244,9 @@ export class Model {
     this.requestFrame();
   }
 
-  private routeKey(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number, addr: number, len: number, path: string): string {
-    // Purpose: a stable identity for one advertised prefix along one observed next hop
-    return `${originAs}|${peerAs}|${peerIp}|${localIp}|${nextHop}|${addr}|${len}|${path}`;
+  private routeKey(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number): string {
+    // Purpose: a stable identity for announcements sharing an origin and an observed BGP hop
+    return `${originAs}|${peerAs}|${peerIp}|${localIp}|${nextHop}`;
   }
 
   private recordIp(ip: number, asn: number, role: number, source: number, second: number): void {
@@ -280,22 +283,34 @@ export class Model {
     row.last = Math.max(row.last, second);
   }
 
-  private recordRoute(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number, addr: number, len: number, path: string, second: number): void {
-    // Purpose: count an announced path seen live, exactly as prep-globe counts it in the dumps
-    const key = this.routeKey(originAs, peerAs, peerIp, localIp, nextHop, addr, len, path);
+  private recordRoute(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number, prefixes: number, path: string, second: number): void {
+    // Purpose: count announcements seen live on an observed hop, matching the prep-globe aggregation
+    const key = this.routeKey(originAs, peerAs, peerIp, localIp, nextHop);
     let row = this.observedRouteIndex.get(key);
     if (row === undefined) {
-      row = { originAs, peerAs, peerIp, localIp, nextHop, prefixAddr: addr, prefixLen: len, path, count: 0, first: second, last: second };
+      row = { originAs, peerAs, peerIp, localIp, nextHop, prefixes, path, count: 0, first: second, last: second };
       this.observedRouteIndex.set(key, row);
     }
     row.count++;
     row.last = Math.max(row.last, second);
   }
 
+  observedRoutesFor(asn: number): readonly ObservedRoute[] {
+    // Purpose: only the paths an AS originated, pre-indexed so selecting it never scans the whole table
+    return this.observedRoutesByOrigin.get(asn) ?? [];
+  }
+
   private publishObserved(): void {
-    // Purpose: publish new immutable arrays only when deck.gl needs redrawn IP points
-    this.observedIps = [...this.observedIpIndex.values()].sort((a, b) => a.ip - b.ip);
-    this.observedRoutes = [...this.observedRouteIndex.values()].sort((a, b) => a.originAs - b.originAs || a.nextHop - b.nextHop || a.prefixAddr - b.prefixAddr);
+    // Purpose: publish immutable arrays and the origin index; called at load and on a slow live throttle
+    this.observedIps = [...this.observedIpIndex.values()];
+    this.observedRoutes = [...this.observedRouteIndex.values()];
+    const byOrigin = new Map<number, ObservedRoute[]>();
+    for (const row of this.observedRoutes) {
+      let list = byOrigin.get(row.originAs);
+      if (list === undefined) byOrigin.set(row.originAs, list = []);
+      list.push(row);
+    }
+    this.observedRoutesByOrigin = byOrigin;
   }
 
   setFilter(change: { kinds?: number[]; country?: number | null; lenRange?: [number, number] }): void {
@@ -550,10 +565,15 @@ export class Model {
       const source = exact ? 0 : (seen === undefined ? 2 : Math.min(seen.source, 4));
       this.recordIp(nextHop, asn, 2, source, row.second);
       if (row.kind === 0 && row.origin_as > 0 && peerIp !== null) {
-        this.recordRoute(row.origin_as, row.peer_as, peerIp, localIp ?? 0, nextHop, row.prefix_addr, row.prefix_len, row.as_path, row.second);
+        this.recordRoute(row.origin_as, row.peer_as, peerIp, localIp ?? 0, nextHop, 1, row.as_path, row.second);
       }
     }
-    this.publishObserved();
+    // The IP layer is a slowly-changing background, not a per-second event: republishing 100k rows
+    // on every batch made the globe stutter. Five seconds keeps live discoveries timely and smooth.
+    if (performance.now() - this.lastObservedPublish >= 5000) {
+      this.publishObserved();
+      this.lastObservedPublish = performance.now();
+    }
   }
 
   private async onLiveBatch(rows: LiveRow[]): Promise<void> {

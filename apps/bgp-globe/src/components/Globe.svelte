@@ -310,21 +310,20 @@
     let maxIp = 1;
     for (const ip of ips) maxIp = Math.max(maxIp, ip.count);
 
-    const groups = new Map<string, { from: [number, number]; to: [number, number]; originAs: number; peerAs: number; nextHop: number; peerIp: number; localIp: number; count: number; prefixes: Set<string>; path: string }>();
+    const groups = new Map<string, { from: [number, number]; to: [number, number]; originAs: number; peerAs: number; nextHop: number; peerIp: number; localIp: number; count: number; prefixes: number; path: string }>();
     if (selected !== null) {
-      for (const route of model.observedRoutes) {
-        if (route.originAs !== selected) continue;
+      for (const route of model.observedRoutesFor(selected)) {
         const from = allIpIndex.get(route.nextHop)?.pos ?? position(route.peerAs);
         const to = allIpIndex.get(route.localIp)?.pos ?? position(route.peerAs);
         if (from === null || to === null || from === undefined || to === undefined) continue;
         const key = `${from[0].toFixed(2)},${from[1].toFixed(2)}>${to[0].toFixed(2)},${to[1].toFixed(2)}`;
         let group = groups.get(key);
         if (group === undefined) {
-          group = { from, to, originAs: selected, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp, count: 0, prefixes: new Set(), path: route.path };
+          group = { from, to, originAs: selected, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp, count: 0, prefixes: 0, path: route.path };
           groups.set(key, group);
         }
         group.count += route.count;
-        group.prefixes.add(`${route.prefixAddr}/${route.prefixLen}`);
+        group.prefixes += route.prefixes;
       }
     }
     // Co-located routes share one line; width is logarithmic in how many observations merged into it.
@@ -339,7 +338,7 @@
         peerIp: group.peerIp,
         localIp: group.localIp,
         count: group.count,
-        prefixes: group.prefixes.size,
+        prefixes: group.prefixes,
         asPath: group.path,
       }));
     let maxRoute = 1;

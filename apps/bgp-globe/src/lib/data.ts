@@ -74,8 +74,7 @@ export interface ObservedRoute {
   readonly peerIp: number;
   readonly localIp: number;
   readonly nextHop: number;
-  readonly prefixAddr: number;
-  readonly prefixLen: number;
+  readonly prefixes: number;
   readonly path: string;
   readonly count: number;
   readonly first: number;
@@ -164,8 +163,7 @@ function observedRoutes(file: ColumnsFile | null): ObservedRoute[] {
       peerIp: Number(c.peer_ip![i]),
       localIp: Number(c.local_ip![i]),
       nextHop: Number(c.next_hop![i]),
-      prefixAddr: Number(c.prefix_addr![i]),
-      prefixLen: Number(c.prefix_len![i]),
+      prefixes: Number(c.prefixes![i]),
       path: paths[Number(c.pathCode![i])] ?? '',
       count: Number(c.count![i]),
       first: Number(c.first![i]),

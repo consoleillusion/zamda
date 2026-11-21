@@ -1,5 +1,6 @@
 // Prepares public/ for the dev server and the build:
-//   public/data      a link to the repository's data/ (globe-*.zcl from `bun run prep-globe`)
+//   public/data      a link to the repository's data/ (globe-*.zcl from `bun run prep-globe`), including
+//                    the physical-IP tables globe-ips.zcl and globe-ip-routes.zcl
 //   public/engine    a link to the WASM engine build (packages/zamda/dist/zamda-engine.wasm)
 //   public/countries.geojson  Natural Earth 1:110m countries (public domain), downloaded once
 //   public/terrain   low-resolution Terrarium elevation tiles (z=1..3), downloaded once
@@ -79,4 +80,6 @@ if (!existsSync(terrainReady)) {
 
 const missing = ['globe-as.zcl', 'globe-routes.zcl', 'globe-updates.zcl'].filter(f => !existsSync(join(repo, 'data', f)));
 if (missing.length > 0) console.warn(`missing data/${missing.join(', data/')}: run \`bun run prep-bgp\` and \`bun run prep-globe\` at the repository root`);
+const missingPhysical = ['globe-ips.zcl', 'globe-ip-routes.zcl'].filter(f => !existsSync(join(repo, 'data', f)));
+if (missingPhysical.length > 0) console.warn(`missing data/${missingPhysical.join(', data/')}: re-run \`bun run prep-globe\` for the observed-IP layer (the globe still runs without it)`);
 if (!existsSync(join(repo, 'packages/zamda/dist/zamda-engine.wasm'))) console.warn('no WASM engine yet: run `bun run build` at the repository root (the page falls back to JS)');

@@ -5,7 +5,7 @@
 //   data/globe-updates.zcl  every IPv4 announcement and withdrawal seen in the next N minutes, one row per
 //                           prefix, in time order: the replay
 //   data/globe-ips.zcl      every BGP-speaking IP observed in those updates, placed at its AS's known position
-//   data/globe-ip-routes.zcl  observed announced paths, grouped by origin, peer, next hop and prefix
+//   data/globe-ip-routes.zcl  observed announcements aggregated by origin, peer and next hop
 //
 //   bun run prep:globe                     60 minutes of updates after the routes dump
 //   bun run prep:globe --minutes 30        fewer minutes (a smaller replay)
@@ -125,8 +125,8 @@ interface RouteObservation {
   peerIp: number;
   localIp: number;
   nextHop: number;
-  addr: number;
-  len: number;
+  // The distinct prefixes seen on one observed next hop, and one representative AS path for the tooltip.
+  prefixKeys: Set<string>;
   path: string;
   count: number;
   first: number;
@@ -135,8 +135,6 @@ interface RouteObservation {
 
 const ipObservations = new Map<number, IpObservation>();
 const routeObservations = new Map<string, RouteObservation>();
-const paths: string[] = [];
-const pathCodes = new Map<string, number>();
 const peerAsByIp = new Map<number, number>();
 
 function asnPosition(asn: number): { lon: number; lat: number; precision: number } {
@@ -170,20 +168,17 @@ function observeIp(ip: number, asn: number, role: number, source: number, second
 }
 
 function observeRoute(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number, addr: number, len: number, path: string, second: number): void {
-  // Purpose: count an advertised prefix on its observed next hop, keeping the full AS path for the tooltip
-  const key = `${originAs}|${peerAs}|${peerIp}|${localIp}|${nextHop}|${addr}|${len}|${path}`;
+  // Purpose: merge announcements sharing an observed next hop into one row; the map draws one line per hop pair
+  const key = `${originAs}|${peerAs}|${peerIp}|${localIp}|${nextHop}`;
   let row = routeObservations.get(key);
   if (row === undefined) {
-    row = { originAs, peerAs, peerIp, localIp, nextHop, addr, len, path, count: 0, first: second, last: second };
+    row = { originAs, peerAs, peerIp, localIp, nextHop, prefixKeys: new Set(), path, count: 0, first: second, last: second };
     routeObservations.set(key, row);
   }
+  row.prefixKeys.add(`${addr}/${len}`);
   row.count++;
   row.first = Math.min(row.first, second);
   row.last = Math.max(row.last, second);
-  if (!pathCodes.has(path)) {
-    pathCodes.set(path, paths.length);
-    paths.push(path);
-  }
 }
 
 await writeFile(dataFile('globe-as.zcl'), encodeColumns({ rows: n, columns: as, lists: { names, countries, rirs }, meta: { source: 'graph.bin' } }));
@@ -377,16 +372,19 @@ await writeFile(
 );
 console.log(`wrote globe-ips.zcl: ${ipCount.toLocaleString()} observed BGP-speaking IPs`);
 
-const routeRows = [...routeObservations.values()].sort((a, b) => a.originAs - b.originAs || a.nextHop - b.nextHop || a.addr - b.addr || a.len - b.len);
+const routeRows = [...routeObservations.values()].sort((a, b) => a.originAs - b.originAs || a.nextHop - b.nextHop);
 const routeCount = routeRows.length;
+// Only the representative path of each group is read back; paths seen in other announcements
+// are dead weight in the file, so rebuild the list from what the final rows actually use.
+const usedPaths = [...new Set(routeRows.map(row => row.path))];
+const usedPathCode = new Map(usedPaths.map((path, i) => [path, i]));
 const ipRouteColumns = {
   origin_as: new Uint32Array(routeCount),
   peer_as: new Uint32Array(routeCount),
   peer_ip: new Uint32Array(routeCount),
   local_ip: new Uint32Array(routeCount),
   next_hop: new Uint32Array(routeCount),
-  prefix_addr: new Uint32Array(routeCount),
-  prefix_len: new Uint8Array(routeCount),
+  prefixes: new Uint32Array(routeCount),
   pathCode: new Uint32Array(routeCount),
   count: new Uint32Array(routeCount),
   first: new Uint32Array(routeCount),
@@ -398,9 +396,8 @@ routeRows.forEach((row, i) => {
   ipRouteColumns.peer_ip[i] = row.peerIp;
   ipRouteColumns.local_ip[i] = row.localIp;
   ipRouteColumns.next_hop[i] = row.nextHop;
-  ipRouteColumns.prefix_addr[i] = row.addr;
-  ipRouteColumns.prefix_len[i] = row.len;
-  ipRouteColumns.pathCode[i] = pathCodes.get(row.path)!;
+  ipRouteColumns.prefixes[i] = row.prefixKeys.size;
+  ipRouteColumns.pathCode[i] = usedPathCode.get(row.path)!;
   ipRouteColumns.count[i] = row.count;
   ipRouteColumns.first[i] = row.first;
   ipRouteColumns.last[i] = row.last;
@@ -410,8 +407,8 @@ await writeFile(
   encodeColumns({
     rows: routeCount,
     columns: ipRouteColumns,
-    lists: { paths },
-    meta: { rrc, start, minutes, source: 'RIS MRT BGP4MP announcements grouped by path and next hop' },
+    lists: { paths: usedPaths },
+    meta: { rrc, start, minutes, source: 'RIS MRT BGP4MP announcements aggregated by origin, peer and observed next hop' },
   }),
 );
-console.log(`wrote globe-ip-routes.zcl: ${routeCount.toLocaleString()} observed advertised paths`);
+console.log(`wrote globe-ip-routes.zcl: ${routeCount.toLocaleString()} observed next-hop paths`);
