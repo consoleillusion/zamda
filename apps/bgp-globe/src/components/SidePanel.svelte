@@ -7,6 +7,11 @@
   let { model }: { model: Model } = $props();
   let ipText = $state('8.8.8.8');
   let ipError = $state(false);
+  let asQuery = $state('');
+
+  const asResults = $derived(model.searchNetworks(asQuery));
+  const selectedIps = $derived(model.selectedAsn === null ? 0 : model.observedIps.filter(ip => ip.asn === model.selectedAsn).length);
+  const selectedPaths = $derived(model.selectedAsn === null ? 0 : model.observedRoutes.filter(route => route.originAs === model.selectedAsn).length);
 
   function name(asn: number): string {
     // Purpose: a network's registered name
@@ -47,6 +52,23 @@
     const next = has ? model.kinds.filter(k => k !== kind) : [...model.kinds, kind];
     model.setFilter({ kinds: next });
   }
+
+  function chooseAsn(asn: number): void {
+    // Purpose: focus the globe on one AS's observed IPs and originated paths
+    model.selectAsn(asn);
+    model.flyToNetwork(asn);
+    asQuery = '';
+  }
+
+  function searchAsn(event: SubmitEvent): void {
+    // Purpose: focus the first search result, or clear when there is no query
+    event.preventDefault();
+    if (model.selectedAsn !== null && asQuery.trim() === '') {
+      model.selectAsn(null);
+      return;
+    }
+    if (asResults[0]) chooseAsn(asResults[0].asn);
+  }
 </script>
 
 <aside class="side">
@@ -63,6 +85,35 @@
       <div class="w" style="flex: {withdrawShare}"></div>
     </div>
     <div class="splitlabels"><span class="ann">{compact(model.totals.updates - model.totals.withdraws)} announced</span><span class="wd">{compact(model.totals.withdraws)} withdrawn</span></div>
+  </section>
+
+  <section>
+    <h2>Network focus</h2>
+    <form onsubmit={searchAsn}>
+      <input class="mono" bind:value={asQuery} placeholder="AS1564, name or country" spellcheck="false" />
+      <button type="submit">Focus</button>
+    </form>
+    {#if model.selectedAsn !== null}
+      <div class="focus-chip">
+        <span><b>AS{model.selectedAsn}</b> {name(model.selectedAsn)} {cc(model.selectedAsn)}</span>
+        <button aria-label="clear network focus" onclick={() => model.selectAsn(null)}>✕</button>
+      </div>
+      <p class="muted hint">{selectedIps} observed IPs · {selectedPaths} advertised paths</p>
+    {/if}
+    {#if asQuery.trim().length > 0}
+      <ol class="list">
+        {#each asResults as result (result.asn)}
+          <li>
+            <button onclick={() => chooseAsn(result.asn)}>
+              <span class="who"><b>AS{result.asn}</b> {result.name}</span>
+              <span class="cc">{result.country}</span>
+            </button>
+          </li>
+        {:else}
+          <li class="muted">no matching network</li>
+        {/each}
+      </ol>
+    {/if}
   </section>
 
   <section>
@@ -170,6 +221,9 @@
   .ranges { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   input[type='range'] { accent-color: var(--announce); width: 100%; }
   .hint { font-size: 12px; }
+  .focus-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; padding: 7px 9px; border: 1px solid var(--accent-border); background: var(--accent-wash-soft); font-size: 12px; }
+  .focus-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .focus-chip button { flex: none; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 2px; }
   .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
   .list button { position: relative; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; width: 100%; text-align: left; background: var(--wash-1); border: 1px solid transparent; border-radius: 0; padding: 6px 8px; cursor: pointer; overflow: hidden; }
   .list button:hover, .list button.on { border-color: var(--line-strong); }

@@ -3,13 +3,13 @@
 
 import { ARC_LIMIT, compileOriginsOfPrefixPlan, compileRoutePlans, compileTimelinePlan, compileUpdatePlans } from './plans';
 import { loadAll, prefixSize } from './data';
-import type { Networks, RouteColumns, UpdateColumns } from './data';
+import type { Networks, RouteColumns, UpdateColumns, ObservedIp, ObservedRoute } from './data';
 import { Engines } from './engines';
 import type { EngineName, EngineTables } from './engines';
 import { startFeed } from './live';
 import type { Feed, FeedSource, LiveRow } from './live';
 import { NONE } from './schemas';
-import { num } from './format';
+import { num, parseIp } from './format';
 
 export type Mode = 'replay' | 'live';
 export type Projection = 'globe' | 'mercator';
@@ -26,6 +26,12 @@ export interface ArcRow {
   readonly origin: number;
   readonly updates: number;
   readonly withdraws: number;
+}
+
+export interface NetworkResult {
+  readonly asn: number;
+  readonly name: string;
+  readonly country: string;
 }
 
 export interface MoasRow {
@@ -49,6 +55,9 @@ export interface Pulse {
   readonly kind: number;
   readonly born: number;
 }
+
+type LiveIp = { -readonly [K in keyof ObservedIp]: ObservedIp[K] };
+type LiveRoute = { -readonly [K in keyof ObservedRoute]: ObservedRoute[K] };
 
 const HISTORY = 90;
 const TIMELINE_BUCKET = 20;
@@ -82,6 +91,11 @@ export class Model {
   span = $state(60);
   playing = $state(false);
   speed = $state(20);
+
+  // Physical-IP view: every BGP-speaking IP we have observed and the paths it advertised.
+  selectedAsn = $state<number | null>(null);
+  observedIps = $state.raw<ObservedIp[]>([]);
+  observedRoutes = $state.raw<ObservedRoute[]>([]);
 
   // Results the map and panels draw.
   origins = $state.raw<OriginRow[]>([]);
@@ -130,6 +144,8 @@ export class Model {
   private livePeers = new Map<number, Set<number>>();
   private liveRateWindow: number[] = [];
   private routesRefreshed = 0;
+  private observedIpIndex = new Map<number, LiveIp>();
+  private observedRouteIndex = new Map<string, LiveRoute>();
 
   async start(): Promise<void> {
     // Purpose: load the data, build the JS tables, then start the WASM engine in the background
@@ -144,6 +160,12 @@ export class Model {
       this.networks = data.networks;
       this.routes = data.routes;
       this.updates = data.updates;
+      this.observedIps = data.observed.ips;
+      this.observedRoutes = data.observed.routes;
+      for (const row of data.observed.ips) this.observedIpIndex.set(row.ip, { ...row });
+      for (const row of data.observed.routes) {
+        this.observedRouteIndex.set(this.routeKey(row.originAs, row.peerAs, row.peerIp, row.localIp, row.nextHop, row.prefixAddr, row.prefixLen, row.path), { ...row });
+      }
       for (const f of countries.features) this.countryNames.set(f.properties.iso, f.properties.name);
       data.networks.countries.forEach((iso, i) => this.countryIndex.set(iso, i));
       this.loadText = 'building the JS tables';
@@ -193,6 +215,87 @@ export class Model {
     if (mode === 'live') this.startLive();
     else this.stopLive();
     this.requestFrame();
+  }
+
+  searchNetworks(query: string, limit = 8): NetworkResult[] {
+    // Purpose: find an AS by number, name or country for the drawer's network focus search
+    const n = this.networks;
+    const q = query.trim().toLowerCase();
+    if (n === null || q.length === 0) return [];
+    const found: NetworkResult[] = [];
+    for (let i = 0; i < n.count; i++) {
+      const asn = n.asn[i]!;
+      const name = n.names[n.nameCode[i]!] || '';
+      const iso = n.cc[i] === NONE ? '' : n.countries[n.cc[i]!] ?? '';
+      if (!String(asn).includes(q) && !name.toLowerCase().includes(q) && !iso.toLowerCase().includes(q) && !(this.countryNames.get(iso) ?? '').toLowerCase().includes(q)) continue;
+      found.push({ asn, name, country: iso });
+      if (found.length >= limit) break;
+    }
+    return found;
+  }
+
+  selectAsn(asn: number | null): void {
+    // Purpose: focus the whole globe on one network's IPs and originated routes
+    if (this.selectedAsn === asn) return;
+    this.selectedAsn = asn;
+    this.requestFrame();
+  }
+
+  private routeKey(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number, addr: number, len: number, path: string): string {
+    // Purpose: a stable identity for one advertised prefix along one observed next hop
+    return `${originAs}|${peerAs}|${peerIp}|${localIp}|${nextHop}|${addr}|${len}|${path}`;
+  }
+
+  private recordIp(ip: number, asn: number, role: number, source: number, second: number): void {
+    // Purpose: merge a live sighting into the same per-IP table prep-globe writes
+    if (ip === 0 || asn === 0) return;
+    let row = this.observedIpIndex.get(ip);
+    if (row === undefined) {
+      const at = this.networks?.index.get(asn);
+      row = {
+        ip,
+        asn,
+        roleMask: 0,
+        source,
+        precision: at === undefined ? 0 : this.networks!.precision[at]!,
+        lon: at === undefined ? 0 : this.networks!.lon[at]!,
+        lat: at === undefined ? 0 : this.networks!.lat[at]!,
+        count: 0,
+        first: second,
+        last: second,
+      };
+      this.observedIpIndex.set(ip, row);
+    }
+    if (source < row.source) {
+      const at = this.networks?.index.get(asn);
+      row.source = source;
+      row.asn = asn;
+      row.precision = at === undefined ? 0 : this.networks!.precision[at]!;
+      row.lon = at === undefined ? 0 : this.networks!.lon[at]!;
+      row.lat = at === undefined ? 0 : this.networks!.lat[at]!;
+    }
+    row.roleMask |= role;
+    row.count++;
+    row.first = Math.min(row.first, second);
+    row.last = Math.max(row.last, second);
+  }
+
+  private recordRoute(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number, addr: number, len: number, path: string, second: number): void {
+    // Purpose: count an announced path seen live, exactly as prep-globe counts it in the dumps
+    const key = this.routeKey(originAs, peerAs, peerIp, localIp, nextHop, addr, len, path);
+    let row = this.observedRouteIndex.get(key);
+    if (row === undefined) {
+      row = { originAs, peerAs, peerIp, localIp, nextHop, prefixAddr: addr, prefixLen: len, path, count: 0, first: second, last: second };
+      this.observedRouteIndex.set(key, row);
+    }
+    row.count++;
+    row.last = Math.max(row.last, second);
+  }
+
+  private publishObserved(): void {
+    // Purpose: publish new immutable arrays only when deck.gl needs redrawn IP points
+    this.observedIps = [...this.observedIpIndex.values()].sort((a, b) => a.ip - b.ip);
+    this.observedRoutes = [...this.observedRouteIndex.values()].sort((a, b) => a.originAs - b.originAs || a.nextHop - b.nextHop || a.prefixAddr - b.prefixAddr);
   }
 
   setFilter(change: { kinds?: number[]; country?: number | null; lenRange?: [number, number] }): void {
@@ -432,11 +535,33 @@ export class Model {
     this.liveSource = null;
   }
 
+  private observeLiveRows(rows: LiveRow[]): void {
+    // Purpose: preserve RIS Live's peer IP, next hop and full path for the physical-IP view
+    for (const row of rows) {
+      const peerIp = parseIp(row.peer_ip ?? '');
+      const localIp = parseIp(row.local_ip ?? '');
+      if (peerIp !== null) this.recordIp(peerIp, row.peer_as, 1, 4, row.second);
+      if (localIp !== null) this.recordIp(localIp, 0, 4, 3, row.second);
+      const nextHop = parseIp(row.next_hop ?? '');
+      if (nextHop === null) continue;
+      const seen = this.observedIpIndex.get(nextHop);
+      const exact = nextHop === peerIp;
+      const asn = exact ? row.peer_as : (seen?.asn ?? row.peer_as);
+      const source = exact ? 0 : (seen === undefined ? 2 : Math.min(seen.source, 4));
+      this.recordIp(nextHop, asn, 2, source, row.second);
+      if (row.kind === 0 && row.origin_as > 0 && peerIp !== null) {
+        this.recordRoute(row.origin_as, row.peer_as, peerIp, localIp ?? 0, nextHop, row.prefix_addr, row.prefix_len, row.as_path, row.second);
+      }
+    }
+    this.publishObserved();
+  }
+
   private async onLiveBatch(rows: LiveRow[]): Promise<void> {
     // Purpose: one second of live updates: log them, apply them to the routing table, pulse them on the map
     const engines = this.engines;
     const networks = this.networks;
     if (engines === null || networks === null || this.mode !== 'live') return;
+    this.observeLiveRows(rows);
     const n = rows.length;
     const cols = {
       second: new Uint32Array(n),

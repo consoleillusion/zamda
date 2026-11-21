@@ -89,10 +89,12 @@ const ccOf = (asn: number): number => {
 };
 const ROLE_PEER = 1;
 const ROLE_NEXT_HOP = 2;
+const ROLE_COLLECTOR = 4;
 // Lower numbers mean a more exact attribution; a header IP beats an inferred next hop.
 const SOURCE_MRT_HEADER = 0;
 const SOURCE_PEER_INDEX = 1;
 const SOURCE_NEXT_HOP_INFERRED = 2;
+const SOURCE_COLLECTOR = 3;
 
 function ipNumber(text: string | null | undefined): number | null {
   // Purpose: a dotted-quad IP as an unsigned number, or null when it is not IPv4
@@ -120,6 +122,8 @@ interface IpObservation {
 interface RouteObservation {
   originAs: number;
   peerAs: number;
+  peerIp: number;
+  localIp: number;
   nextHop: number;
   addr: number;
   len: number;
@@ -142,18 +146,19 @@ function asnPosition(asn: number): { lon: number; lat: number; precision: number
   return { lon: as.lon[i]!, lat: as.lat[i]!, precision: as.precision[i]! };
 }
 
-function observeIp(ip: number, asn: number, role: number, source: number, second: number): void {
+function observeIp(ip: number, asn: number, role: number, source: number, second: number, override?: { lon: number; lat: number; precision: number }): void {
   // Purpose: merge every sighting of one IP into a single point with roles, attribution and a time range
+  const locate = (): { lon: number; lat: number; precision: number } => override ?? asnPosition(asn);
   let row = ipObservations.get(ip);
   if (row === undefined) {
-    const at = asnPosition(asn);
+    const at = locate();
     row = { ip, asn, roleMask: 0, source, precision: at.precision, lon: at.lon, lat: at.lat, count: 0, first: second, last: second };
     ipObservations.set(ip, row);
   }
   if (source < row.source) {
     row.source = source;
     row.asn = asn;
-    const at = asnPosition(asn);
+    const at = locate();
     row.precision = at.precision;
     row.lon = at.lon;
     row.lat = at.lat;
@@ -164,12 +169,12 @@ function observeIp(ip: number, asn: number, role: number, source: number, second
   row.last = Math.max(row.last, second);
 }
 
-function observeRoute(originAs: number, peerAs: number, nextHop: number, addr: number, len: number, path: string, second: number): void {
+function observeRoute(originAs: number, peerAs: number, peerIp: number, localIp: number, nextHop: number, addr: number, len: number, path: string, second: number): void {
   // Purpose: count an advertised prefix on its observed next hop, keeping the full AS path for the tooltip
-  const key = `${originAs}|${peerAs}|${nextHop}|${addr}|${len}|${path}`;
+  const key = `${originAs}|${peerAs}|${peerIp}|${localIp}|${nextHop}|${addr}|${len}|${path}`;
   let row = routeObservations.get(key);
   if (row === undefined) {
-    row = { originAs, peerAs, nextHop, addr, len, path, count: 0, first: second, last: second };
+    row = { originAs, peerAs, peerIp, localIp, nextHop, addr, len, path, count: 0, first: second, last: second };
     routeObservations.set(key, row);
   }
   row.count++;
@@ -206,6 +211,23 @@ for (let i = 0; i < r; i++) {
 const dumpMatch = /\/(rrc\d\d)\/\d{4}\.\d{2}\/bview\.(\d{8})\.(\d{4})\.gz$/.exec(source.dump ?? '');
 if (dumpMatch === null) throw new Error(`routes.bin does not name a RIS dump (${String(source.dump)}); run prep-bgp without --mrt`);
 const [, rrc, date, time] = dumpMatch as unknown as [string, string, string, string];
+// RIS collector cities, used only for the collector-side IP in the MRT header. Country-level at best.
+const collectorCities: Readonly<Record<string, { lon: number; lat: number }>> = {
+  rrc00: { lon: 4.9, lat: 52.37 }, rrc01: { lon: -0.12, lat: 51.5 }, rrc02: { lon: 2.35, lat: 48.86 },
+  rrc03: { lon: 4.9, lat: 52.37 }, rrc04: { lon: 6.14, lat: 46.2 }, rrc05: { lon: 16.37, lat: 48.21 },
+  rrc06: { lon: 139.69, lat: 35.69 }, rrc07: { lon: 18.07, lat: 59.33 }, rrc08: { lon: 139.69, lat: 35.69 },
+  rrc09: { lon: 8.68, lat: 50.11 }, rrc10: { lon: 9.19, lat: 45.46 }, rrc11: { lon: -74.01, lat: 40.71 },
+  rrc12: { lon: -80.19, lat: 25.76 }, rrc13: { lon: 28.05, lat: -26.2 }, rrc14: { lon: -122.03, lat: 37.39 },
+  rrc15: { lon: 151.21, lat: -33.87 }, rrc16: { lon: 174.76, lat: -36.85 }, rrc17: { lon: 126.98, lat: 37.57 },
+  rrc18: { lon: -46.63, lat: -23.55 }, rrc19: { lon: 73.86, lat: 18.52 }, rrc20: { lon: 37.62, lat: 55.75 },
+  rrc21: { lon: 15.98, lat: 45.81 }, rrc22: { lon: 26.1, lat: 44.43 }, rrc23: { lon: 103.82, lat: 1.35 },
+  rrc24: { lon: 153.03, lat: -27.47 }, rrc25: { lon: -43.17, lat: -22.91 }, rrc26: { lon: -99.13, lat: 19.43 },
+};
+function collectorLocation(): { lon: number; lat: number; precision: number } {
+  // Purpose: a coarse location for the collector-side IP named in the MRT header
+  const city = collectorCities[rrc];
+  return city === undefined ? { lon: 0, lat: 0, precision: 0 } : { lon: city.lon, lat: city.lat, precision: 1 };
+}
 console.log(`routes: ${r.toLocaleString()} from ${rrc} ${date} ${time}`);
 const start = Date.UTC(Number(date.slice(0, 4)), Number(date.slice(4, 6)) - 1, Number(date.slice(6, 8)), Number(time.slice(0, 2)), Number(time.slice(2, 4))) / 1000;
 await writeFile(dataFile('globe-routes.zcl'), encodeColumns({ rows: r, columns: routeCols, lists: { countries, rirs }, meta: { rrc, time: start } }));
@@ -249,10 +271,12 @@ const push = (second: number, kind: number, addr: number, len: number, originAs:
   rows++;
 };
 
-function observeUpdate(second: number, originAs: number, peer: number, addr: number, len: number, update: { peerIp: string; nextHop: string | null; asPath: string }): void {
+function observeUpdate(second: number, originAs: number, peer: number, addr: number, len: number, update: { peerIp: string; localIp: string; nextHop: string | null; asPath: string }): void {
   // Purpose: retain the physical addresses and the advertised path that the replay columns discard
   const peerIp = ipNumber(update.peerIp);
+  const localIp = ipNumber(update.localIp);
   if (peerIp !== null) observeIp(peerIp, peer, ROLE_PEER, SOURCE_MRT_HEADER, second);
+  if (localIp !== null) observeIp(localIp, 0, ROLE_COLLECTOR, SOURCE_COLLECTOR, second, collectorLocation());
   const nextHop = ipNumber(update.nextHop);
   if (nextHop === null) return;
   let asn = peerAsByIp.get(nextHop) ?? peer;
@@ -262,7 +286,7 @@ function observeUpdate(second: number, originAs: number, peer: number, addr: num
     source = SOURCE_MRT_HEADER;
   } else if (peerAsByIp.has(nextHop)) source = SOURCE_PEER_INDEX;
   observeIp(nextHop, asn, ROLE_NEXT_HOP, source, second);
-  if (originAs > 0) observeRoute(originAs, peer, nextHop, addr, len, update.asPath, second);
+  if (originAs > 0 && peerIp !== null && localIp !== null) observeRoute(originAs, peer, peerIp, localIp, nextHop, addr, len, update.asPath, second);
 }
 let skipped = 0;
 for (let m = 0; m < minutes; m += 5) {
@@ -347,7 +371,7 @@ await writeFile(
   encodeColumns({
     rows: ipCount,
     columns: ipColumns,
-    lists: { roles: ['peer', 'next-hop'], sources: ['mrt header', 'RIS peer index', 'inferred from peer AS'], precisions: ['unknown', 'network country', 'network facility'] },
+    lists: { roles: ['peer', 'next-hop', 'collector'], sources: ['mrt header', 'RIS peer index', 'inferred from peer AS', 'RIS collector city'], precisions: ['unknown', 'network country', 'network facility'] },
     meta: { rrc, start, minutes, source: 'RIS MRT BGP4MP peer, local and NEXT_HOP addresses' },
   }),
 );
@@ -358,6 +382,8 @@ const routeCount = routeRows.length;
 const ipRouteColumns = {
   origin_as: new Uint32Array(routeCount),
   peer_as: new Uint32Array(routeCount),
+  peer_ip: new Uint32Array(routeCount),
+  local_ip: new Uint32Array(routeCount),
   next_hop: new Uint32Array(routeCount),
   prefix_addr: new Uint32Array(routeCount),
   prefix_len: new Uint8Array(routeCount),
@@ -369,6 +395,8 @@ const ipRouteColumns = {
 routeRows.forEach((row, i) => {
   ipRouteColumns.origin_as[i] = row.originAs;
   ipRouteColumns.peer_as[i] = row.peerAs;
+  ipRouteColumns.peer_ip[i] = row.peerIp;
+  ipRouteColumns.local_ip[i] = row.localIp;
   ipRouteColumns.next_hop[i] = row.nextHop;
   ipRouteColumns.prefix_addr[i] = row.addr;
   ipRouteColumns.prefix_len[i] = row.len;

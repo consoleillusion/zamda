@@ -13,12 +13,20 @@
       body: `The Internet is about ${compact(model.routeTotals.networks)} independent networks (autonomous systems, ASes). They use BGP to tell each other which blocks of addresses (prefixes) they can reach. Each dot is a network; its size is how many routing updates it caused in the window.`,
     },
     {
+      title: 'Observed IP points',
+      body: `Every coloured point is an IP address actually seen in a BGP UPDATE: a RIS peer, a NEXT_HOP or a collector address. There are ${compact(model.observedIps.length)} in this view. Colour identifies its AS; size grows logarithmically with how often it was seen. The tooltip shows how precisely we could place it.`,
+    },
+    {
       title: 'Announce and withdraw',
       body: 'An announcement says “send traffic for this prefix my way, via this path”. A withdrawal takes that back. Teal is announcements, pink is withdrawals. A burst of pink often means an outage or a cable cut somewhere.',
     },
     {
       title: 'The arcs',
       body: 'RIPE RIS collectors listen to BGP from networks around the world (the peers). An arc joins the peer that sent an update to the network that originates the prefix. It shows who learns about whom, not where cables run.',
+    },
+    {
+      title: 'A focused network',
+      body: 'Search for an AS, click its IP point or click an origin dot. The globe then shows only that network’s observed IPs and the prefixes it originated, grouped where they share the same next hop and collector. Thicker lines mean more observations, on a logarithmic scale. These are observed BGP hops, not fibre routes.',
     },
     {
       title: 'Prefixes and the routing table',

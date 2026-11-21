@@ -55,12 +55,41 @@ export interface UpdateColumns {
   readonly minutes: number;
 }
 
-async function fetchFile(path: string, onProgress: (loaded: number, total: number) => void): Promise<ColumnsFile> {
-  // Purpose: download one columns file with progress, and decode it
-  const response = await fetch(path);
-  if (!response.ok || response.body === null) {
-    throw new Error(`${path}: HTTP ${response.status}. Run \`bun run prep-bgp && bun run prep-globe\` at the repository root.`);
-  }
+export interface ObservedIp {
+  readonly ip: number;
+  readonly asn: number;
+  readonly roleMask: number;
+  readonly source: number;
+  readonly precision: number;
+  readonly lon: number;
+  readonly lat: number;
+  readonly count: number;
+  readonly first: number;
+  readonly last: number;
+}
+
+export interface ObservedRoute {
+  readonly originAs: number;
+  readonly peerAs: number;
+  readonly peerIp: number;
+  readonly localIp: number;
+  readonly nextHop: number;
+  readonly prefixAddr: number;
+  readonly prefixLen: number;
+  readonly path: string;
+  readonly count: number;
+  readonly first: number;
+  readonly last: number;
+}
+
+export interface ObservedData {
+  readonly ips: ObservedIp[];
+  readonly routes: ObservedRoute[];
+}
+
+async function readBody(response: Response, onProgress?: (loaded: number, total: number) => void): Promise<Uint8Array> {
+  // Purpose: read a response body while reporting progress when the stream has a length
+  if (response.body === null) return new Uint8Array(await response.arrayBuffer());
   const total = Number(response.headers.get('content-length') ?? 0);
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -70,7 +99,7 @@ async function fetchFile(path: string, onProgress: (loaded: number, total: numbe
     if (done) break;
     chunks.push(value);
     loaded += value.length;
-    onProgress(loaded, total);
+    onProgress?.(loaded, total || loaded);
   }
   const bytes = new Uint8Array(loaded);
   let at = 0;
@@ -78,7 +107,72 @@ async function fetchFile(path: string, onProgress: (loaded: number, total: numbe
     bytes.set(chunk, at);
     at += chunk.length;
   }
-  return decodeColumns(bytes);
+  return bytes;
+}
+
+async function fetchFile(path: string, onProgress: (loaded: number, total: number) => void): Promise<ColumnsFile> {
+  // Purpose: download one columns file with progress, and decode it
+  const response = await fetch(path);
+  if (!response.ok || response.body === null) {
+    throw new Error(`${path}: HTTP ${response.status}. Run \`bun run prep-bgp && bun run prep-globe\` at the repository root.`);
+  }
+  return decodeColumns(await readBody(response, onProgress));
+}
+
+async function fetchOptionalFile(path: string): Promise<ColumnsFile | null> {
+  // Purpose: load a table added by a newer prep-globe; old generated data still runs the app
+  const response = await fetch(path);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+  return decodeColumns(await readBody(response));
+}
+
+function observedIps(file: ColumnsFile | null): ObservedIp[] {
+  // Purpose: shape the observed-IP table for the map, ignoring points with no location at all
+  if (file === null) return [];
+  const c = file.columns;
+  const rows: ObservedIp[] = [];
+  for (let i = 0; i < file.rows; i++) {
+    const precision = Number(c.precision![i]);
+    if (precision === 0) continue;
+    rows.push({
+      ip: Number(c.ip![i]),
+      asn: Number(c.asn![i]),
+      roleMask: Number(c.roleMask![i]),
+      source: Number(c.source![i]),
+      precision,
+      lon: Number(c.lon![i]),
+      lat: Number(c.lat![i]),
+      count: Number(c.count![i]),
+      first: Number(c.first![i]),
+      last: Number(c.last![i]),
+    });
+  }
+  return rows;
+}
+
+function observedRoutes(file: ColumnsFile | null): ObservedRoute[] {
+  // Purpose: shape the observed advertised-path table, including its full AS path text
+  if (file === null) return [];
+  const c = file.columns;
+  const paths = file.lists.paths ?? [];
+  const rows: ObservedRoute[] = new Array(file.rows);
+  for (let i = 0; i < file.rows; i++) {
+    rows[i] = {
+      originAs: Number(c.origin_as![i]),
+      peerAs: Number(c.peer_as![i]),
+      peerIp: Number(c.peer_ip![i]),
+      localIp: Number(c.local_ip![i]),
+      nextHop: Number(c.next_hop![i]),
+      prefixAddr: Number(c.prefix_addr![i]),
+      prefixLen: Number(c.prefix_len![i]),
+      path: paths[Number(c.pathCode![i])] ?? '',
+      count: Number(c.count![i]),
+      first: Number(c.first![i]),
+      last: Number(c.last![i]),
+    };
+  }
+  return rows;
 }
 
 function hash(n: number): number {
@@ -95,18 +189,20 @@ export function prefixSize(length: number): number {
   return 2 ** (32 - length);
 }
 
-export async function loadAll(onProgress: (what: string, fraction: number) => void): Promise<{ networks: Networks; routes: RouteColumns; updates: UpdateColumns }> {
-  // Purpose: fetch the three data files in parallel and shape them for the engines and the map
+export async function loadAll(onProgress: (what: string, fraction: number) => void): Promise<{ networks: Networks; routes: RouteColumns; updates: UpdateColumns; observed: ObservedData }> {
+  // Purpose: fetch the three core data files and the optional physical-IP tables in parallel
   const sizes = { as: [0, 1], routes: [0, 1], updates: [0, 1] } as Record<string, [number, number]>;
   const report = (name: string) => (loaded: number, total: number) => {
     sizes[name] = [loaded, total || loaded];
     const sum = Object.values(sizes).reduce((s, [l, t]) => [s[0]! + l, s[1]! + t], [0, 0]);
     onProgress('downloading the routing table and an hour of BGP updates', sum[0]! / Math.max(1, sum[1]!));
   };
-  const [as, routeFile, updateFile] = await Promise.all([
+  const [as, routeFile, updateFile, ipFile, ipRouteFile] = await Promise.all([
     fetchFile('/data/globe-as.zcl', report('as')),
     fetchFile('/data/globe-routes.zcl', report('routes')),
     fetchFile('/data/globe-updates.zcl', report('updates')),
+    fetchOptionalFile('/data/globe-ips.zcl'),
+    fetchOptionalFile('/data/globe-ip-routes.zcl'),
   ]);
 
   const n = as.rows;
@@ -187,7 +283,7 @@ export async function loadAll(onProgress: (what: string, fraction: number) => vo
     start: Number(updateFile.meta.start),
     minutes: Number(updateFile.meta.minutes),
   };
-  return { networks, routes, updates };
+  return { networks, routes, updates, observed: { ips: observedIps(ipFile), routes: observedRoutes(ipRouteFile) } };
 }
 
 export function countryName(networks: Networks, code: number, names: ReadonlyMap<string, string>): string {

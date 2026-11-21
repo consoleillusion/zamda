@@ -5,6 +5,7 @@
   import { TileLayer } from '@deck.gl/geo-layers';
   import { ArcLayer, BitmapLayer, GeoJsonLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from '@deck.gl/layers';
   import type { Model } from '../lib/model.svelte';
+  import type { ObservedIp, ObservedRoute } from '../lib/data';
   import { compact, flag } from '../lib/format';
   import { NONE } from '../lib/schemas';
 
@@ -96,6 +97,49 @@
     const a = announce();
     const b = withdraw();
     return [0, 1, 2].map(k => Math.round(a[k]! + (b[k]! - a[k]!) * Math.min(1, w))) as RGB;
+  }
+
+  function hash(n: number): number {
+    // Purpose: a stable pseudo-random number in [0, 1) for an AS number
+    let x = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b);
+    x ^= x >>> 13;
+    x = Math.imul(x, 0xc2b2ae35);
+    x ^= x >>> 16;
+    return (x >>> 0) / 4294967296;
+  }
+
+  function hsl(h: number, s: number, l: number): RGB {
+    // Purpose: HSL to RGB for the categorical AS palette
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    const sector = Math.floor(h / 60) % 6;
+    const rgb = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][sector]!;
+    return rgb.map(v => Math.round((v + m) * 255)) as RGB;
+  }
+
+  function asColor(asn: number): RGB {
+    // Purpose: one stable, saturated colour per AS on either theme
+    return hsl(hash(asn) * 360, light ? 0.68 : 0.72, light ? 0.3 + hash(asn * 7 + 1) * 0.1 : 0.58 + hash(asn * 11 + 3) * 0.12);
+  }
+
+  function ipText(addr: number): string {
+    // Purpose: dotted-quad text for an observed IP
+    return `${addr >>> 24}.${(addr >>> 16) & 255}.${(addr >>> 8) & 255}.${addr & 255}`;
+  }
+
+  function roleLabel(mask: number): string {
+    // Purpose: which BGP roles an observed IP played
+    const roles = [];
+    if ((mask & 1) !== 0) roles.push('RIS peer');
+    if ((mask & 2) !== 0) roles.push('NEXT_HOP');
+    if ((mask & 4) !== 0) roles.push('collector');
+    return roles.join(' + ') || 'observed';
+  }
+
+  function sourceLabel(source: number): string {
+    // Purpose: how confidently an IP was attributed to its AS
+    return ['MRT header (exact)', 'RIS peer index (exact)', 'inferred from peer AS', 'RIS collector city', 'RIS Live'][source] ?? 'unknown source';
   }
 
   type TerrainFetchOptions = { signal?: AbortSignal };
@@ -198,6 +242,18 @@
   }
 
   type ArcDraw = { peer: number; origin: number; updates: number; withdraws: number; from: [number, number] | null; to: [number, number] | null };
+  type IpDraw = ObservedIp & { pos: [number, number] };
+  type RouteDraw = {
+    path: [number, number, number][];
+    originAs: number;
+    peerAs: number;
+    nextHop: number;
+    peerIp: number;
+    localIp: number;
+    count: number;
+    prefixes: number;
+    asPath: string;
+  };
   // Drawn data, rebuilt only when a result changes (not on every animation frame).
   let drawn: {
     arcs: ArcDraw[];
@@ -208,7 +264,11 @@
     routeMax: number;
     moasArcs: { from: [number, number]; to: [number, number] }[];
     paths: { path: [number, number, number][]; arc: ArcDraw }[];
-  } = { arcs: [], maxArc: 1, origins: [], maxOrigin: 1, maxCountry: 1, routeMax: 1, moasArcs: [], paths: [] };
+    ips: IpDraw[];
+    maxIp: number;
+    routePaths: RouteDraw[];
+    maxRoute: number;
+  } = { arcs: [], maxArc: 1, origins: [], maxOrigin: 1, maxCountry: 1, routeMax: 1, moasArcs: [], paths: [], ips: [], maxIp: 1, routePaths: [], maxRoute: 1 };
 
   // Deck.gl reuses layer instances cheaply; rebuilding them every pulse frame re-uploads the terrain and
   // country textures. Keep every layer that does not animate in one cache, keyed by its inputs.
@@ -220,9 +280,12 @@
   }
 
   function rebuild(): void {
-    // Purpose: positions and scales for the latest results
-    const arcs = model.arcs.map(a => ({ ...a, from: position(a.peer), to: position(a.origin) })).filter(a => a.from !== null && a.to !== null);
-    const origins = model.origins.filter(o => position(o.asn) !== null);
+    // Purpose: positions and scales for the latest results, including the physical-IP and selected-route layers
+    const selected = model.selectedAsn;
+    const arcs = selected === null
+      ? model.arcs.map(a => ({ ...a, from: position(a.peer), to: position(a.origin) })).filter(a => a.from !== null && a.to !== null)
+      : [];
+    const origins = model.origins.filter(o => position(o.asn) !== null && (selected === null || o.asn === selected));
     const moasArcs: { from: [number, number]; to: [number, number] }[] = [];
     if (model.selectedMoas !== null) {
       const pts = model.selectedMoas.origins.map(o => position(o.asn)).filter((p): p is [number, number] => p !== null);
@@ -236,17 +299,60 @@
     for (const v of model.countryActivity.values()) maxCountry = Math.max(maxCountry, v.updates);
     let routeMax = 1;
     for (const v of model.routeCountries.values()) routeMax = Math.max(routeMax, v.routes);
-    // The globe gets the strongest 400 arcs; fewer, shorter paths keep the 3D render cheap and the land readable.
+    // The globe gets the strongest 400 event arcs; fewer, shorter paths keep the 3D render cheap.
     const paths = model.projection === 'globe' ? arcs.slice(0, 400).map(arc => ({ path: arcPath(arc.from!, arc.to!, 0.07), arc })) : [];
-    drawn = { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths };
+
+    const allIpIndex = new Map<number, IpDraw>();
+    for (const ip of model.observedIps) {
+      if (ip.precision > 0) allIpIndex.set(ip.ip, { ...ip, pos: [ip.lon, ip.lat] });
+    }
+    const ips = [...allIpIndex.values()].filter(ip => selected === null || ip.asn === selected);
+    let maxIp = 1;
+    for (const ip of ips) maxIp = Math.max(maxIp, ip.count);
+
+    const groups = new Map<string, { from: [number, number]; to: [number, number]; originAs: number; peerAs: number; nextHop: number; peerIp: number; localIp: number; count: number; prefixes: Set<string>; path: string }>();
+    if (selected !== null) {
+      for (const route of model.observedRoutes) {
+        if (route.originAs !== selected) continue;
+        const from = allIpIndex.get(route.nextHop)?.pos ?? position(route.peerAs);
+        const to = allIpIndex.get(route.localIp)?.pos ?? position(route.peerAs);
+        if (from === null || to === null || from === undefined || to === undefined) continue;
+        const key = `${from[0].toFixed(2)},${from[1].toFixed(2)}>${to[0].toFixed(2)},${to[1].toFixed(2)}`;
+        let group = groups.get(key);
+        if (group === undefined) {
+          group = { from, to, originAs: selected, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp, count: 0, prefixes: new Set(), path: route.path };
+          groups.set(key, group);
+        }
+        group.count += route.count;
+        group.prefixes.add(`${route.prefixAddr}/${route.prefixLen}`);
+      }
+    }
+    // Co-located routes share one line; width is logarithmic in how many observations merged into it.
+    const routePaths: RouteDraw[] = [...groups.values()]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 1200)
+      .map(group => ({
+        path: arcPath(group.from, group.to, model.projection === 'globe' ? 0.03 : 0),
+        originAs: group.originAs,
+        peerAs: group.peerAs,
+        nextHop: group.nextHop,
+        peerIp: group.peerIp,
+        localIp: group.localIp,
+        count: group.count,
+        prefixes: group.prefixes.size,
+        asPath: group.path,
+      }));
+    let maxRoute = 1;
+    for (const route of routePaths) maxRoute = Math.max(maxRoute, route.count);
+    drawn = { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, routePaths, maxRoute };
   }
 
   function layers(): unknown[] {
     // Purpose: every layer, with the static ones cached so pulse frames do not re-upload the whole globe.
     const globe = model.projection === 'globe';
-    const deps = [globe, light, model.country, model.countryActivity, model.routeCountries, model.selectedMoas, drawn, countriesGeo];
+    const deps = [globe, light, model.country, model.countryActivity, model.routeCountries, model.selectedMoas, model.selectedAsn, drawn, countriesGeo];
     if (staticLayers === null || !sameDeps(staticLayers.deps, deps)) {
-      const { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths } = drawn;
+      const { arcs, maxArc, origins, maxOrigin, maxCountry, routeMax, moasArcs, paths, ips, maxIp, routePaths, maxRoute } = drawn;
       const selected = model.country;
       staticLayers = {
         deps,
@@ -320,6 +426,22 @@
               // Paint the data ramp over the relief texture instead of hiding behind it.
               parameters: { depthTest: false },
             }),
+          new PathLayer({
+            id: 'advertised-routes',
+            data: routePaths,
+            pickable: true,
+            getPath: (d: RouteDraw) => d.path,
+            getColor: (d: RouteDraw) => {
+              const [r, g, b] = asColor(d.originAs);
+              return [r, g, b, 90 + Math.round(120 * Math.log1p(d.count) / Math.log1p(maxRoute))] as [number, number, number, number];
+            },
+            getWidth: (d: RouteDraw) => 1 + 7 * Math.log1p(d.count) / Math.log1p(maxRoute),
+            widthUnits: 'pixels',
+            capRounded: false,
+            wrapLongitude: !globe,
+            updateTriggers: { getColor: [routePaths, maxRoute, light], getWidth: [routePaths, maxRoute] },
+            parameters: { depthTest: false },
+          }),
           globe &&
             new PathLayer({
               id: 'arcs',
@@ -362,6 +484,20 @@
             transitions: { getRadius: 250 },
             parameters: { depthTest: false },
           }),
+          new ScatterplotLayer({
+            id: 'observed-ips',
+            data: ips,
+            pickable: true,
+            radiusUnits: 'pixels',
+            getPosition: (d: IpDraw) => d.pos,
+            getRadius: (d: IpDraw) => 2 + 9 * Math.log1p(d.count) / Math.log1p(maxIp),
+            getFillColor: (d: IpDraw) => [...asColor(d.asn), model.selectedAsn === null ? 170 : 230] as [number, number, number, number],
+            getLineColor: light ? [20, 20, 20, 120] : [255, 255, 255, 150],
+            lineWidthMinPixels: 0.8,
+            stroked: true,
+            updateTriggers: { getRadius: [ips, maxIp], getFillColor: [ips, light, model.selectedAsn] },
+            parameters: { depthTest: false },
+          }),
           globe &&
             new PathLayer({
               id: 'moas',
@@ -391,7 +527,7 @@
       ...staticLayers.layers,
       new ScatterplotLayer({
         id: 'pulses',
-        data: model.pulses,
+        data: model.selectedAsn === null ? model.pulses : [],
         radiusUnits: 'pixels',
         getPosition: (d: { lon: number; lat: number }) => [d.lon, d.lat],
         getRadius: (d: { born: number }) => 2 + Math.min(12, Math.max(0, t - d.born) / 400),
@@ -420,6 +556,27 @@
       const i = n.index.get(asn);
       return i === undefined || n.cc[i] === NONE ? '' : `${flag(n.countries[n.cc[i]!]!)} ${n.countries[n.cc[i]!]}`;
     };
+    if (info.layer.id === 'observed-ips') {
+      const ip = info.object as IpDraw;
+      const who = ip.asn === 0 ? 'RIS collector' : `<b>AS${ip.asn}</b> ${nameOf(ip.asn)} <span class="muted">${ccOf(ip.asn)}</span>`;
+      const at = `${ip.lat.toFixed(2)}, ${ip.lon.toFixed(2)}`;
+      return {
+        className: 'tip',
+        html: `<b class="mono">${ipText(ip.ip)}</b> ${who}<br>
+          ${roleLabel(ip.roleMask)} · ${sourceLabel(ip.source)}<br>
+          ${at} · ${ip.precision === 2 ? 'facility-level' : 'country-level'} position<br>
+          seen ${ip.count.toLocaleString('en')} times<br><span class="muted">click to focus this network</span>`,
+      };
+    }
+    if (info.layer.id === 'advertised-routes') {
+      const route = info.object as RouteDraw;
+      return {
+        className: 'tip',
+        html: `<b>AS${route.originAs}</b> ${nameOf(route.originAs)} advertises <b>${route.prefixes.toLocaleString('en')}</b> prefix(es)<br>
+          ${ipText(route.nextHop)} → ${ipText(route.localIp)} · ${route.count.toLocaleString('en')} observations merged<br>
+          <span class="mono">${route.asPath || 'path unavailable'}</span><br><span class="muted">Observed BGP next hop to collector, not a fibre route. Width grows logarithmically with the merged count.</span>`,
+      };
+    }
     if (info.layer.id === 'origins') {
       const o = info.object as OriginLike;
       const h = model.hoverNetwork?.asn === o.asn ? model.hoverNetwork : null;
@@ -493,7 +650,21 @@
         if (info.layer?.id === 'countries' && info.object) {
           const code = model.countryIndex.get((info.object as { properties: { iso: string } }).properties.iso) ?? null;
           model.setFilter({ country: model.country === code ? null : code });
-        } else if (info.layer?.id === 'origins' && info.object) model.flyToNetwork((info.object as OriginLike).asn);
+        } else if (info.layer?.id === 'observed-ips' && info.object) {
+          const ip = info.object as IpDraw;
+          if (ip.asn !== 0) {
+            model.selectAsn(ip.asn);
+            model.flyTo(ip.lon, ip.lat, 3);
+          }
+        } else if (info.layer?.id === 'advertised-routes' && info.object) {
+          model.selectAsn((info.object as RouteDraw).originAs);
+        } else if (info.layer?.id === 'origins' && info.object) {
+          const asn = (info.object as OriginLike).asn;
+          model.selectAsn(asn);
+          model.flyToNetwork(asn);
+        } else if (model.selectedAsn !== null && !info.object) {
+          model.selectAsn(null);
+        }
       },
       layers: [],
       parameters: { clearColor: [0, 0, 0, 0] } as never,
@@ -524,7 +695,7 @@
 
   $effect(() => {
     // Redraw whenever a result, a filter, the selection or the theme changes.
-    void [model.arcs, model.origins, model.countryActivity, model.routeCountries, model.country, model.selectedMoas, light];
+    void [model.arcs, model.origins, model.countryActivity, model.routeCountries, model.country, model.selectedMoas, model.selectedAsn, model.observedIps, model.observedRoutes, light];
     rebuild();
     apply();
   });

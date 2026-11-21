@@ -17,6 +17,11 @@ export interface LiveRow {
   origin_as: number;
   peer_as: number;
   path_len: number;
+  // The IPs and full path RIS Live carries but the replay columns do not have.
+  peer_ip: string | null;
+  local_ip: string | null;
+  next_hop: string | null;
+  as_path: string;
 }
 
 export type FeedSource = 'ris-live' | 'recorded';
@@ -49,6 +54,22 @@ function asn(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffffffff ? value : null;
 }
 
+function ipNumber(text: unknown): number | null {
+  // Purpose: an IPv4 dotted quad as an unsigned number, or null
+  if (typeof text !== 'string') return null;
+  const parts = text.split('.');
+  if (parts.length !== 4) return null;
+  const octets = parts.map(p => Number(p));
+  if (octets.some(o => !Number.isInteger(o) || o < 0 || o > 255)) return null;
+  return ((octets[0]! << 24) | (octets[1]! << 16) | (octets[2]! << 8) | octets[3]!) >>> 0;
+}
+
+function pathText(value: unknown): string {
+  // Purpose: RIS Live's path (arrays for AS sets) as the same text the MRT prep writes
+  if (!Array.isArray(value)) return '';
+  return value.map(part => Array.isArray(part) ? `{${part.map(v => asn(v) ?? 0).join(' ')}}` : String(asn(part) ?? 0)).join(' ');
+}
+
 export function parseRisMessage(raw: string): LiveRow[] {
   // Purpose: one RIS Live message as rows: one per IPv4 prefix announced or withdrawn
   let message: { type?: unknown; data?: Record<string, unknown> };
@@ -64,19 +85,25 @@ export function parseRisMessage(raw: string): LiveRow[] {
   if (second === null || peer === null) return [];
   const path = Array.isArray(data.path) ? data.path : [];
   const origin = path.length > 0 ? asn(path[path.length - 1]) : null;
+  const fullPath = pathText(path);
+  const peerText = typeof data.peer === 'string' ? data.peer : (typeof data.peer_ip === 'string' ? data.peer_ip : null);
+  const peerIp = ipNumber(peerText) === null ? null : peerText;
+  const localText = typeof data.local_ip === 'string' ? data.local_ip : (typeof data.localIp === 'string' ? data.localIp : null);
+  const localIp = ipNumber(localText) === null ? null : localText;
   const rows: LiveRow[] = [];
   if (Array.isArray(data.withdrawals)) {
     for (const text of data.withdrawals) {
       const p = parsePrefix(text);
-      if (p !== null) rows.push({ second, kind: 1, prefix_addr: p.addr, prefix_len: p.len, origin_as: 0, peer_as: peer, path_len: 0 });
+      if (p !== null) rows.push({ second, kind: 1, prefix_addr: p.addr, prefix_len: p.len, origin_as: 0, peer_as: peer, path_len: 0, peer_ip: peerIp, local_ip: localIp, next_hop: null, as_path: '' });
     }
   }
   if (origin !== null && Array.isArray(data.announcements)) {
-    for (const group of data.announcements as { prefixes?: unknown }[]) {
+    for (const group of data.announcements as { prefixes?: unknown; next_hop?: unknown }[]) {
       if (!Array.isArray(group?.prefixes)) continue;
+      const nextHop = ipNumber(group.next_hop) === null ? null : String(group.next_hop);
       for (const text of group.prefixes) {
         const p = parsePrefix(text);
-        if (p !== null) rows.push({ second, kind: 0, prefix_addr: p.addr, prefix_len: p.len, origin_as: origin, peer_as: peer, path_len: Math.min(255, path.length) });
+        if (p !== null) rows.push({ second, kind: 0, prefix_addr: p.addr, prefix_len: p.len, origin_as: origin, peer_as: peer, path_len: Math.min(255, path.length), peer_ip: peerIp, local_ip: localIp, next_hop: nextHop, as_path: fullPath });
       }
     }
   }
@@ -146,6 +173,10 @@ export function playRecorded(updates: UpdateColumns, handlers: FeedHandlers): Fe
         origin_as: c.origin_as[row]!,
         peer_as: c.peer_as[row]!,
         path_len: c.path_len[row]!,
+        peer_ip: null,
+        local_ip: null,
+        next_hop: null,
+        as_path: '',
       });
       row++;
     }
