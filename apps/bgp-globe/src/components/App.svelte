@@ -85,6 +85,10 @@
           </div>
         </div>
         <div class="row toggle-row">
+          <button class="tick" class:on={model.autoRotate} onclick={() => (model.autoRotate = !model.autoRotate)} aria-pressed={model.autoRotate}>
+            <span class="box" aria-hidden="true">{#if model.autoRotate}✓{/if}</span>
+            Auto-rotate globe
+          </button>
           <Learn {model} />
         </div>
         {#if model.routes}
@@ -140,6 +144,9 @@
   .title p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
   .toggle-row { margin-top: 10px; align-items: center; gap: 14px; }
+  .tick { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+  .tick:hover, .tick.on { color: var(--text); }
+  .box { display: inline-grid; place-items: center; width: 14px; height: 14px; border: 1px solid var(--line-strong); border-radius: 0; background: var(--wash-1); color: var(--announce); font-size: 11px; line-height: 1; }
   .source { margin: 10px 0 0; font-size: 11.5px; }
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); margin-right: 6px; vertical-align: 1px; }
   .dot.live { background: var(--withdraw); box-shadow: 0 0 0 0 var(--withdraw-pulse); animation: pulse 1.6s infinite; }

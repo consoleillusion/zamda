@@ -480,11 +480,11 @@
       layers: [],
       parameters: { clearColor: [0, 0, 0, 0] } as never,
     });
-    // Slow rotation while nobody touches the globe; it stops for 8 s after any interaction.
+    // Optional slow rotation while nobody touches the globe; off by default, and it stops for 8 s after any interaction.
     let raf = 0;
     const spin = (time: number) => {
       now = performance.now();
-      if (model.projection === 'globe' && time - lastInteraction > 8000 && !(viewState as { transitionDuration?: number }).transitionDuration) {
+      if (model.autoRotate && model.projection === 'globe' && time - lastInteraction > 8000 && !(viewState as { transitionDuration?: number }).transitionDuration) {
         viewState = { ...viewState, longitude: ((Number(viewState.longitude) + 0.025 + 180) % 360) - 180 };
         deck?.setProps({ viewState: viewState as never });
       }

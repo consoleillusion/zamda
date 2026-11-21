@@ -70,6 +70,7 @@ export class Model {
   wasmReady = $state(false);
   projection = $state<Projection>('globe');
   mode = $state<Mode>('live');
+  autoRotate = $state(false);
 
   // Filters.
   kinds = $state<number[]>([0, 1]);
