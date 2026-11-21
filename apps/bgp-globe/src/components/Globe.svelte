@@ -7,7 +7,7 @@
   import { compact, flag } from '../lib/format';
   import { NONE } from '../lib/schemas';
 
-  let { model }: { model: Model } = $props();
+  let { model, light = false }: { model: Model; light?: boolean } = $props();
 
   let host: HTMLDivElement;
   let deck: Deck<GlobeView | MapView> | null = null;
@@ -17,34 +17,54 @@
   let fading = $state(false);
   let now = $state(0);
 
-  // Colours: one palette for the whole page (see style.css).
-  const ANNOUNCE: [number, number, number] = [56, 224, 214];
-  const WITHDRAW: [number, number, number] = [255, 92, 138];
-  const STOPS: [number, [number, number, number]][] = [
-    [0, [17, 30, 52]],
-    [0.35, [20, 88, 120]],
-    [0.65, [38, 170, 170]],
-    [0.85, [180, 220, 120]],
-    [1, [255, 214, 102]],
+  // Globe colours follow the theme: neutral land and water, semantic colours for activity.
+  type RGB = [number, number, number];
+  const DARK_OCEAN: RGB = [21, 29, 39];
+  const LIGHT_OCEAN: RGB = [172, 206, 238];
+  const DARK_ANNOUNCE: RGB = [56, 224, 214];
+  const DARK_WITHDRAW: RGB = [255, 92, 138];
+  const LIGHT_ANNOUNCE: RGB = [0, 105, 92];
+  const LIGHT_WITHDRAW: RGB = [183, 28, 76];
+  // Land is green in both themes: dim and low-saturation in dark, bright and
+  // high-saturation in light. Activity moves up the green ramp, never toward red.
+  const DARK_STOPS: [number, RGB][] = [
+    [0, [44, 56, 48]],
+    [0.35, [52, 72, 60]],
+    [0.65, [62, 94, 74]],
+    [0.85, [76, 116, 90]],
+    [1, [92, 136, 106]],
+  ];
+  const LIGHT_STOPS: [number, RGB][] = [
+    [0, [90, 170, 114]],
+    [0.35, [73, 159, 98]],
+    [0.65, [57, 147, 83]],
+    [0.85, [47, 133, 71]],
+    [1, [40, 120, 61]],
   ];
 
-  function ramp(x: number): [number, number, number] {
+  function announce(): RGB { return light ? LIGHT_ANNOUNCE : DARK_ANNOUNCE; }
+  function withdraw(): RGB { return light ? LIGHT_WITHDRAW : DARK_WITHDRAW; }
+
+  function ramp(x: number): RGB {
     // Purpose: a colour from the sequential palette for x in [0, 1]
+    const stops = light ? LIGHT_STOPS : DARK_STOPS;
     const v = Math.max(0, Math.min(1, x));
-    for (let i = 1; i < STOPS.length; i++) {
-      const [b, cb] = STOPS[i]!;
-      const [a, ca] = STOPS[i - 1]!;
+    for (let i = 1; i < stops.length; i++) {
+      const [b, cb] = stops[i]!;
+      const [a, ca] = stops[i - 1]!;
       if (v <= b) {
         const f = (v - a) / (b - a);
-        return [0, 1, 2].map(k => Math.round(ca[k]! + (cb[k]! - ca[k]!) * f)) as [number, number, number];
+        return [0, 1, 2].map(k => Math.round(ca[k]! + (cb[k]! - ca[k]!) * f)) as RGB;
       }
     }
-    return STOPS[STOPS.length - 1]![1];
+    return stops[stops.length - 1]![1];
   }
 
-  function mix(w: number): [number, number, number] {
+  function mix(w: number): RGB {
     // Purpose: announce colour to withdraw colour by the share of withdrawals
-    return [0, 1, 2].map(k => Math.round(ANNOUNCE[k]! + (WITHDRAW[k]! - ANNOUNCE[k]!) * Math.min(1, w))) as [number, number, number];
+    const a = announce();
+    const b = withdraw();
+    return [0, 1, 2].map(k => Math.round(a[k]! + (b[k]! - a[k]!) * Math.min(1, w))) as RGB;
   }
 
   function position(asn: number): [number, number] | null {
@@ -144,9 +164,9 @@
         id: 'ocean',
         data: [[[-180, 90], [0, 90], [180, 90], [180, -90], [0, -90], [-180, -90]]],
         getPolygon: (d: unknown) => d as [number, number][],
-        getFillColor: [7, 13, 26],
+        getFillColor: light ? LIGHT_OCEAN : DARK_OCEAN,
       }),
-      new PathLayer({ id: 'graticule', data: graticule, getPath: (d: unknown) => d as [number, number][], getColor: [80, 120, 170, 40], widthMinPixels: 1, parameters: { depthTest: false } }),
+      new PathLayer({ id: 'graticule', data: graticule, getPath: (d: unknown) => d as [number, number][], getColor: light ? [0, 0, 0, 26] : [255, 255, 255, 22], widthMinPixels: 1, parameters: { depthTest: false } }),
       countriesGeo &&
         new GeoJsonLayer({
           id: 'countries',
@@ -155,7 +175,9 @@
           stroked: true,
           filled: true,
           lineWidthMinPixels: 0.6,
-          getLineColor: (f: { properties: { iso: string } }) => (selected !== null && model.countryIndex.get(f.properties.iso) === selected ? [255, 255, 255, 220] : [90, 130, 180, 90]),
+          getLineColor: (f: { properties: { iso: string } }) => selected !== null && model.countryIndex.get(f.properties.iso) === selected
+            ? (light ? [20, 20, 20, 220] : [255, 255, 255, 220])
+            : (light ? [0, 0, 0, 70] : [255, 255, 255, 55]),
           getFillColor: (f: { properties: { iso: string } }) => {
             const v = countryValue(f.properties.iso);
             if (v !== null) {
@@ -167,7 +189,7 @@
             const [r, g, b] = ramp(0.25 * (Math.log1p(routes) / Math.log1p(routeMax)));
             return [r, g, b, 200];
           },
-          updateTriggers: { getFillColor: [model.countryActivity, model.routeCountries], getLineColor: [selected] },
+          updateTriggers: { getFillColor: [model.countryActivity, model.routeCountries, light], getLineColor: [selected, light] },
           transitions: { getFillColor: 350 },
           parameters: { depthTest: !globe ? false : true },
         }),
@@ -182,7 +204,7 @@
           widthUnits: 'pixels',
           capRounded: true,
           wrapLongitude: false,
-          updateTriggers: { getColor: [paths], getWidth: [maxArc] },
+          updateTriggers: { getColor: [paths, light], getWidth: [maxArc] },
         }),
       !globe && new ArcLayer({
         id: 'arcs',
@@ -196,7 +218,7 @@
         getWidth: (d: ArcDraw) => 0.6 + 3.4 * Math.sqrt(d.updates / maxArc),
         getHeight: 0.35,
         widthUnits: 'pixels',
-        updateTriggers: { getSourceColor: [arcs], getWidth: [maxArc] },
+        updateTriggers: { getSourceColor: [arcs, light], getWidth: [maxArc] },
       }),
       new ScatterplotLayer({
         id: 'origins',
@@ -206,10 +228,10 @@
         getPosition: (d: OriginLike) => position(d.asn)!,
         getRadius: (d: OriginLike) => 1.5 + 16 * Math.sqrt(d.updates / maxOrigin),
         getFillColor: (d: OriginLike) => [...mix(d.withdraws / Math.max(1, d.updates)), 150] as [number, number, number, number],
-        getLineColor: [255, 255, 255, 120],
+        getLineColor: light ? [20, 20, 20, 110] : [255, 255, 255, 120],
         lineWidthMinPixels: 0.5,
         stroked: true,
-        updateTriggers: { getRadius: [maxOrigin], getFillColor: [origins] },
+        updateTriggers: { getRadius: [maxOrigin], getFillColor: [origins, light] },
         transitions: { getRadius: 250 },
         parameters: { depthTest: false },
       }),
@@ -221,10 +243,10 @@
         getRadius: (d: { born: number }) => 2 + Math.min(12, Math.max(0, t - d.born) / 400),
         getFillColor: (d: { born: number; kind: number }) => {
           const age = Math.max(0, t - d.born) / 6000;
-          return [...(d.kind === 1 ? WITHDRAW : ANNOUNCE), Math.round(200 * Math.max(0, 1 - age))] as [number, number, number, number];
+          return [...(d.kind === 1 ? withdraw() : announce()), Math.round(200 * Math.max(0, 1 - age))] as [number, number, number, number];
         },
         stroked: false,
-        updateTriggers: { getRadius: [t], getFillColor: [t] },
+        updateTriggers: { getRadius: [t], getFillColor: [t, light] },
         parameters: { depthTest: false },
       }),
       globe &&
@@ -233,7 +255,7 @@
           data: moasArcs.map(m => arcPath(m.from, m.to, 0.12)),
           getPath: (d: [number, number, number][]) => d,
           wrapLongitude: false,
-          getColor: [255, 170, 60, 255],
+          getColor: light ? [139, 101, 4, 255] : [255, 170, 60, 255],
           getWidth: 3,
           widthUnits: 'pixels',
         }),
@@ -243,8 +265,8 @@
         greatCircle: true,
         getSourcePosition: (d: { from: [number, number] }) => d.from,
         getTargetPosition: (d: { to: [number, number] }) => d.to,
-        getSourceColor: [255, 200, 60, 255],
-        getTargetColor: [255, 70, 70, 255],
+        getSourceColor: light ? [139, 101, 4, 255] : [255, 200, 60, 255],
+        getTargetColor: light ? [183, 28, 76, 255] : [255, 70, 70, 255],
         getWidth: 3,
         getHeight: 0.6,
       }),
@@ -363,8 +385,8 @@
   });
 
   $effect(() => {
-    // Redraw whenever a result, a filter or the selection changes.
-    void [model.arcs, model.origins, model.countryActivity, model.routeCountries, model.country, model.selectedMoas];
+    // Redraw whenever a result, a filter, the selection or the theme changes.
+    void [model.arcs, model.origins, model.countryActivity, model.routeCountries, model.country, model.selectedMoas, light];
     rebuild();
     apply();
   });

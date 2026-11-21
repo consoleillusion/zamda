@@ -56,12 +56,12 @@
   .learn { position: absolute; left: 16px; bottom: 150px; width: 360px; padding: 14px 16px; z-index: 5; }
   .head { display: flex; justify-content: space-between; align-items: start; }
   .x { background: none; border: 0; color: var(--muted); cursor: pointer; }
-  p { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: #c9d6ee; min-height: 80px; }
+  p { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: var(--learn-text); min-height: 80px; }
   .nav { display: flex; align-items: center; justify-content: space-between; }
-  .nav > button { background: none; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; cursor: pointer; color: var(--muted); font-size: 12px; }
+  .nav > button { background: none; border: 1px solid var(--line); border-radius: 0; padding: 4px 10px; cursor: pointer; color: var(--muted); font-size: 12px; }
   .nav > button:hover { color: var(--text); border-color: var(--line-strong); }
   .dots { display: flex; gap: 5px; }
-  .dots button { width: 6px; height: 6px; border-radius: 50%; border: 0; padding: 0; background: rgba(255, 255, 255, 0.2); cursor: pointer; }
+  .dots button { width: 6px; height: 6px; border-radius: 50%; border: 0; padding: 0; background: var(--wash-4); cursor: pointer; }
   .dots button.on { background: var(--announce); }
   .reopen { position: absolute; left: 16px; bottom: 150px; padding: 8px 12px; cursor: pointer; z-index: 5; font-size: 12.5px; }
   @media (max-width: 900px) { .learn, .reopen { display: none; } }

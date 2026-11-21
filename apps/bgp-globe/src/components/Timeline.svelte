@@ -80,9 +80,9 @@
 </footer>
 
 <style>
-  .timeline { position: absolute; left: 16px; right: 372px; bottom: 16px; padding: 12px 16px; z-index: 5; }
+  .timeline { position: absolute; left: 16px; right: calc(min(var(--drawer-width), 100vw) + 12px); bottom: 16px; padding: 12px 16px; z-index: 5; }
   .controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
-  .play { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line-strong); background: rgba(56, 224, 214, 0.14); display: grid; place-items: center; cursor: pointer; }
+  .play { width: 36px; height: 36px; border-radius: 0; border: 1px solid var(--line-strong); background: var(--accent-wash); display: grid; place-items: center; cursor: pointer; }
   .play svg { fill: var(--text); }
   .when { display: flex; flex-direction: column; line-height: 1.2; min-width: 120px; }
   .t { font-size: 18px; font-weight: 600; }
@@ -91,9 +91,9 @@
   .seg button { padding: 4px 8px; font-size: 12px; }
   .hint { font-size: 11.5px; margin-left: auto; }
   .bars { width: 100%; height: 64px; display: block; cursor: ew-resize; touch-action: none; }
-  .bars .a { fill: rgba(56, 224, 214, 0.55); }
-  .bars .d { fill: rgba(255, 92, 138, 0.8); }
-  .bars .window { fill: rgba(255, 255, 255, 0.08); stroke: rgba(255, 255, 255, 0.5); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .bars .a { fill: var(--accent-bar); }
+  .bars .d { fill: var(--withdraw-bar); }
+  .bars .window { fill: var(--wash-2); stroke: var(--muted); stroke-opacity: 0.6; stroke-width: 1; vector-effect: non-scaling-stroke; }
   .bars .head { stroke: var(--amber); stroke-width: 2; vector-effect: non-scaling-stroke; }
   .live { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 13px; }
   .live .num { font-size: 12.5px; }

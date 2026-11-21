@@ -25,7 +25,7 @@
   const budget = $derived(model.frameMs <= 16.7 ? 'smooth' : model.frameMs <= 50 ? 'interactive' : 'sluggish');
 </script>
 
-<section class="engine glass" aria-label="Engine">
+<section class="engine" aria-label="Engine">
   <div class="head">
     <h2>Query engine</h2>
     <div class="seg">
@@ -68,10 +68,10 @@
   .spark polyline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
   .spark .js { stroke: var(--js); }
   .spark .wasm { stroke: var(--wasm); }
-  .budget { stroke: rgba(255, 255, 255, 0.18); stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+  .budget { stroke: var(--wash-4); stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
   .legend { display: flex; gap: 12px; font-size: 12px; margin-top: 6px; flex-wrap: wrap; font-family: var(--mono); }
   .speed { color: var(--wasm); font-weight: 600; margin-left: auto; }
-  .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+  .sw { display: inline-block; width: 8px; height: 8px; border-radius: 0; margin-right: 6px; }
   .sw.js { background: var(--js); }
   .sw.wasm { background: var(--wasm); }
 </style>

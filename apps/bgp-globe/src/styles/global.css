@@ -1,54 +1,140 @@
-/* One dark theme for the page. Colours: announce teal, withdraw pink, highlight amber. */
+/* BGP demo themes. Backgrounds and surfaces are neutral greyscale; colour lives only in
+   the accent and semantic variables, so the data stands out. */
 :root {
-  --bg: #04070f;
-  --panel: rgba(10, 18, 34, 0.72);
-  --panel-solid: #0b1426;
-  --line: rgba(120, 160, 220, 0.16);
-  --line-strong: rgba(120, 160, 220, 0.32);
-  --text: #e6eefc;
-  --muted: #8b9bb8;
-  --faint: #56657f;
+  color-scheme: dark;
+
+  --bg: #111;
+  --panel: rgba(26, 26, 26, 0.88);
+  --panel-solid: #1a1a1a;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --text: #ededed;
+  --muted: #9a9a9a;
+  --faint: #707070;
+  --learn-text: #d8d8d8;
+
+  /* Saturated accents and semantic colours. */
   --announce: #38e0d6;
   --withdraw: #ff5c8a;
   --amber: #ffd666;
   --wasm: #a78bfa;
   --js: #f7c948;
-  --radius: 14px;
+
+  /* Neutral washes: switch with the theme so every surface follows it. */
+  --wash-1: rgba(255, 255, 255, 0.035);
+  --wash-2: rgba(255, 255, 255, 0.06);
+  --wash-3: rgba(255, 255, 255, 0.1);
+  --wash-4: rgba(255, 255, 255, 0.2);
+  --wash-input: rgba(0, 0, 0, 0.25);
+  --tip-bg: rgba(18, 18, 18, 0.96);
+  --tip-strong: #ffffff;
+  --scroll-thumb: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  --body-bg: radial-gradient(1200px 800px at 30% 40%, #1b1b1b 0%, #111 55%, #0a0a0a 100%);
+
+  /* Accent washes: translucent versions of the semantic colours. */
+  --accent-wash: rgba(56, 224, 214, 0.14);
+  --accent-bar: rgba(56, 224, 214, 0.55);
+  --accent-border: rgba(56, 224, 214, 0.4);
+  --accent-wash-soft: rgba(56, 224, 214, 0.06);
+  --withdraw-bar: rgba(255, 92, 138, 0.8);
+  --withdraw-pulse: rgba(255, 92, 138, 0.6);
+  --amber-wash: rgba(255, 214, 102, 0.05);
+  --amber-border: rgba(255, 214, 102, 0.3);
+
+  --drawer-width: 360px;
   --sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 }
+
+html.light {
+  color-scheme: light;
+
+  --bg: #f4f4f2;
+  --panel: rgba(255, 255, 255, 0.94);
+  --panel-solid: #ffffff;
+  --line: rgba(0, 0, 0, 0.1);
+  --line-strong: rgba(0, 0, 0, 0.2);
+  --text: #141414;
+  --muted: #555555;
+  --faint: #6b6b6b;
+  --learn-text: #333333;
+
+  /* Darkened but still saturated, so they keep contrast on a light background. */
+  --announce: #00695c;
+  --withdraw: #b71c4c;
+  --amber: #8b6504;
+  --wasm: #6a1b9a;
+  --js: #8a6d00;
+
+  --wash-1: rgba(0, 0, 0, 0.035);
+  --wash-2: rgba(0, 0, 0, 0.06);
+  --wash-3: rgba(0, 0, 0, 0.1);
+  --wash-4: rgba(0, 0, 0, 0.18);
+  --wash-input: rgba(0, 0, 0, 0.04);
+  --tip-bg: rgba(255, 255, 255, 0.97);
+  --tip-strong: #111111;
+  --scroll-thumb: rgba(0, 0, 0, 0.18);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  --body-bg: radial-gradient(1200px 800px at 30% 40%, #ffffff 0%, #f4f4f2 55%, #e8e8e5 100%);
+
+  --accent-wash: rgba(0, 105, 92, 0.1);
+  --accent-bar: rgba(0, 105, 92, 0.6);
+  --accent-border: rgba(0, 105, 92, 0.45);
+  --accent-wash-soft: rgba(0, 105, 92, 0.06);
+  --withdraw-bar: rgba(183, 28, 76, 0.85);
+  --withdraw-pulse: rgba(183, 28, 76, 0.45);
+  --amber-wash: rgba(139, 101, 4, 0.07);
+  --amber-border: rgba(139, 101, 4, 0.35);
+}
+
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; -webkit-font-smoothing: antialiased; overflow: hidden; }
-body { background: radial-gradient(1200px 800px at 30% 40%, #0b1a33 0%, #050a15 55%, #03060c 100%); }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+body { background: var(--body-bg); }
 button { font: inherit; color: inherit; }
 .num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
+
 .glass {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+  border-radius: 0;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--glass-shadow);
 }
-.seg { display: inline-flex; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); gap: 2px; }
-.seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 7px; cursor: pointer; color: var(--muted); font-weight: 550; letter-spacing: 0.01em; transition: background 0.15s, color 0.15s; }
+
+.seg { display: inline-flex; padding: 3px; border-radius: 0; background: var(--wash-2); border: 1px solid var(--line); gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 0; cursor: pointer; color: var(--muted); font-weight: 550; letter-spacing: 0.01em; transition: background 0.15s, color 0.15s; }
 .seg button:hover { color: var(--text); }
-.seg button.on { background: rgba(255, 255, 255, 0.1); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.seg button.on { background: var(--wash-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-strong); font-size: 12px; background: rgba(255, 255, 255, 0.05); }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 0; border: 1px solid var(--line-strong); font-size: 12px; background: var(--wash-1); }
 .chip button { border: 0; background: none; cursor: pointer; padding: 0; color: var(--muted); }
+
 h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+
 ::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 0; }
+
 .deck-tooltip.tip, .tip {
-  background: rgba(8, 14, 28, 0.94) !important;
+  background: var(--tip-bg) !important;
   color: var(--text) !important;
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 10px 12px !important;
   font: 12.5px/1.5 var(--sans) !important;
   max-width: 340px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--glass-shadow);
 }
-.tip b { color: #fff; }
+.tip b { color: var(--tip-strong); }

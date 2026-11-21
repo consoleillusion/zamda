@@ -49,7 +49,7 @@
   }
 </script>
 
-<aside class="side glass">
+<aside class="side">
   <section>
     <h2>{model.mode === 'live' ? 'Last two minutes' : 'In the window'}</h2>
     <div class="cards">
@@ -151,12 +151,12 @@
 </aside>
 
 <style>
-  .side { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 16px; }
+  .side { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 16px; border-top: 1px solid var(--line); }
   .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .cards div { background: rgba(255, 255, 255, 0.035); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; }
+  .cards div { background: var(--wash-1); border: 1px solid var(--line); border-radius: 0; padding: 8px 10px; display: flex; flex-direction: column; }
   .cards .num { font-size: 18px; font-weight: 600; }
   .cards small { color: var(--muted); font-size: 11px; }
-  .split { display: flex; height: 6px; border-radius: 6px; overflow: hidden; margin-top: 10px; background: rgba(255, 255, 255, 0.06); }
+  .split { display: flex; height: 6px; border-radius: 0; overflow: hidden; margin-top: 10px; background: var(--wash-2); }
   .split .a { background: var(--announce); transition: flex 0.3s; }
   .split .w { background: var(--withdraw); transition: flex 0.3s; }
   .splitlabels { display: flex; justify-content: space-between; font-size: 11.5px; margin-top: 4px; font-family: var(--mono); }
@@ -171,25 +171,25 @@
   input[type='range'] { accent-color: var(--announce); width: 100%; }
   .hint { font-size: 12px; }
   .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-  .list button { position: relative; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; width: 100%; text-align: left; background: rgba(255, 255, 255, 0.025); border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; cursor: pointer; overflow: hidden; }
+  .list button { position: relative; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; width: 100%; text-align: left; background: var(--wash-1); border: 1px solid transparent; border-radius: 0; padding: 6px 8px; cursor: pointer; overflow: hidden; }
   .list button:hover, .list button.on { border-color: var(--line-strong); }
   .list .bar { position: absolute; left: 0; bottom: 0; height: 2px; opacity: 0.85; }
   .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
   .n { font-size: 12px; color: var(--muted); }
   .cc { grid-column: 1 / -1; font-size: 11px; color: var(--faint); }
   .moas .who { color: var(--amber); }
-  .detail { margin-top: 8px; font-size: 12px; line-height: 1.6; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255, 214, 102, 0.3); background: rgba(255, 214, 102, 0.05); }
+  .detail { margin-top: 8px; font-size: 12px; line-height: 1.6; padding: 8px 10px; border-radius: 0; border: 1px solid var(--amber-border); background: var(--amber-wash); }
   .link { display: block; background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; text-align: left; font-size: 12px; }
   .link:hover { color: var(--announce); }
   .close { margin-top: 4px; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0; font-size: 11px; }
   form { display: flex; gap: 6px; }
-  form input { flex: 1; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--line-strong); border-radius: 8px; padding: 7px 10px; color: var(--text); outline: none; }
+  form input { flex: 1; background: var(--wash-input); border: 1px solid var(--line-strong); border-radius: 0; padding: 7px 10px; color: var(--text); outline: none; }
   form input:focus { border-color: var(--announce); }
   form input.bad { border-color: var(--withdraw); }
-  form button { background: rgba(56, 224, 214, 0.15); border: 1px solid rgba(56, 224, 214, 0.4); border-radius: 8px; padding: 0 12px; cursor: pointer; }
+  form button { background: var(--accent-wash); border: 1px solid var(--accent-border); border-radius: 0; padding: 0 12px; cursor: pointer; }
   .matches { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
-  .matches li { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); opacity: 0.7; }
-  .matches li.best { opacity: 1; border-color: rgba(56, 224, 214, 0.5); background: rgba(56, 224, 214, 0.06); }
+  .matches li { padding: 6px 8px; border-radius: 0; border: 1px solid var(--line); opacity: 0.7; }
+  .matches li.best { opacity: 1; border-color: var(--accent-border); background: var(--accent-wash-soft); }
   .matches .muted { font-size: 11px; }
   @media (max-width: 900px) { .side { display: none; } }
 </style>
