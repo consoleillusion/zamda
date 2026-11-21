@@ -39,6 +39,7 @@ const send = (reply: Reply, transfer: Transferable[] = []): void => scope.postMe
 
 async function handle(request: Request): Promise<void> {
   // Purpose: do what one message asks and answer it
+  const began = performance.now();
   if (request.type === 'abort') {
     running.get(request.target)?.abort();
     return;
@@ -98,7 +99,7 @@ async function handle(request: Request): Promise<void> {
         value = await link.memoryLive();
         break;
     }
-    send({ id: request.id, ok: true, value }, transfer);
+    send({ id: request.id, ok: true, value, took: performance.now() - began }, transfer);
   } catch (e) {
     if (e instanceof EngineLinkFailure) send({ id: request.id, ok: false, error: toWire(e.error), lost: true });
     else if (e instanceof ZamdaError) send({ id: request.id, ok: false, error: toWire(e), lost: false });

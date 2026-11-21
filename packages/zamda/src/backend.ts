@@ -24,6 +24,8 @@ export interface BackendOptions {
   readonly sliceMs?: number;
   // Called between time slices and once at the end.
   readonly onProgress?: (progress: { rowsScanned: number; rowsTotal: number }) => void;
+  // Worker-side time from receiving a run to answering it. Backends that run on the caller's thread ignore it.
+  readonly onTiming?: (ms: number) => void;
   // An opaque handle grouping runs that share work; only the backend that made it understands it, the rest ignore it.
   readonly session?: RunSession;
   // Extra tables bound by the plan, ordered by the extra scan nodes in the IR.

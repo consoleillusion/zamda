@@ -74,6 +74,15 @@ maybe('engine in a worker', () => {
     expect((await total.execute(wasm as never)).toArray()[0]!.n).toBe(1500);
   });
 
+  test('a run reports its own worker-side time', async () => {
+    const backend = await start();
+    const wasm = await backend.table(S, columns(20_000));
+    const timings: number[] = [];
+    await total.execute(wasm as never, { onTiming: ms => timings.push(ms) });
+    expect(timings.length).toBe(1);
+    expect(timings[0]!).toBeGreaterThanOrEqual(0);
+  });
+
   test('the page stays responsive while the engine works in the worker', async () => {
     const N = 2_000_000;
     const data = columns(N);

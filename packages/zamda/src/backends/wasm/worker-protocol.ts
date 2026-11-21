@@ -33,7 +33,7 @@ export type Request =
   | { readonly id: number; readonly type: 'memoryLive' };
 
 export type Reply =
-  | { readonly id: number; readonly ok: true; readonly value: unknown }
+  | { readonly id: number; readonly ok: true; readonly value: unknown; readonly took?: number }
   // `lost`: the engine module behind the worker is gone and the error is what the caller sees.
   | { readonly id: number; readonly ok: false; readonly error: WireError; readonly lost: boolean }
   | { readonly id: number; readonly progress: { readonly rowsScanned: number; readonly rowsTotal: number } };

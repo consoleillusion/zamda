@@ -44,6 +44,7 @@ export interface RunRequest {
 
 export interface RunHooks {
   readonly onProgress?: BackendOptions['onProgress'];
+  readonly onTiming?: BackendOptions['onTiming'];
   readonly signal?: AbortSignal;
 }
 
@@ -493,7 +494,7 @@ export async function createManagedBackend(link: EngineLink, options: { memoryLi
             ...(runOptions.sliceMs === undefined ? {} : { sliceMs: runOptions.sliceMs }),
             ...(sessionId === undefined ? {} : { sessionId }),
           },
-          { ...(runOptions.onProgress === undefined ? {} : { onProgress: runOptions.onProgress }), ...(runOptions.signal === undefined ? {} : { signal: runOptions.signal }) },
+          { ...(runOptions.onProgress === undefined ? {} : { onProgress: runOptions.onProgress }), ...(runOptions.onTiming === undefined ? {} : { onTiming: runOptions.onTiming }), ...(runOptions.signal === undefined ? {} : { signal: runOptions.signal }) },
         );
       });
     },

@@ -15,6 +15,8 @@ export interface ExecuteOptions<P extends ParamDecls = NoParams> {
   readonly signal?: AbortSignal;
   // Called between time slices and once at the end, with how much of the table has been read.
   readonly onProgress?: (progress: { rowsScanned: number; rowsTotal: number }) => void;
+  // Worker-side run time, for callers that need engine time without a paint-blocked wall clock.
+  readonly onTiming?: (ms: number) => void;
   // Rows processed per chunk. Default 65,536. Results never depend on it.
   readonly chunkRows?: number;
   // How long to work before returning to the event loop, in milliseconds. Default 8.
@@ -167,6 +169,7 @@ export class Plan<In extends Fields, Out extends Fields, P extends ParamDecls = 
         chunkRows,
         sliceMs,
         onProgress: options.onProgress,
+        onTiming: options.onTiming,
         session: options.session,
         sources,
       });

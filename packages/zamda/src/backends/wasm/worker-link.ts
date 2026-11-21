@@ -24,6 +24,7 @@ interface Pending {
   resolve(value: unknown): void;
   reject(error: unknown): void;
   onProgress?: RunHooks['onProgress'];
+  onTiming?: RunHooks['onTiming'];
 }
 
 // How long an aborted run may keep the worker busy before the worker is treated as stuck, by default.
@@ -79,7 +80,10 @@ export function workerLink(options: WorkerLinkOptions): EngineLink {
         return;
       }
       pending.delete(reply.id);
-      if (reply.ok) p.resolve(reply.value);
+      if (reply.ok) {
+        if (reply.took !== undefined) p.onTiming?.(reply.took);
+        p.resolve(reply.value);
+      }
       else if (reply.lost) p.reject(new EngineLinkFailure(fromWire(reply.error)));
       else p.reject(fromWire(reply.error));
     });
@@ -95,7 +99,7 @@ export function workerLink(options: WorkerLinkOptions): EngineLink {
     if (worker === null) return { id: 0, promise: Promise.reject(new EngineLinkFailure(new EngineCrashError('The engine worker is not running'))) };
     const id = next++;
     const promise = new Promise<T>((resolve, reject) => {
-      pending.set(id, { resolve: resolve as (v: unknown) => void, reject, ...(hooks.onProgress === undefined ? {} : { onProgress: hooks.onProgress }) });
+      pending.set(id, { resolve: resolve as (v: unknown) => void, reject, ...(hooks.onProgress === undefined ? {} : { onProgress: hooks.onProgress }), ...(hooks.onTiming === undefined ? {} : { onTiming: hooks.onTiming }) });
     });
     try {
       worker.postMessage(request(id), transfer);

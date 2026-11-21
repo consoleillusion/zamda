@@ -146,6 +146,12 @@ export class Model {
   private busy = false;
   private scheduled = false;
   private pendingFrame = false;
+
+  get computing(): boolean {
+    // Purpose: tell the globe when a query is waiting on an engine, so painting cannot stall its reply
+    return this.busy;
+  }
+
   private lastClock = 0;
   private frameStamps: number[] = [];
   private livePeers = new Map<number, Set<number>>();

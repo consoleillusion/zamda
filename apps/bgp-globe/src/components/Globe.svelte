@@ -859,8 +859,10 @@
         viewState = { ...viewState, longitude: ((Number(viewState.longitude) + 0.025 + 180) % 360) - 180 };
         deck?.setProps({ viewState: viewState as never });
       }
-      // Pulse animation needs redraws, but cap them so a busy globe does not starve engine replies.
-      if (model.pulses.length > 0 && time - lastPulseFrame > 50) {
+      // Pulse animation needs redraws, but a software renderer can block the page thread for seconds and
+      // delay a worker reply. Never paint while a query is in flight: the engine number then measures the
+      // engine, not the canvas.
+      if (model.pulses.length > 0 && !model.computing && time - lastPulseFrame > 50) {
         lastPulseFrame = time;
         apply();
       }

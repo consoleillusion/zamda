@@ -185,6 +185,11 @@ pipe(Users).select(c => ({ total: c.age.sum() }));
 // @ts-expect-error rename accepts existing column names only
 pipe(Users).rename({ nope: 'x' });
 
+// A backend can report its own run time without the caller measuring a render-blocked wall clock.
+void projected.execute(users, { onTiming: ms => void ms });
+// @ts-expect-error the timing callback takes a number of milliseconds
+void projected.execute(users, { onTiming: 'slow' });
+
 // Sessions: an opaque RunSession reference; the backend decides what it does with it (T-416).
 void projected.execute(users, { session: { kind: 'zamda/wasm-session' } });
 // @ts-expect-error a session is a RunSession (an object with a kind), not a number

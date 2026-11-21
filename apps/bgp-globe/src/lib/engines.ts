@@ -100,13 +100,17 @@ export class Engines {
     this.lanes.set(lane, controller);
     const session = this.session(name);
     const started = performance.now();
+    const workerMs: number[] = [];
     try {
       const results = await Promise.all(
         jobs.map(job =>
-          (job.plan as Plan<never, never, never>).execute(job.table(this.tables(name)) as never, { params: job.params, signal: controller.signal, ...(session ? { session } : {}) } as never),
+          (job.plan as Plan<never, never, never>).execute(job.table(this.tables(name)) as never, { params: job.params, signal: controller.signal, ...(session ? { session } : {}), onTiming: (ms: number) => workerMs.push(ms) } as never),
         ),
       );
-      return { results: results as never, ms: performance.now() - started };
+      // Several plans share one batch: their worker times overlap, so the batch took the longest one, not their sum.
+      // A wall-clock wait on this thread also includes deck.gl painting, which can stall a software renderer for seconds.
+      const ms = name === 'wasm' && workerMs.length > 0 ? Math.max(...workerMs) : performance.now() - started;
+      return { results: results as never, ms };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return null;
       throw error;
