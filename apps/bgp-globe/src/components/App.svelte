@@ -159,7 +159,7 @@
   .dot.live { background: var(--withdraw); box-shadow: 0 0 0 0 var(--withdraw-pulse); animation: pulse 1.6s infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--withdraw-pulse); } 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
-  .corner-controls { position: absolute; top: 14px; left: max(12px, calc(min(var(--drawer-width), 100vw) - 65px)); display: flex; gap: 6px; z-index: 20; }
+  .corner-controls { position: absolute; top: 0; left: 0; display: flex; gap: 6px; z-index: 20; }
   .icon-btn {
     width: 48px;
     height: 48px;
