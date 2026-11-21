@@ -199,6 +199,11 @@ function nearestNodes(graph: CableGraph, point: Point, limit: number, maxKm: num
       }
     }
   }
+  if (candidates.length === 0) {
+    // Inland routers can be far from any mapped landing; the nearest mapped point is still the only
+    // candidate the local cable data can offer, and the drawn connector makes that guess visible.
+    graph.nodes.forEach((node, at) => candidates.push({ at, km: distanceKm(point, node) }));
+  }
   return candidates.sort((a, b) => a.km - b.km).slice(0, limit).map(candidate => candidate.at);
 }
 
@@ -211,8 +216,8 @@ export function pathKey(points: readonly (Point | readonly [number, number])[]):
 
 export function physicalAlternatives(graph: CableGraph, from: Point, to: Point, landings = 3): [number, number][][] {
   // Purpose: every candidate cable route between two places, one per plausible pair of landings
-  const starts = nearestNodes(graph, from, landings, 1200);
-  const ends = nearestNodes(graph, to, landings, 1200);
+  const starts = nearestNodes(graph, from, landings, 2500);
+  const ends = nearestNodes(graph, to, landings, 2500);
   const seen = new Set<string>();
   const out: [number, number][][] = [];
   for (const start of starts) {
@@ -261,10 +266,53 @@ export function asPathAsns(text: string): number[] {
   return pathSequences(text).flat();
 }
 
+export interface RouteHop {
+  readonly fromAs: number;
+  readonly toAs: number;
+  readonly from: Point;
+  readonly to: Point;
+}
+
+export interface RouteHopPoints {
+  readonly hops: RouteHop[];
+  readonly chain: [number, number][];
+}
+
+export function routeHopPoints(row: PhysicalRouteRow, lookup: PhysicalPointLookup): RouteHopPoints | null {
+  // Purpose: one ordered chain of endpoints shared by the advertised route and its physical candidates
+  const hops = asPathHops(row.path);
+  if (hops.length === 0 && row.originAs !== 0) {
+    // RIB rows have no UPDATE AS_PATH; their next hop is still an observed peer address.
+    hops.push([row.originAs, row.peerAs === 0 ? row.originAs : row.peerAs]);
+  }
+  const resolved: RouteHop[] = [];
+  let from = Number.isFinite(row.originLon) && Number.isFinite(row.originLat)
+    ? { lon: row.originLon, lat: row.originLat }
+    : lookup.asnPoint(row.originAs);
+  for (let index = 0; index < hops.length; index++) {
+    const [fromAs, toAs] = hops[index]!;
+    if (from === null) return null;
+    const to = index === hops.length - 1
+      ? lookup.ipPoint(row.nextHop) ?? (row.localIp === undefined ? null : lookup.ipPoint(row.localIp)) ?? lookup.asnPoint(toAs)
+      : lookup.asnPoint(toAs);
+    if (to === null
+      || !Number.isFinite(from.lon) || !Number.isFinite(from.lat)
+      || !Number.isFinite(to.lon) || !Number.isFinite(to.lat)) return null;
+    resolved.push({ fromAs, toAs, from, to });
+    from = to;
+  }
+  if (resolved.length === 0) return null;
+  return {
+    hops: resolved,
+    chain: [resolved[0]!.from, ...resolved.map(hop => hop.to)].map(point => [point.lon, point.lat] as [number, number]),
+  };
+}
+
 export interface PhysicalRouteRow {
   readonly originAs: number;
   readonly peerAs: number;
   readonly nextHop: number;
+  readonly localIp?: number;
   readonly path: string;
   readonly originLon: number;
   readonly originLat: number;
@@ -304,25 +352,15 @@ export function collectPhysicalRoutes(
     paths: Set<string>;
   }>();
   for (const row of rows) {
-    const hops = asPathHops(row.path);
-    if (hops.length === 0 && row.originAs !== 0 && row.peerAs !== 0 && row.originAs !== row.peerAs) {
-      hops.push([row.originAs, row.peerAs]);
-    }
+    const resolved = routeHopPoints(row, lookup);
+    if (resolved === null) continue;
     const used = new Set<string>();
-    hops.forEach(([fromAs, toAs], index) => {
-      const fromPoint = index === 0 && fromAs === row.originAs && Number.isFinite(row.originLon) && Number.isFinite(row.originLat)
-        ? { lon: row.originLon, lat: row.originLat }
-        : lookup.asnPoint(fromAs);
-      const toPoint = index === hops.length - 1 && toAs === row.peerAs
-        ? lookup.ipPoint(row.nextHop) ?? lookup.asnPoint(toAs)
-        : lookup.asnPoint(toAs);
-      if (fromPoint === null || toPoint === null
-        || !Number.isFinite(fromPoint.lon) || !Number.isFinite(fromPoint.lat)
-        || !Number.isFinite(toPoint.lon) || !Number.isFinite(toPoint.lat)) return;
-      const endpointKey = `${fromAs}|${toPoint === fromPoint ? 'same' : `${fromPoint.lon.toFixed(3)},${fromPoint.lat.toFixed(3)}`}|${toPoint.lon.toFixed(3)},${toPoint.lat.toFixed(3)}`;
+    for (const { fromAs, toAs, from, to } of resolved.hops) {
+      const endpointKey = `${fromAs}|` +
+        `${from.lon.toFixed(3)},${from.lat.toFixed(3)}|${to.lon.toFixed(3)},${to.lat.toFixed(3)}`;
       let candidates = alternatives.get(endpointKey);
       if (candidates === undefined) {
-        candidates = physicalAlternatives(graph, fromPoint, toPoint);
+        candidates = physicalAlternatives(graph, from, to);
         alternatives.set(endpointKey, candidates);
       }
       for (const path of candidates) {
@@ -339,7 +377,7 @@ export function collectPhysicalRoutes(
         group.routes++;
         group.paths.add(row.path);
       }
-    });
+    }
   }
   return [...merged.values()]
     .map(group => ({ ...group, paths: group.paths.size }))

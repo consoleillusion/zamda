@@ -111,8 +111,8 @@
   <section>
     <h2>Physical route layers</h2>
     <div class="legend">
-      <div><i class="sw solid"></i><span><b>BGP next hop</b> — observed UPDATE hop, or a RIB prefix with its AS's RIS peer address as next hop.</span></div>
-      <div><i class="sw dashed"></i><span><b>Inferred physical route</b> — every distinct candidate cable path between consecutive ASes in an AS_PATH, merged into one line per candidate. BGP did not observe the cable path.</span></div>
+      <div><i class="sw solid"></i><span><b>BGP next hop</b> — observed UPDATE hop, or a RIB prefix with its AS's RIS peer address as next hop. Thin lines run through every AS on the path, not straight to the peer.</span></div>
+      <div><i class="sw dashed"></i><span><b>Inferred physical route</b> — every distinct candidate cable path between the same consecutive ASes, merged into one line per candidate. BGP did not observe the cable path.</span></div>
       <div><i class="sw cable"></i><span><b>Submarine cables</b> — background geometry only, never a claim that traffic uses that cable.</span></div>
     </div>
     <p class="muted hint">IP locations: <a href="https://db-ip.com" target="_blank" rel="noreferrer">DB-IP</a> (CC BY 4.0) and operator geofeeds.</p>

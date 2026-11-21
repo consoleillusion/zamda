@@ -6,8 +6,8 @@
   import { ArcLayer, BitmapLayer, GeoJsonLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from '@deck.gl/layers';
   import type { Model } from '../lib/model.svelte';
   import type { ObservedIp, ObservedRoute, AsIpPoint } from '../lib/data';
-  import { buildCableGraph, collectPhysicalRoutes } from '../lib/cables';
-  import type { CableGraph, PhysicalRouteGroup, PhysicalRouteRow, Point } from '../lib/cables';
+  import { buildCableGraph, collectPhysicalRoutes, routeHopPoints } from '../lib/cables';
+  import type { CableGraph, PhysicalPointLookup, PhysicalRouteGroup, PhysicalRouteRow, Point } from '../lib/cables';
   import { compact, flag } from '../lib/format';
   import { NONE } from '../lib/schemas';
 
@@ -305,6 +305,7 @@
   type InferredDraw = { path: [number, number, number][]; ip: IpDraw; landing: [number, number] };
   type RouteDraw = {
     path: [number, number, number][];
+    chain: [number, number][];
     originAs: number;
     peerAs: number;
     nextHop: number;
@@ -341,6 +342,20 @@
 
   let physicalCache: { deps: unknown[]; groups: PhysicalRouteGroup[] } | null = null;
 
+  function physicalLookup(): PhysicalPointLookup {
+    // Purpose: one converter for the model's [lon, lat] points and the inference layer's Point objects
+    const asPoint = (at: [number, number] | Point | null | undefined): Point | null => {
+      if (at === null || at === undefined) return null;
+      const lon = 'lon' in at ? at.lon : at[0]!;
+      const lat = 'lat' in at ? at.lat : at[1]!;
+      return Number.isFinite(lon) && Number.isFinite(lat) ? { lon, lat } : null;
+    };
+    return {
+      asnPoint: asn => asPoint(model.asnPoint(asn)),
+      ipPoint: ip => asPoint(model.ipPoint(ip)),
+    };
+  }
+
   function physicalGroups(rows: readonly PhysicalRouteRow[]): PhysicalRouteGroup[] {
     // Purpose: infer every cable alternative for the current focus once, not on every globe repaint
     if (cableGraph === null) return [];
@@ -349,16 +364,7 @@
     // The unfocused globe would otherwise infer tens of thousands of candidates at once. Keep the
     // overview responsive; a focused AS or country always computes every alternative for its routes.
     const input = model.hasSelection ? rows : [...rows].sort((a, b) => b.count - a.count).slice(0, 1200);
-    const asPoint = (at: [number, number] | Point | null | undefined): Point | null => {
-      if (at === null || at === undefined) return null;
-      const lon = 'lon' in at ? at.lon : at[0]!;
-      const lat = 'lat' in at ? at.lat : at[1]!;
-      return Number.isFinite(lon) && Number.isFinite(lat) ? { lon, lat } : null;
-    };
-    const groups = collectPhysicalRoutes(cableGraph, input, {
-      asnPoint: asn => asPoint(model.asnPoint(asn)),
-      ipPoint: ip => asPoint(model.ipPoint(ip)),
-    });
+    const groups = collectPhysicalRoutes(cableGraph, input, physicalLookup());
     physicalCache = { deps, groups };
     return groups;
   }
@@ -411,6 +417,8 @@
 
     type Group = RouteDraw & { originLabel: string };
     const groups = new Map<string, Group>();
+    const lookup = physicalLookup();
+    const pointKey = (point: [number, number]) => `${point[0].toFixed(2)},${point[1].toFixed(2)}`;
     for (const route of selectedRoutes) {
       const origin: [number, number] | null = Number.isFinite(route.originLon) && Number.isFinite(route.originLat)
         ? [route.originLon, route.originLat]
@@ -418,7 +426,12 @@
       const nextHopPoint = allIpIndex.get(route.nextHop)?.pos ?? position(route.peerAs);
       const collector = allIpIndex.get(route.localIp)?.pos ?? position(route.peerAs);
       if (origin === null || nextHopPoint === null || nextHopPoint === undefined || collector === null || collector === undefined) continue;
-      const key = `${origin[0].toFixed(2)},${origin[1].toFixed(2)}>${nextHopPoint[0].toFixed(2)},${nextHopPoint[1].toFixed(2)}>${collector[0].toFixed(2)},${collector[1].toFixed(2)}`;
+      // The coloured evidence line and the amber candidates share the same AS-hop endpoints, so a
+      // route visibly runs through every network on its AS_PATH instead of jumping straight to the peer.
+      const chain = [...(routeHopPoints(route, lookup)?.chain ?? [origin, nextHopPoint])] as [number, number][];
+      const tail = chain[chain.length - 1]!;
+      if (pointKey(tail) !== pointKey(collector)) chain.push(collector);
+      const key = chain.map(pointKey).join('>');
       let group = groups.get(key);
       if (group === undefined) {
         const next = allIpIndex.get(route.nextHop);
@@ -429,7 +442,7 @@
         const originLabel = `${[route.originCountry, route.originCity].filter(Boolean).join(' · ') || 'origin prefix'} · ${route.originLat.toFixed(2)}, ${route.originLon.toFixed(2)}`;
         const routerDetail = `${originLabel} origin prefix → ${ipText(route.nextHop)} next hop ${geo(next)} → ${ipText(route.localIp)} collector ${geo(local)}`;
         group = {
-          path: [], originAs: route.originAs, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp,
+          path: [], chain, originAs: route.originAs, peerAs: route.peerAs, nextHop: route.nextHop, peerIp: route.peerIp, localIp: route.localIp,
           count: 0, prefixes: 0, source: route.source, asPath: route.path, routerDetail,
           origin, nextHopPoint, collector, originLabel,
         };
@@ -444,7 +457,7 @@
       .slice(0, 1200)
       .map(group => ({
         ...group,
-        path: surfacePath([group.origin, group.nextHopPoint, group.collector], model.projection === 'globe' ? 0.03 : 0),
+        path: surfacePath(group.chain, model.projection === 'globe' ? 0.03 : 0),
       }));
     let maxRoute = 1;
     for (const route of routePaths) maxRoute = Math.max(maxRoute, route.count);
@@ -573,19 +586,6 @@
               wrapLongitude: !globe,
               parameters: { depthTest: false },
             }),
-          new PathLayer({
-            id: 'physical-routes',
-            data: physicalRoutes,
-            pickable: true,
-            getPath: (d: PhysicalDraw) => d.path3d,
-            getColor: [236, 168, 66, 210] as [number, number, number, number],
-            getWidth: (d: PhysicalDraw) => 1.5 + 6 * Math.log1p(d.count) / Math.log1p(maxPhysical),
-            widthUnits: 'pixels',
-            capRounded: false,
-            wrapLongitude: !globe,
-            updateTriggers: { getWidth: [maxPhysical], getPath: [physicalRoutes] },
-            parameters: { depthTest: false },
-          }),
           new ScatterplotLayer({
             id: 'as-ip-points',
             data: asIps,
@@ -642,6 +642,20 @@
             getHeight: 0.35,
             widthUnits: 'pixels',
             updateTriggers: { getSourceColor: [arcs, light], getWidth: [maxArc] },
+          }),
+          // Draw the inferred candidates above the thin evidence lines so every route visibly follows one.
+          new PathLayer({
+            id: 'physical-routes',
+            data: physicalRoutes,
+            pickable: true,
+            getPath: (d: PhysicalDraw) => d.path3d,
+            getColor: [236, 168, 66, 210] as [number, number, number, number],
+            getWidth: (d: PhysicalDraw) => 1.5 + 6 * Math.log1p(d.count) / Math.log1p(maxPhysical),
+            widthUnits: 'pixels',
+            capRounded: false,
+            wrapLongitude: !globe,
+            updateTriggers: { getWidth: [maxPhysical], getPath: [physicalRoutes] },
+            parameters: { depthTest: false },
           }),
           new ScatterplotLayer({
             id: 'observed-ips',
@@ -734,7 +748,7 @@
         html: `<b>AS${route.originAs}</b> ${nameOf(route.originAs)} advertises <b>${route.prefixes.toLocaleString('en')}</b> prefix(es)<br>
           ${route.source} · ${route.count.toLocaleString('en')} observations merged<br>
           ${model.pathDetail === 'ips-geoip' ? `${route.routerDetail}<br>` : ''}
-          <span class="mono">${route.asPath || 'path unavailable'}</span><br><span class="muted">Origin prefix → BGP next hop → collector, not a fibre route. Width grows logarithmically with the merged count.</span>`,
+          <span class="mono">${route.asPath || 'path unavailable'}</span><br><span class="muted">Origin prefix → each AS on the path → BGP next hop → collector. These are observed endpoints, not a fibre route; the amber lines are the candidate cables. Width grows logarithmically with the merged count.</span>`,
       };
     }
     if (info.layer.id === 'arcs') {

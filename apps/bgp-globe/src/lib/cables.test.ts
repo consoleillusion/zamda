@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { asPathAsns, asPathHops, buildCableGraph, collectPhysicalRoutes, physicalAlternatives } from './cables';
+import { asPathAsns, asPathHops, buildCableGraph, collectPhysicalRoutes, physicalAlternatives, routeHopPoints } from './cables';
 
 test('an AS path yields origin-to-peer hops without inventing links across a set', () => {
   expect(asPathHops('20 30 40')).toEqual([[40, 30], [30, 20]]);
@@ -7,6 +7,21 @@ test('an AS path yields origin-to-peer hops without inventing links across a set
   expect(asPathHops('20 30 {50 60} 40')).toEqual([[30, 20]]);
   expect(asPathHops('')).toEqual([]);
   expect(asPathAsns('20 30 {50 60} 40')).toEqual([20, 30, 40]);
+});
+
+test('an observed route and its candidates share one ordered AS-hop chain', () => {
+  const row = {
+    originAs: 40, peerAs: 20, nextHop: 1234, localIp: 999, path: '20 30 40',
+    originLon: 0.01, originLat: 0.01, prefixes: 3, count: 5,
+  };
+  const lookup = {
+    asnPoint: (asn: number) => asn === 30 ? { lon: 0.5, lat: 0.5 } : { lon: 0.99, lat: 0.99 },
+    ipPoint: (ip: number) => ip === 1234 ? { lon: 0.9, lat: 0.9 } : null,
+  };
+  const resolved = routeHopPoints(row, lookup);
+  expect(resolved?.hops.map(hop => [hop.fromAs, hop.toAs] as [number, number])).toEqual([[40, 30], [30, 20]]);
+  expect(resolved?.chain).toEqual([[0.01, 0.01], [0.5, 0.5], [0.9, 0.9]]);
+  expect(routeHopPoints({ ...row, path: '' }, lookup)?.hops.map(hop => [hop.fromAs, hop.toAs] as [number, number])).toEqual([[40, 20]]);
 });
 
 test('physical alternatives include distinct cable paths between the same places', () => {
