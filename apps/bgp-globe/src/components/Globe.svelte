@@ -2,7 +2,8 @@
   // The map: a WebGL globe or a Mercator map (deck.gl), drawing what the model's queries returned.
   import { onMount } from 'svelte';
   import { Deck, FlyToInterpolator, MapView, _GlobeView as GlobeView } from '@deck.gl/core';
-  import { ArcLayer, GeoJsonLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from '@deck.gl/layers';
+  import { TileLayer } from '@deck.gl/geo-layers';
+  import { ArcLayer, BitmapLayer, GeoJsonLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from '@deck.gl/layers';
   import type { Model } from '../lib/model.svelte';
   import { compact, flag } from '../lib/format';
   import { NONE } from '../lib/schemas';
@@ -19,8 +20,38 @@
 
   // Globe colours follow the theme: neutral land and water, semantic colours for activity.
   type RGB = [number, number, number];
-  const DARK_OCEAN: RGB = [21, 29, 39];
-  const LIGHT_OCEAN: RGB = [172, 206, 238];
+
+  function lift(c: RGB): RGB {
+    // Purpose: raise a base colour by one point of HSL saturation and lightness, keeping its hue.
+    const [r, g, b] = c.map(v => v / 255);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const delta = max - min;
+    const l = (max + min) / 2;
+    const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+    let h = 0;
+    if (delta !== 0) {
+      if (max === r) h = ((g - b) / delta) % 6;
+      else if (max === g) h = (b - r) / delta + 2;
+      else h = (r - g) / delta + 4;
+      h = (h * 60 + 360) % 360;
+    }
+    const s2 = Math.min(1, s + 0.01);
+    const l2 = Math.min(1, l + 0.01);
+    const chroma = (1 - Math.abs(2 * l2 - 1)) * s2;
+    const x = chroma * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l2 - chroma / 2;
+    const sector = Math.floor(h / 60) % 6;
+    const out = [
+      [chroma, x, 0], [x, chroma, 0], [0, chroma, x],
+      [0, x, chroma], [x, 0, chroma], [chroma, 0, x],
+    ][sector]!;
+    return out.map(v => Math.min(255, Math.round((v + m) * 255))) as RGB;
+  }
+
+  const DARK_OCEAN: RGB = lift([21, 29, 39]);
+  const LIGHT_OCEAN: RGB = lift([172, 206, 238]);
+  // Terrain relief is a multiplier on the base colour, never a grey paint layer.
   const DARK_ANNOUNCE: RGB = [56, 224, 214];
   const DARK_WITHDRAW: RGB = [255, 92, 138];
   const LIGHT_ANNOUNCE: RGB = [0, 105, 92];
@@ -28,18 +59,18 @@
   // Land is green in both themes: dim and low-saturation in dark, bright and
   // high-saturation in light. Activity moves up the green ramp, never toward red.
   const DARK_STOPS: [number, RGB][] = [
-    [0, [44, 56, 48]],
-    [0.35, [52, 72, 60]],
-    [0.65, [62, 94, 74]],
-    [0.85, [76, 116, 90]],
-    [1, [92, 136, 106]],
+    [0, lift([44, 56, 48])],
+    [0.35, lift([52, 72, 60])],
+    [0.65, lift([62, 94, 74])],
+    [0.85, lift([76, 116, 90])],
+    [1, lift([92, 136, 106])],
   ];
   const LIGHT_STOPS: [number, RGB][] = [
-    [0, [90, 170, 114]],
-    [0.35, [73, 159, 98]],
-    [0.65, [57, 147, 83]],
-    [0.85, [47, 133, 71]],
-    [1, [40, 120, 61]],
+    [0, lift([90, 170, 114])],
+    [0.35, lift([73, 159, 98])],
+    [0.65, lift([57, 147, 83])],
+    [0.85, lift([47, 133, 71])],
+    [1, lift([40, 120, 61])],
   ];
 
   function announce(): RGB { return light ? LIGHT_ANNOUNCE : DARK_ANNOUNCE; }
@@ -65,6 +96,54 @@
     const a = announce();
     const b = withdraw();
     return [0, 1, 2].map(k => Math.round(a[k]! + (b[k]! - a[k]!) * Math.min(1, w))) as RGB;
+  }
+
+  type TerrainFetchOptions = { signal?: AbortSignal };
+
+  async function terrainTextureFetch(url: string, options: TerrainFetchOptions = {}): Promise<HTMLCanvasElement> {
+    // Purpose: turn a local Terrarium tile into a neutral multiplier that shades the base colour without painting grey.
+    const response = await fetch(url, { signal: options.signal });
+    if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+    const bitmap = await createImageBitmap(await response.blob());
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext('2d');
+    if (ctx === null) throw new Error('2D canvas unavailable for terrain texture');
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const { data } = image;
+    const width = canvas.width;
+    const height = canvas.height;
+    const elevation = new Float32Array(width * height);
+    for (let i = 0; i < elevation.length; i++) {
+      const p = i * 4;
+      elevation[i] = data[p]! * 256 + data[p + 1]! + data[p + 2]! / 256 - 32768;
+    }
+    const at = (x: number, y: number): number => elevation[
+      Math.max(0, Math.min(height - 1, y)) * width + Math.max(0, Math.min(width - 1, x))
+    ]!;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const dx = (at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1)
+          - at(x - 1, y - 1) - 2 * at(x - 1, y) - at(x - 1, y + 1)) / 8;
+        const dy = (at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1)
+          - at(x - 1, y - 1) - 2 * at(x, y - 1) - at(x + 1, y - 1)) / 8;
+        const edge = Math.min(1, Math.min(x, y, width - 1 - x, height - 1 - y) / 4);
+        const altitude = Math.max(0, Math.min(1, (elevation[y * width + x]! + 5000) / 11000));
+        const relief = Math.max(-1, Math.min(1, (dx + dy) / 600)) * edge;
+        const multiplier = Math.max(0.76, Math.min(1, 0.78 + altitude * 0.22 + relief * 0.07));
+        const value = Math.round(multiplier * 255);
+        data[i] = value;
+        data[i + 1] = value;
+        data[i + 2] = value;
+        data[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+    return canvas;
   }
 
   function position(asn: number): [number, number] | null {
@@ -160,12 +239,47 @@
     const selected = model.country;
     const t = now;
     return [
+      // The globe surface is always drawn first, so tiles and data never reveal a grey sphere.
       new SolidPolygonLayer({
-        id: 'ocean',
+        id: 'globe-surface',
         data: [[[-180, 90], [0, 90], [180, 90], [180, -90], [0, -90], [-180, -90]]],
         getPolygon: (d: unknown) => d as [number, number][],
+        stroked: false,
+        filled: true,
         getFillColor: light ? LIGHT_OCEAN : DARK_OCEAN,
       }),
+      globe &&
+        new TileLayer({
+          id: 'terrain-shade',
+          data: '/terrain/{z}/{x}/{y}.png',
+          fetch: terrainTextureFetch as never,
+          minZoom: 1,
+          maxZoom: 3,
+          tileSize: 256,
+          renderSubLayers: (props: unknown) => {
+            const { id, data, tile } = props as {
+              id: string;
+              data: HTMLCanvasElement | null;
+              tile: { bbox: { west: number; south: number; east: number; north: number } };
+            };
+            return data === null ? null : new BitmapLayer({
+              id: `${id}-shade`,
+              image: data,
+              bounds: [tile.bbox.west, tile.bbox.south, tile.bbox.east, tile.bbox.north],
+              pickable: false,
+              parameters: {
+                blend: true,
+                blendColorOperation: 'add',
+                blendColorSrcFactor: 'dst',
+                blendColorDstFactor: 'zero',
+                blendAlphaOperation: 'add',
+                blendAlphaSrcFactor: 'one',
+                blendAlphaDstFactor: 'zero',
+                depthTest: false,
+              },
+            });
+          },
+        }),
       new PathLayer({ id: 'graticule', data: graticule, getPath: (d: unknown) => d as [number, number][], getColor: light ? [0, 0, 0, 26] : [255, 255, 255, 22], widthMinPixels: 1, parameters: { depthTest: false } }),
       countriesGeo &&
         new GeoJsonLayer({
@@ -182,16 +296,17 @@
             const v = countryValue(f.properties.iso);
             if (v !== null) {
               const [r, g, b] = ramp(Math.log1p(v.value) / Math.log1p(maxCountry));
-              return [r, g, b, 210];
+              return [r, g, b, 130];
             }
             const code = model.countryIndex.get(f.properties.iso);
             const routes = code === undefined ? 0 : (model.routeCountries.get(code)?.routes ?? 0);
             const [r, g, b] = ramp(0.25 * (Math.log1p(routes) / Math.log1p(routeMax)));
-            return [r, g, b, 200];
+            return [r, g, b, 120];
           },
           updateTriggers: { getFillColor: [model.countryActivity, model.routeCountries, light], getLineColor: [selected, light] },
           transitions: { getFillColor: 350 },
-          parameters: { depthTest: !globe ? false : true },
+          // Paint the data ramp over the relief texture instead of hiding behind it.
+          parameters: { depthTest: false },
         }),
       globe &&
         new PathLayer({

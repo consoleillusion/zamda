@@ -6,5 +6,8 @@ target/
 # Generated data only at the repo root; engine/test data is tracked
 /data/
 
+# Downloaded at dev/build time by apps/bgp-globe/scripts/setup.ts
+/apps/bgp-globe/public/
+
 *.log
 .DS_Store

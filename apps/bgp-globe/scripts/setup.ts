@@ -2,6 +2,8 @@
 //   public/data      a link to the repository's data/ (globe-*.zcl from `bun run prep-globe`)
 //   public/engine    a link to the WASM engine build (packages/zamda/dist/zamda-engine.wasm)
 //   public/countries.geojson  Natural Earth 1:110m countries (public domain), downloaded once
+//   public/terrain   low-resolution Terrarium elevation tiles (z=1..3), downloaded once
+//                    the browser turns these into a neutral relief texture at runtime
 // Nothing here is committed: public/ holds only links and downloads.
 
 import { existsSync, mkdirSync, symlinkSync } from 'node:fs';
@@ -40,6 +42,39 @@ if (!existsSync(countries)) {
     })),
   };
   await writeFile(countries, JSON.stringify(slim));
+}
+
+// Low-resolution global elevation: 4 + 16 + 64 Terrarium tiles, about 8 MB in total.
+// Served locally because the public S3 bucket does not send CORS headers. The app
+// derives a multiplier texture from them, so the ocean and land keep their base colour.
+const TERRARIUM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
+const terrainDir = join(pub, 'terrain');
+// The versioned marker forces a re-check of the tile set when the zoom range changes.
+const terrainReady = join(terrainDir, '.ready-v1');
+if (!existsSync(terrainReady)) {
+  console.log('downloading elevation tiles (z=1..3)');
+  const jobs: (() => Promise<void>)[] = [];
+  for (let z = 1; z <= 3; z++) {
+    const n = 2 ** z;
+    for (let x = 0; x < n; x++) {
+      for (let y = 0; y < n; y++) {
+        jobs.push(async () => {
+          const dir = join(terrainDir, String(z), String(x));
+          mkdirSync(dir, { recursive: true });
+          const at = join(dir, `${y}.png`);
+          if (existsSync(at)) return;
+          const url = `${TERRARIUM}/${z}/${x}/${y}.png`;
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+          await writeFile(at, Buffer.from(await response.arrayBuffer()));
+        });
+      }
+    }
+  }
+  for (let i = 0; i < jobs.length; i += 8) {
+    await Promise.all(jobs.slice(i, i + 8).map(job => job()));
+  }
+  await writeFile(terrainReady, '');
 }
 
 const missing = ['globe-as.zcl', 'globe-routes.zcl', 'globe-updates.zcl'].filter(f => !existsSync(join(repo, 'data', f)));
